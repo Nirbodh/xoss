@@ -1,4 +1,4 @@
-// screens/TournamentsScreen.js - UPDATED CARD DESIGN
+// screens/TournamentsScreen.js - FIXED VERSION
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, 
@@ -13,9 +13,12 @@ import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../context/AuthContext';
 import { useWallet } from '../context/WalletContext';
 
+// ✅ FIXED: TournamentContext import
+import { useTournaments } from '../context/TournamentContext';
+
 const { width, height } = Dimensions.get('window');
 
-// Game icons mapping - ADDED MORE ICONS
+// Game icons mapping
 const gameIcons = {
   'freefire': require('../assets/games/free-fire-banner.jpg'),
   'pubg': require('../assets/games/pubg-banner.jpg'), 
@@ -23,11 +26,6 @@ const gameIcons = {
   'ludo': require('../assets/games/ludo-banner.jpg'),
   'fortnite': require('../assets/games/fortnite-banner.jpg'),
   'valorant': require('../assets/games/valorant-banner.jpg'),
- // 'bgmi': require('../assets/games/bgmi.png'),
-  //'clashroyale': require('../assets/games/clashroyale.png'),
-  //'clashofclans': require('../assets/games/clashofclans.png'),
-  //'amongus': require('../assets/games/amongus.png'),
-  //'minecraft': require('../assets/games/minecraft.png')
 };
 
 // Game display names
@@ -48,7 +46,7 @@ const getGameDisplayName = (gameId) => {
   return gameNames[gameId] || gameId;
 };
 
-// Tournament Card Component - UPDATED DESIGN
+// ✅ FIXED: Tournament Card Component with Real Data from Context
 const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
@@ -70,7 +68,7 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
     ]).start();
   }, []);
 
-  // Get game icon - using images from assets
+  // Get game icon
   const GameIcon = () => {
     const iconSource = gameIcons[tournament.game];
     
@@ -84,7 +82,6 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
       );
     }
     
-    // Fallback to FontAwesome5 icon if image not found
     return (
       <FontAwesome5 
         name="gamepad" 
@@ -93,6 +90,32 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
       />
     );
   };
+
+  // ✅ FIXED: Calculate time left with real data
+  const getTimeLeft = (scheduleTime) => {
+    if (!scheduleTime) return '2h 30m';
+    
+    const now = new Date();
+    const schedule = new Date(scheduleTime);
+    const diff = schedule - now;
+    
+    if (diff <= 0) return 'Started';
+    
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return `${hours}h ${minutes}m`;
+  };
+
+  // ✅ FIXED: Get participants count from context data
+  const getParticipants = (tournament) => {
+    return {
+      current: tournament.currentParticipants || tournament.currentPlayers || tournament.currentTeams || 0,
+      max: tournament.maxParticipants || tournament.maxPlayers || tournament.maxTeams || 50
+    };
+  };
+
+  const participants = getParticipants(tournament);
 
   return (
     <Animated.View 
@@ -115,14 +138,22 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
             <View style={styles.gameTextContainer}>
               <Text style={styles.gameName}>{getGameDisplayName(tournament.game)}</Text>
               <Text style={styles.tournamentTitle}>{tournament.title}</Text>
+              {/* ✅ FIXED: Match Type Badge */}
+              <Text style={styles.matchTypeBadge}>
+                {tournament.matchType === 'tournament' ? '🏆 TOURNAMENT' : '⚡ MATCH'}
+              </Text>
             </View>
           </View>
           <View style={[
             styles.statusBadge,
-            { backgroundColor: tournament.status === 'live' ? '#4CAF50' : '#FF9800' }
+            { 
+              backgroundColor: tournament.status === 'live' ? '#4CAF50' : 
+                              tournament.status === 'completed' ? '#2196F3' : '#FF9800'
+            }
           ]}>
             <Text style={styles.statusText}>
-              {tournament.status === 'live' ? 'LIVE' : 'UPCOMING'}
+              {tournament.status === 'live' ? 'LIVE' : 
+               tournament.status === 'completed' ? 'COMPLETED' : 'UPCOMING'}
             </Text>
           </View>
         </View>
@@ -133,12 +164,12 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
             <View style={styles.detailItem}>
               <Ionicons name="trophy" size={20} color="#FFD700" />
               <Text style={styles.detailLabel}>Prize Pool</Text>
-              <Text style={styles.detailValue}>৳{tournament.totalPrize}</Text>
+              <Text style={styles.detailValue}>৳{tournament.prizePool || tournament.totalPrize || 0}</Text>
             </View>
             <View style={styles.detailItem}>
               <Ionicons name="people" size={20} color="#4FC3F7" />
               <Text style={styles.detailLabel}>Players</Text>
-              <Text style={styles.detailValue}>{tournament.currentParticipants}/{tournament.maxParticipants}</Text>
+              <Text style={styles.detailValue}>{participants.current}/{participants.max}</Text>
             </View>
           </View>
           
@@ -146,19 +177,36 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
             <View style={styles.detailItem}>
               <Ionicons name="cash" size={20} color="#4CAF50" />
               <Text style={styles.detailLabel}>Entry Fee</Text>
-              <Text style={styles.detailValue}>৳{tournament.entryFee}</Text>
+              <Text style={styles.detailValue}>৳{tournament.entryFee || 0}</Text>
             </View>
             <View style={styles.detailItem}>
               <Ionicons name="time" size={20} color="#FF9800" />
               <Text style={styles.detailLabel}>Time Left</Text>
-              <Text style={styles.detailValue}>{tournament.timeLeft || '2h 30m'}</Text>
+              <Text style={styles.detailValue}>{getTimeLeft(tournament.scheduleTime)}</Text>
             </View>
           </View>
         </View>
 
-        {/* Action Buttons - UPDATED TO MATCH FIRST IMAGE */}
+        {/* ✅ FIXED: Progress Bar */}
+        <View style={styles.progressSection}>
+          <View style={styles.progressBar}>
+            <View 
+              style={[
+                styles.progressFill, 
+                { 
+                  width: `${(participants.current / participants.max) * 100}%`,
+                  backgroundColor: tournament.status === 'live' ? '#4CAF50' : '#2962ff'
+                }
+              ]} 
+            />
+          </View>
+          <Text style={styles.progressText}>
+            {participants.current}/{participants.max} registered • {Math.round((participants.current / participants.max) * 100)}% full
+          </Text>
+        </View>
+
+        {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          {/* Left Side - Two Large Buttons */}
           <View style={styles.leftButtons}>
             <TouchableOpacity 
               style={styles.detailsButton}
@@ -187,8 +235,8 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
             </TouchableOpacity>
           </View>
 
-          {/* Right Side - JOIN Button */}
-          {!tournament.registered && (
+          {/* Join/Registered Button */}
+          {tournament.status === 'upcoming' && !tournament.registered && (
             <TouchableOpacity 
               style={styles.joinButton}
               onPress={() => onJoin(tournament)}
@@ -209,13 +257,43 @@ const TournamentCard = ({ tournament, onJoin, onDetails, onRoomCode, index }) =>
               <Text style={styles.registeredText}>REGISTERED</Text>
             </View>
           )}
+
+          {tournament.status === 'live' && (
+            <TouchableOpacity 
+              style={styles.liveJoinButton}
+              onPress={() => onJoin(tournament)}
+            >
+              <LinearGradient
+                colors={['#FF4444', '#FF6B6B']}
+                style={styles.joinButtonGradient}
+              >
+                <Ionicons name="play-circle" size={18} color="#fff" />
+                <Text style={styles.joinButtonText}>LIVE</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+
+          {tournament.status === 'completed' && (
+            <View style={styles.completedBadge}>
+              <Ionicons name="trophy" size={18} color="#FFD700" />
+              <Text style={styles.completedText}>ENDED</Text>
+            </View>
+          )}
         </View>
+
+        {/* ✅ FIXED: Live Indicator */}
+        {tournament.status === 'live' && (
+          <View style={styles.liveIndicator}>
+            <View style={styles.livePulse} />
+            <Text style={styles.liveIndicatorText}>LIVE NOW</Text>
+          </View>
+        )}
       </LinearGradient>
     </Animated.View>
   );
 };
 
-// Quick Join Modal Component (unchanged)
+// Quick Join Modal Component
 const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
   const slideAnim = useRef(new Animated.Value(height)).current;
 
@@ -238,7 +316,7 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
   }, [visible]);
 
   const availableMatches = matches.filter(match => 
-    !match.registered && match.status === 'upcoming' && match.spotsLeft > 0
+    !match.registered && match.status === 'upcoming' && (match.spotsLeft > 0 || match.currentParticipants < match.maxParticipants)
   );
 
   return (
@@ -268,7 +346,7 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
           <ScrollView style={styles.quickJoinList}>
             {availableMatches.map((match, index) => (
               <TouchableOpacity 
-                key={match._id}
+                key={match._id || match.id}
                 style={styles.quickJoinItem}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -285,9 +363,11 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
                       <Text style={styles.quickJoinTitle}>{match.title}</Text>
                       <Text style={styles.quickJoinGame}>{getGameDisplayName(match.game)} • {match.matchType === 'tournament' ? 'Tournament' : 'Match'}</Text>
                       <View style={styles.quickJoinDetails}>
-                        <Text style={styles.quickJoinPrize}>৳{match.totalPrize}</Text>
+                        <Text style={styles.quickJoinPrize}>৳{match.prizePool || match.totalPrize}</Text>
                         <Text style={styles.quickJoinFee}>Entry: ৳{match.entryFee}</Text>
-                        <Text style={styles.quickJoinSpots}>{match.spotsLeft} spots left</Text>
+                        <Text style={styles.quickJoinSpots}>
+                          {match.spotsLeft || (match.maxParticipants - match.currentParticipants)} spots left
+                        </Text>
                       </View>
                     </View>
                     <View style={styles.quickJoinAction}>
@@ -321,10 +401,18 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
   );
 };
 
-// Main TournamentsScreen Component (unchanged)
+// ✅ FIXED: Main TournamentsScreen Component with PROPER FILTERING
 const TournamentsScreen = ({ navigation }) => {
-  const [matches, setMatches] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // ✅ FIXED: Use TournamentContext with proper filtering
+  const { 
+    tournaments, 
+    loading, 
+    error, 
+    refreshTournaments,
+    joinTournament,
+    getTournamentsByGame 
+  } = useTournaments();
+
   const [refreshing, setRefreshing] = useState(false);
   const [currentMainTab, setCurrentMainTab] = useState('all');
   const [currentGame, setCurrentGame] = useState('all');
@@ -358,57 +446,64 @@ const TournamentsScreen = ({ navigation }) => {
     { id: 'tournaments', name: 'Tournaments', icon: 'trophy' }
   ];
 
-  useEffect(() => {
-    fetchMatches();
-  }, []);
+  // ✅ FIXED: Get matches and tournaments from context with proper filtering
+  const userMatches = tournaments.filter(t => t.matchType === 'match');
+  const userTournaments = tournaments.filter(t => t.matchType === 'tournament');
 
-  const fetchMatches = async () => {
-    try {
-      // Your existing mock matches data...
-      const mockMatches = [
-        // Your existing mock data remains the same
-        {
-          _id: 1,
-          title: "SOLO MATCH | 2:00 PM",
-          startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
-          totalPrize: 400,
-          perKill: 5,
-          entryFee: 10,
-          type: "Solo",
-          version: "Mobile",
-          map: "Bermuda",
-          currentParticipants: 16,
-          maxParticipants: 48,
-          roomId: "4598XY",
-          roomPassword: "1234",
-          roomCode: "789123",
-          prizeDetails: { first: 150, second: 100, third: 70, fourth: 40 },
-          status: 'upcoming',
-          game: 'freefire',
-          matchType: 'match',
-          registered: false,
-          spotsLeft: 32,
-          skillLevel: 3
-        },
-        // ... rest of your mock data
-      ];
-      setMatches(mockMatches);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ✅ FIXED: Refresh function using Context
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await fetchMatches();
+    await refreshTournaments();
     setRefreshing(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const handleJoinPress = (tournament) => {
+  // ✅ FIXED: Auto-refresh when screen focuses
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      refreshTournaments();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  const handleJoinPress = async (tournament) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    navigation.navigate('JoinMatch', { match: tournament });
+    
+    // ✅ FIXED: Check if user has enough balance
+    if (balance < tournament.entryFee) {
+      Alert.alert(
+        'Insufficient Balance',
+        `You need ৳${tournament.entryFee} to join this tournament. Your current balance is ৳${balance}.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add Money', onPress: () => navigation.navigate('Wallet') }
+        ]
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Join Tournament',
+      `Join "${tournament.title}" for ৳${tournament.entryFee}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Confirm Join', 
+          onPress: async () => {
+            // ✅ FIXED: Use joinTournament from context
+            const result = await joinTournament(tournament.id || tournament._id);
+            if (result.success) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              navigation.navigate('JoinMatch', { match: tournament });
+            } else {
+              Alert.alert('Error', result.error || 'Failed to join tournament');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleDetailsPress = (tournament) => {
@@ -418,13 +513,13 @@ const TournamentsScreen = ({ navigation }) => {
 
   const handleRoomCodePress = async (tournament) => {
     try {
-      await Clipboard.setStringAsync(
-        `Room ID: ${tournament.roomId}\nPassword: ${tournament.roomPassword}`
-      );
+      const roomInfo = `🎮 ${tournament.title}\n🔑 Room ID: ${tournament.roomId}\n🔒 Password: ${tournament.password}\n⏰ Time: ${new Date(tournament.scheduleTime).toLocaleString()}`;
+      
+      await Clipboard.setStringAsync(roomInfo);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         '✅ Room Info Copied!',
-        `Room ID: ${tournament.roomId}\nPassword: ${tournament.roomPassword}`,
+        roomInfo,
         [{ text: 'OK' }]
       );
     } catch (error) {
@@ -433,29 +528,90 @@ const TournamentsScreen = ({ navigation }) => {
     }
   };
 
-  // Filtering logic (unchanged)
-  const filteredMatches = matches.filter(match => {
-    if (currentMainTab === 'matches' && match.matchType !== 'match') return false;
-    if (currentMainTab === 'tournaments' && match.matchType !== 'tournament') return false;
-    if (currentGame !== 'all' && match.game !== currentGame) return false;
-    if (searchQuery && !match.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
+  // ✅ FIXED: Filtering logic with proper match/tournament separation
+  const getFilteredData = () => {
+    let data = [];
+    
+    // Main tab filtering
+    if (currentMainTab === 'matches') {
+      data = userMatches; // শুধু ম্যাচ
+    } else if (currentMainTab === 'tournaments') {
+      data = userTournaments; // শুধু টুর্নামেন্ট
+    } else {
+      data = tournaments; // সব ইভেন্ট (matches + tournaments)
+    }
+    
+    // Game filtering
+    if (currentGame !== 'all') {
+      data = data.filter(match => match.game === currentGame);
+    }
+    
+    // Search filtering
+    if (searchQuery) {
+      data = data.filter(match => 
+        match.title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    // Status filtering - show upcoming and live only by default
+    data = data.filter(match => 
+      match.status === 'upcoming' || match.status === 'live'
+    );
+    
+    return data;
+  };
+
+  const filteredMatches = getFilteredData();
+
+  // ✅ FIXED: Sort by status and time
+  const sortedMatches = [...filteredMatches].sort((a, b) => {
+    // Live matches first
+    if (a.status === 'live' && b.status !== 'live') return -1;
+    if (a.status !== 'live' && b.status === 'live') return 1;
+    
+    // Then upcoming matches by time
+    if (a.status === 'upcoming' && b.status === 'upcoming') {
+      return new Date(a.scheduleTime) - new Date(b.scheduleTime);
+    }
+    
+    // Then completed matches
+    return 0;
   });
 
-  // Header animations (unchanged)
+  // Header animations
   const headerBackground = scrollY.interpolate({
     inputRange: [0, 100],
     outputRange: ['rgba(26, 35, 126, 1)', 'rgba(26, 35, 126, 0.95)'],
     extrapolate: 'clamp',
   });
 
-  if (loading) {
+  // ✅ FIXED: Show error message if any from context
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar backgroundColor="#1a237e" barStyle="light-content" />
+        <View style={styles.errorContainer}>
+          <Ionicons name="warning" size={64} color="#FF6B6B" />
+          <Text style={styles.errorText}>Failed to load tournaments</Text>
+          <Text style={styles.errorSubtext}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={refreshTournaments}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (loading && userMatches.length === 0 && userTournaments.length === 0) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <StatusBar backgroundColor="#1a237e" barStyle="light-content" />
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading tournaments...</Text>
           <ActivityIndicator size="large" color="#2962ff" />
+          <Text style={styles.loadingText}>Loading tournaments...</Text>
         </View>
       </SafeAreaView>
     );
@@ -573,7 +729,7 @@ const TournamentsScreen = ({ navigation }) => {
         </View>
         
         <Text style={styles.matchesCount}>
-          {filteredMatches.length} {currentMainTab === 'matches' ? 'matches' : 
+          {sortedMatches.length} {currentMainTab === 'matches' ? 'matches' : 
                                    currentMainTab === 'tournaments' ? 'tournaments' : 'events'} found
           {currentGame !== 'all' && ` in ${getGameDisplayName(currentGame)}`}
         </Text>
@@ -618,7 +774,7 @@ const TournamentsScreen = ({ navigation }) => {
         ))}
       </ScrollView>
 
-      {/* Matches List */}
+      {/* ✅ FIXED: Matches List with Proper Filtering */}
       <Animated.ScrollView
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}
@@ -638,9 +794,9 @@ const TournamentsScreen = ({ navigation }) => {
         scrollEventThrottle={16}
       >
         <View style={styles.matchesContainer}>
-          {filteredMatches.map((match, index) => (
+          {sortedMatches.map((match, index) => (
             <TournamentCard
-              key={match._id}
+              key={match._id || match.id}
               tournament={match}
               onJoin={handleJoinPress}
               onDetails={handleDetailsPress}
@@ -649,7 +805,7 @@ const TournamentsScreen = ({ navigation }) => {
             />
           ))}
           
-          {filteredMatches.length === 0 && (
+          {sortedMatches.length === 0 && !loading && (
             <View style={styles.noMatchesFound}>
               <Ionicons name="trophy-outline" size={64} color="#2962ff" />
               <Text style={styles.noMatchesText}>
@@ -661,6 +817,12 @@ const TournamentsScreen = ({ navigation }) => {
               <Text style={styles.noMatchesSubtext}>
                 {searchQuery ? 'Try a different search' : 'Check back later for new events'}
               </Text>
+              <TouchableOpacity 
+                style={styles.refreshButton}
+                onPress={refreshTournaments}
+              >
+                <Text style={styles.refreshButtonText}>Refresh</Text>
+              </TouchableOpacity>
             </View>
           )}
         </View>
@@ -669,19 +831,58 @@ const TournamentsScreen = ({ navigation }) => {
       {/* Quick Join Modal */}
       <QuickJoinModal
         visible={showQuickJoin}
-        matches={matches}
+        matches={userMatches} // ✅ শুধু ম্যাচ দেখাবে
         onClose={() => setShowQuickJoin(false)}
         onJoin={handleJoinPress}
       />
+
+      {/* ✅ FIXED: Floating Refresh Button */}
+      <TouchableOpacity 
+        style={styles.floatingRefresh}
+        onPress={refreshTournaments}
+      >
+        <Ionicons name="refresh" size={20} color="white" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 };
 
-// UPDATED STYLES SECTION
+// ✅ FIXED STYLES (Unchanged from your original)
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: '#0a0c23',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    color: '#b0b8ff',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   header: {
     paddingHorizontal: 20,
@@ -858,7 +1059,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-
   // UPDATED TOURNAMENT CARD STYLES
   scrollView: {
     flex: 1,
@@ -913,6 +1113,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  matchTypeBadge: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
   statusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -949,7 +1155,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
-  // UPDATED ACTION BUTTONS - MATCHING FIRST IMAGE
+  // ✅ FIXED: Progress Bar Styles
+  progressSection: {
+    marginBottom: 16,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  // FIXED ACTION BUTTONS
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -989,6 +1215,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     maxWidth: 100,
   },
+  liveJoinButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    maxWidth: 100,
+  },
   joinButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1017,8 +1249,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  // Rest of the styles remain the same...
+  completedBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(33, 150, 243, 0.2)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+    maxWidth: 100,
+  },
+  completedText: {
+    color: '#2196F3',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // ✅ FIXED: Live Indicator
+  liveIndicator: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF4444',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  livePulse: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'white',
+  },
+  liveIndicatorText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
   loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
   },
@@ -1043,6 +1316,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  refreshButton: {
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  refreshButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // ✅ FIXED: Floating Refresh Button
+  floatingRefresh: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#2962ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   // Quick Join Modal Styles
   modalOverlay: {

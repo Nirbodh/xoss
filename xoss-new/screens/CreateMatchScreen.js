@@ -1,4 +1,4 @@
-// screens/CreateMatchScreen.js - FIXED WITH MANUAL ROOM ID & DATE PICKER
+// screens/CreateMatchScreen.js - COMPLETE FIXED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
@@ -404,25 +404,30 @@ const CreateMatchScreen = ({ navigation }) => {
     setShowTemplates(false);
   };
 
+  // ✅ FIXED: handleInputChange function
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => {
+      // Create updated form data
+      const updatedFormData = {
+        ...prev,
+        [field]: value
+      };
 
-    // Auto-calculation (Expo compatible)
-    if (field === 'entryFee' || field === 'maxParticipants') {
-      const entryFee = field === 'entryFee' ? parseFloat(value) || 0 : parseFloat(prev.entryFee) || 0;
-      const participants = field === 'maxParticipants' ? parseInt(value) || 0 : parseInt(prev.maxParticipants) || 0;
-      
-      if (entryFee > 0 && participants > 0) {
-        const totalPrize = (entryFee * participants) * 0.9;
-        setFormData(prev => ({
-          ...prev,
-          totalPrize: Math.round(totalPrize).toString()
-        }));
+      // Auto-calculate total prize when entryFee or maxParticipants changes
+      if (field === 'entryFee' || field === 'maxParticipants') {
+        const entryFee = parseFloat(updatedFormData.entryFee) || 0;
+        const participants = parseInt(updatedFormData.maxParticipants) || 0;
+        
+        if (entryFee > 0 && participants > 0) {
+          const totalPrize = (entryFee * participants) * 0.9; // 90% of total collection
+          updatedFormData.totalPrize = Math.round(totalPrize).toString();
+        } else {
+          updatedFormData.totalPrize = '0';
+        }
       }
-    }
+
+      return updatedFormData;
+    });
   };
 
   const handleAISuggestionApply = (suggestion) => {

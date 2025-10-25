@@ -1,197 +1,106 @@
 const express = require('express');
 const Tournament = require('../models/Tournament');
-const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// Get all tournaments
+// GET all tournaments - WITH DEEP DEBUG
 router.get('/', async (req, res) => {
   try {
-    const { status, game, page = 1, limit = 10 } = req.query;
+    console.log('=== DEBUG START ===');
     
-    let filter = {};
-    if (status) filter.status = status;
-    if (game) filter.game = new RegExp(game, 'i');
+    // 1. Check connection
+    console.log('1. DB State:', Tournament.db.readyState);
     
-    const tournaments = await Tournament.find(filter)
-      .populate('created_by', 'username avatar')
-      .sort({ start_time: 1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    // 2. Check collection name
+    const collections = await Tournament.db.db.listCollections().toArray();
+    console.log('2. All Collections:', collections.map(c => c.name));
     
-    const total = await Tournament.countDocuments(filter);
+    // 3. Count in tournaments collection
+    const count = await Tournament.countDocuments();
+    console.log('3. Count in Tournament model:', count);
     
+    // 4. Try different collection names
+    const db = Tournament.db.db;
+    let allData = [];
+    
+    // Check if data is in different collection
+    for (let coll of collections) {
+      const data = await db.collection(coll.name).find({}).toArray();
+      if (data.length > 0) {
+        console.log(`4. Found ${data.length} docs in ${coll.name}:`, data.map(d => d.title || 'No title'));
+        allData = allData.concat(data);
+      }
+    }
+    
+    console.log('5. Total data found:', allData.length);
+    
+    // 5. Return whatever we found
     res.json({
       success: true,
-      tournaments,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        totalPages: Math.ceil(total / limit)
+      tournaments: allData,
+      count: allData.length,
+      debug: {
+        dbState: Tournament.db.readyState,
+        collections: collections.map(c => c.name),
+        tournamentCount: count,
+        totalFound: allData.length
       }
     });
+    
+    console.log('=== DEBUG END ===');
+    
   } catch (error) {
-    console.error('Get tournaments error:', error);
-    res.status(500).json({ 
+    console.error('DEBUG Error:', error);
+    res.json({
       success: false,
-      message: 'Server error', 
-      error: error.message 
+      message: error.message,
+      tournaments: []
     });
   }
 });
 
-// Get single tournament
-router.get('/:id', async (req, res) => {
+// CREATE tournament - WITH VERIFICATION
+router.post('/create', async (req, res) => {
   try {
-    const tournament = await Tournament.findById(req.params.id)
-      .populate('created_by', 'username avatar')
-      .populate('participants.user', 'username avatar level rank');
+    console.log('=== CREATE DEBUG ===');
+    console.log('Request body:', req.body);
     
-    if (!tournament) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Tournament not found' 
-      });
-    }
+    const tournament = new Tournament({
+      title: req.body.title || 'Test Match ' + Date.now(),
+      game: req.body.game || 'freefire',
+      matchType: 'match',
+      status: 'upcoming',
+      entryFee: 20,
+      prizePool: 500,
+      maxPlayers: 50,
+      currentPlayers: 0,
+      roomId: 'ROOM123',
+      password: 'PASS123'
+    });
+
+    console.log('Before save...');
+    const savedTournament = await tournament.save();
+    console.log('After save. ID:', savedTournament._id);
+    
+    // Verify immediately
+    console.log('Verifying...');
+    const verified = await Tournament.findById(savedTournament._id);
+    console.log('Verified:', verified ? 'YES' : 'NO');
     
     res.json({
       success: true,
-      tournament
+      message: 'Tournament created!',
+      tournament: savedTournament,
+      debug: {
+        savedId: savedTournament._id,
+        verified: !!verified
+      }
     });
+    
   } catch (error) {
-    console.error('Get tournament error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error' 
-    });
-  }
-});
-
-// Create tournament (Admin only)
-router.post('/', adminAuth, async (req, res) => {
-  try {
-    const {
-      title,
-      description,
-      game,
-      game_mode,
-      total_prize,
-      entry_fee,
-      start_time,
-      end_time,
-      max_participants,
-      min_players,
-      max_players_per_team,
-      rules,
-      thumbnail
-    } = req.body;
-
-    const tournamentData = {
-      title,
-      description,
-      game,
-      game_mode,
-      total_prize: total_prize || 0,
-      entry_fee: entry_fee || 0,
-      start_time,
-      end_time,
-      max_participants,
-      min_players: min_players || 1,
-      max_players_per_team: max_players_per_team || 1,
-      rules,
-      thumbnail,
-      created_by: req.user.userId
-    };
-    
-    const tournament = new Tournament(tournamentData);
-    await tournament.save();
-    
-    await tournament.populate('created_by', 'username avatar');
-    
-    res.status(201).json({
-      success: true,
-      message: 'Tournament created successfully',
-      tournament
-    });
-  } catch (error) {
-    console.error('Create tournament error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error', 
-      error: error.message 
-    });
-  }
-});
-
-// Join tournament
-router.post('/:id/join', auth, async (req, res) => {
-  try {
-    const tournament = await Tournament.findById(req.params.id);
-    
-    if (!tournament) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Tournament not found' 
-      });
-    }
-    
-    if (tournament.status !== 'upcoming') {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Tournament is not accepting registrations' 
-      });
-    }
-    
-    // Check if already joined
-    const alreadyJoined = tournament.participants.some(
-      p => p.user.toString() === req.user.userId
-    );
-    
-    if (alreadyJoined) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Already joined this tournament' 
-      });
-    }
-    
-    // Check if tournament is full
-    if (tournament.current_participants >= tournament.max_participants) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Tournament is full' 
-      });
-    }
-    
-    // Add participant
-    tournament.participants.push({
-      user: req.user.userId,
-      joined_at: new Date()
-    });
-    
-    tournament.current_participants += 1;
-    await tournament.save();
-    
-    // Emit socket event
-    const io = req.app.get('io');
-    io.to(`tournament-${tournament._id}`).emit('participant-joined', {
-      tournamentId: tournament._id,
-      participant: {
-        user: req.user.userId
-      },
-      current_participants: tournament.current_participants
-    });
-    
+    console.error('CREATE Error:', error);
     res.json({
-      success: true,
-      message: 'Successfully joined tournament',
-      current_participants: tournament.current_participants
-    });
-  } catch (error) {
-    console.error('Join tournament error:', error);
-    res.status(500).json({ 
       success: false,
-      message: 'Server error', 
-      error: error.message 
+      message: 'Create failed: ' + error.message
     });
   }
 });

@@ -1,100 +1,100 @@
+// xoss-new/utils/api.js (FINAL)
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = "http://192.168.0.100:5000"; // Your backend URL
+// ✅ Backend base URL (Render)
+export const BASE_URL = 'https://xoss.onrender.com';
 
-// Save token to storage
-export async function saveToken(token) {
+// Get token (if needed)
+export const getToken = async () => {
   try {
-    await AsyncStorage.setItem('jwtToken', token);
+    const token = await AsyncStorage.getItem('xoss_token');
+    return token;
   } catch (error) {
-    console.error('Failed to save token', error);
-  }
-}
-
-// Get token from storage
-export async function getToken() {
-  try {
-    return await AsyncStorage.getItem('jwtToken');
-  } catch (error) {
-    console.error('Failed to get token', error);
+    console.log('getToken error:', error);
     return null;
   }
-}
+};
 
-// Remove token from storage (logout)
-export async function removeToken() {
+// ✅ Fetch all tournaments
+export const fetchTournaments = async () => {
   try {
-    await AsyncStorage.removeItem('jwtToken');
+    const token = await getToken();
+    const response = await fetch(`${BASE_URL}/api/tournaments`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
   } catch (error) {
-    console.error('Failed to remove token', error);
+    console.error('Fetch tournaments error:', error);
+    return {
+      success: false,
+      message: error.message,
+      tournaments: [],
+    };
   }
-}
+};
 
-// Internal helper: generic request with auth header
-async function request(path, options = {}) {
-  const token = await getToken();
+// ✅ Create new tournament
+export const createTournament = async (tournamentData) => {
+  try {
+    const token = await getToken();
+    const response = await fetch(`${BASE_URL}/api/tournaments/create`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(tournamentData),
+    });
 
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(options.headers || {}),
-  };
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Create tournament error:', error);
+    return {
+      success: false,
+      message: error.message,
+    };
   }
+};
 
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+// ✅ Update tournament
+export const updateTournament = async (tournamentId, updates) => {
+  try {
+    const token = await getToken();
+    const response = await fetch(`${BASE_URL}/api/tournaments/${tournamentId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(updates),
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const message = errorData.error || 'API request failed';
-    throw new Error(message);
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Update tournament error:', error);
+    return {
+      success: false,
+      message: error.message,
+    };
   }
-
-  return response.json();
-}
-
-// This is your new named export for generic API calls
-export async function api(path, options = {}) {
-  return request(path, options);
-}
-
-// Specific API function: login user
-export async function loginUser(email, password) {
-  const data = await api('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
-
-  if (data.token) {
-    await saveToken(data.token);
-  }
-
-  return data;
-}
-
-// Specific API function: logout user
-export async function logoutUser() {
-  await removeToken();
-}
-
-// Specific API function: fetch users (requires auth)
-export async function fetchUsers() {
-  return request('/api/users', {
-    method: 'GET',
-  });
-}
-
-// Default export (optional, but useful)
-export default {
-  api,
-  loginUser,
-  logoutUser,
-  fetchUsers,
-  saveToken,
-  getToken,
-  removeToken,
 };
