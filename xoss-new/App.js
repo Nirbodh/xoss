@@ -1,26 +1,16 @@
-// xoss-new/App.js - আপনার EXACT কোড, শুধু import এবং provider যোগ
 import React from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  ActivityIndicator, 
-  StatusBar 
-} from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StatusBar } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthProvider } from './context/AuthContext';
 import { WalletProvider } from './context/WalletContext';
 import { ChatProvider } from './context/ChatContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { LeaderboardProvider } from './context/LeaderboardContext';
-
-// ✅ শুধু এই লাইনটি যোগ করুন (বাকি সব একই)
 import { TournamentProvider } from './context/TournamentContext';
-
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Error Boundary (existing code - একদম আপনার মতো)
+// Error Boundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -41,7 +31,7 @@ class ErrorBoundary extends React.Component {
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0c23' }}>
           <Text style={{ color: 'white', fontSize: 18, marginBottom: 10 }}>Something went wrong</Text>
           <Text style={{ color: '#b0b8ff', fontSize: 14 }}>Please restart the app</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={{ marginTop: 20, padding: 10, backgroundColor: '#2962ff', borderRadius: 8 }}
             onPress={() => this.setState({ hasError: false, error: null })}
           >
@@ -55,7 +45,7 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Main App - শুধু TournamentProvider wrap করুন (বাকি সব একই)
+// Main App - MatchContext সরিয়ে শুধু TournamentProvider ব্যবহার করুন
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -65,13 +55,9 @@ export default function App() {
             <NotificationProvider>
               <ChatProvider>
                 <LeaderboardProvider>
-                  {/* ✅ শুধু এই ২ লাইন wrap করুন (বাকি সব একই) */}
+                  {/* ✅ MatchContext সরিয়ে শুধু TournamentProvider ব্যবহার করুন */}
                   <TournamentProvider>
-                    <StatusBar 
-                      barStyle="light-content" 
-                      backgroundColor="transparent" 
-                      translucent 
-                    />
+                    <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
                     <AppNavigator />
                   </TournamentProvider>
                 </LeaderboardProvider>

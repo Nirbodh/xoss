@@ -1,126 +1,189 @@
-// contexts/TournamentContext.js - SIMPLIFIED FIXED VERSION
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// ✅ FIXED: API Configuration
-const API_BASE_URL = __DEV__ 
-  ? "http://192.168.0.200:5000/api" 
-  : "https://xoss.onrender.com/api";
+import { tournamentsAPI } from '../api/tournamentsAPI';
+import { useAuth } from './AuthContext';
 
 const TournamentContext = createContext();
 
 export function TournamentProvider({ children }) {
+  const { user, token } = useAuth() || {};
   const [tournaments, setTournaments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // ✅ FIXED: Load tournaments from API
-  const fetchTournamentsFromAPI = async () => {
+  // ✅ REAL API: Combined tournaments + matches fetch
+  const refreshTournaments = async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      console.log('🌐 Fetching from:', `${API_BASE_URL}/tournaments`);
-      
-      const response = await fetch(`${API_BASE_URL}/tournaments`);
-      
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
+      console.log('🔄 User App: Fetching COMBINED tournaments + matches...');
 
-      const data = await response.json();
-      console.log('📦 API Data received:', data);
-      
-      if (data.success) {
-        setTournaments(data.tournaments || []);
-        await saveTournamentsToStorage(data.tournaments || []);
-        return { success: true, tournaments: data.tournaments };
+      const res = await tournamentsAPI.getAll();
+      console.log('📥 Combined API Response:', res);
+
+      if (res && res.success) {
+        const combinedData = res.data || [];
+        console.log('🎯 Combined data received:', combinedData.length);
+
+        const normalized = combinedData.map(item => {
+          const maxParticipants = item.max_participants || item.maxPlayers || 50;
+          const currentParticipants = item.current_participants || item.currentPlayers || 0;
+
+          return {
+            id: item._id || item.id,
+            _id: item._id || item.id,
+            title: item.title || 'Untitled Match',
+            game: item.game || 'freefire',
+            type: item.type || 'Solo',
+            map: item.map || 'Bermuda',
+            prizePool: item.total_prize || item.prizePool || 0,
+            totalPrize: item.total_prize || item.totalPrize || 0,
+            entryFee: item.entry_fee || 0,
+            perKill: item.perKill || 0,
+            maxPlayers: maxParticipants,
+            maxParticipants: maxParticipants,
+            currentPlayers: currentParticipants,
+            currentParticipants: currentParticipants,
+            scheduleTime: item.scheduleTime || item.start_time,
+            startTime: item.start_time || item.scheduleTime,
+            endTime: item.end_time,
+            roomId: item.roomId || item.room_code,
+            password: item.password || item.room_password,
+            status: item.status || 'upcoming',
+            matchType: item.matchType || 'match',
+            description: item.description,
+            rules: item.rules,
+            created_by: item.created_by,
+            spotsLeft: maxParticipants - currentParticipants,
+            registered: false,
+            source: item.source || 'combined' // match/tournament/combined
+          };
+        });
+
+        console.log('✅ Normalized data:', normalized.length, 'items');
+        setTournaments(normalized);
       } else {
-        throw new Error(data.message || 'Failed to fetch tournaments');
+        setError(res?.message || 'Failed to load tournaments and matches');
+        setTournaments([]);
       }
-    } catch (error) {
-      console.error('❌ API fetch error:', error);
-      setError(error.message);
-      
-      // Fallback to local storage
-      await loadTournamentsFromStorage();
-      
-      return { success: false, error: error.message };
+    } catch (err) {
+      console.error('❌ TournamentContext Error:', err);
+      setError(err.message || 'Network error');
+      setTournaments([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ FIXED: Get ONLY MATCHES for users
-  const getTournamentsForUser = () => {
-    return tournaments.filter(t => 
-      (t.status === 'upcoming' || t.status === 'live') &&
-      (t.matchType === 'match' || !t.matchType) // Include both matches and legacy data
-    );
-  };
-
-  // ✅ FIXED: Get ONLY TOURNAMENTS for users  
-  const getTournamentsForUserTournaments = () => {
-    return tournaments.filter(t => 
-      (t.status === 'upcoming' || t.status === 'live') &&
-      t.matchType === 'tournament'
-    );
-  };
-
-  // Local storage functions
-  const loadTournamentsFromStorage = async () => {
+  // ✅ Debug API function
+  const debugTournamentsAPI = async () => {
     try {
-      const stored = await AsyncStorage.getItem('tournaments_data');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setTournaments(parsed);
-        console.log('✅ Loaded from storage:', parsed.length);
+      console.log('🔍 Debugging Combined API...');
+      const res = await tournamentsAPI.getAll();
+      console.log('📊 Combined API Debug Response:', res);
+      
+      if (res && res.success && res.data) {
+        const tournamentsCount = res.data.filter(item => item.matchType === 'tournament').length;
+        const matchesCount = res.data.filter(item => item.matchType === 'match').length;
+        
+        console.log(`🏆 Tournaments: ${tournamentsCount}, ⚡ Matches: ${matchesCount}, 📊 Total: ${res.data.length}`);
       }
     } catch (error) {
-      console.error('❌ Storage load error:', error);
+      console.error('❌ Debug API error:', error);
     }
   };
 
-  const saveTournamentsToStorage = async (data) => {
+  const createTournament = async (data) => {
     try {
-      await AsyncStorage.setItem('tournaments_data', JSON.stringify(data));
-    } catch (error) {
-      console.error('❌ Storage save error:', error);
+      setLoading(true);
+      setError(null);
+      
+      const payload = {
+        title: data.title,
+        game: data.game,
+        type: data.type,
+        map: data.map,
+        entry_fee: Number(data.entryFee) || 0,
+        total_prize: Number(data.prizePool) || 0,
+        max_participants: Number(data.maxPlayers) || 50,
+        perKill: Number(data.perKill) || 0,
+        scheduleTime: data.scheduleTime,
+        start_time: data.scheduleTime,
+        end_time: data.endTime,
+        roomId: data.roomId,
+        room_code: data.roomId,
+        password: data.password,
+        room_password: data.password,
+        description: data.description,
+        rules: data.rules,
+        status: 'upcoming',
+        matchType: data.matchType || 'match',
+        created_by: data.created_by || user?.id || 'admin'
+      };
+
+      const res = await tournamentsAPI.create(payload, token);
+      if (res && res.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Tournament created successfully' };
+      } else {
+        return { success: false, error: res?.message || 'Create failed' };
+      }
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
     }
-  };
-
-  // Initial load
-  useEffect(() => {
-    fetchTournamentsFromAPI();
-  }, []);
-
-  const refreshTournaments = async () => {
-    return await fetchTournamentsFromAPI();
   };
 
   const joinTournament = async (tournamentId) => {
-    // Implement join logic
-    return { success: true, message: 'Joined successfully!' };
+    try {
+      setLoading(true);
+      setError(null);
+      const tournament = tournaments.find(t => t._id === tournamentId || t.id === tournamentId);
+      
+      if (!tournament) throw new Error('Tournament not found');
+      
+      const current = Number(tournament.currentParticipants || tournament.currentPlayers || 0);
+      const max = Number(tournament.maxParticipants || tournament.maxPlayers || 50);
+      
+      if (current >= max) throw new Error('No spots left');
+
+      const res = await tournamentsAPI.join(tournamentId, token);
+      if (res && res.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Successfully joined tournament' };
+      } else {
+        return { success: false, error: res?.message || 'Join failed' };
+      }
+    } catch (err) {
+      setError(err.message);
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
   };
 
+  const getTournamentsByGame = (gameId) => {
+    return tournaments.filter(t => (t.game || '').toLowerCase() === (gameId || '').toLowerCase());
+  };
+
+  const clearError = () => setError(null);
+
+  useEffect(() => {
+    refreshTournaments();
+  }, []);
+
   const value = {
-    // State
     tournaments,
     loading,
     error,
-    
-    // Actions
     refreshTournaments,
+    createTournament,
     joinTournament,
-    
-    // ✅ FIXED: User Functions
-    getTournamentsForUser, // শুধু ম্যাচ
-    getTournamentsForUserTournaments, // শুধু টুর্নামেন্ট
-    
-    // Helper functions
-    getTournamentById: (id) => tournaments.find(t => t.id === id || t._id === id),
-    getTournamentsByGame: (game) => tournaments.filter(t => t.game === game),
-    getTournamentsByStatus: (status) => tournaments.filter(t => t.status === status),
+    getTournamentsByGame,
+    clearError,
+    fetchTournaments: refreshTournaments,
+    debugTournamentsAPI
   };
 
   return (
@@ -132,8 +195,6 @@ export function TournamentProvider({ children }) {
 
 export function useTournaments() {
   const context = useContext(TournamentContext);
-  if (!context) {
-    throw new Error('useTournaments must be used within TournamentProvider');
-  }
+  if (!context) throw new Error('useTournaments must be used within a TournamentProvider');
   return context;
 }

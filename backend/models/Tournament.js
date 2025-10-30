@@ -1,22 +1,20 @@
-// backend/models/Tournament.js - UPDATED VERSION
 const mongoose = require('mongoose');
 
 const tournamentSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: true,
+    required: [true, 'Title is required'],
     trim: true
   },
   game: {
     type: String,
-    required: true
+    required: [true, 'Game is required']
   },
   status: {
     type: String,
-    enum: ['upcoming', 'live', 'completed', 'cancelled', 'pending'],
+    enum: ['upcoming', 'live', 'completed', 'cancelled'],
     default: 'upcoming'
   },
-  // ✅ ADD THESE NEW FIELDS
   matchType: {
     type: String,
     enum: ['match', 'tournament'],
@@ -26,43 +24,27 @@ const tournamentSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  prizePool: { // ✅ ALIAS FIELD
-    type: Number,
-    default: 0
-  },
   entry_fee: {
-    type: Number,
-    default: 0
-  },
-  entryFee: { // ✅ ALIAS FIELD
     type: Number,
     default: 0
   },
   start_time: {
     type: Date,
-    required: true
+    required: [true, 'Start time is required']
   },
-  scheduleTime: { // ✅ ALIAS FIELD
+  scheduleTime: {
     type: Date,
-    required: true
+    required: [true, 'Schedule time is required']
   },
   end_time: {
     type: Date,
-    required: true
+    required: [true, 'End time is required']
   },
   max_participants: {
     type: Number,
-    required: true
-  },
-  maxPlayers: { // ✅ ALIAS FIELD
-    type: Number,
-    required: true
+    required: [true, 'Max participants is required']
   },
   current_participants: {
-    type: Number,
-    default: 0
-  },
-  currentPlayers: { // ✅ ALIAS FIELD
     type: Number,
     default: 0
   },
@@ -74,15 +56,6 @@ const tournamentSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  thumbnail: {
-    type: String,
-    default: ''
-  },
-  created_by: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  // ✅ ADD TOURNAMENT-SPECIFIC FIELDS
   roomId: {
     type: String,
     default: ''
@@ -91,37 +64,40 @@ const tournamentSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
-  prizeDistributed: {
-    type: Boolean,
-    default: false
-  },
   map: {
     type: String,
     default: ''
   },
-  type: { // Solo, Duo, Squad
+  type: {
     type: String,
-    default: 'Squad'
+    default: 'Solo'
   },
-  format: { // Single Elimination, etc.
+  created_by: {
     type: String,
-    default: 'Single Elimination'
+    default: 'admin'
   }
 }, {
   timestamps: true
 });
 
-// ✅ CREATE ALIASES FOR FRONTEND COMPATIBILITY
-tournamentSchema.virtual('totalPrize').get(function() {
-  return this.prizePool || this.total_prize;
+// Virtuals for frontend compatibility
+tournamentSchema.virtual('prizePool').get(function() {
+  return this.total_prize;
 });
 
-tournamentSchema.virtual('maxParticipants').get(function() {
-  return this.maxPlayers || this.max_participants;
+tournamentSchema.virtual('entryFee').get(function() {
+  return this.entry_fee;
 });
 
-tournamentSchema.virtual('currentParticipants').get(function() {
-  return this.currentPlayers || this.current_participants;
+tournamentSchema.virtual('maxPlayers').get(function() {
+  return this.max_participants;
 });
+
+tournamentSchema.virtual('currentPlayers').get(function() {
+  return this.current_participants;
+});
+
+tournamentSchema.set('toJSON', { virtuals: true });
+tournamentSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Tournament', tournamentSchema);

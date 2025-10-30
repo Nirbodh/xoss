@@ -1,83 +1,83 @@
+// ✅ COMBINED & IMPROVED SERVER.JS
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
-const connectDB = require('./config/database'); // ADD THIS LINE
-
+const connectDB = require('./config/database');
 const app = express();
 
-// Middleware
-app.use(cors());
+// ✅ Connect MongoDB
+connectDB();
+
+// ✅ Middleware
+app.use(cors()); // Simple CORS for all origins
 app.use(express.json());
 
-// MongoDB Connection - UPDATED
-connectDB(); // REPLACE THE DIRECT MONGOOSE CONNECT WITH THIS
+// ✅ Database connection check middleware
+app.use((req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database connection unavailable',
+      timestamp: new Date().toISOString()
+    });
+  }
+  next();
+});
 
-// Routes
+// ✅ Routes
+app.use('/api/matches', require('./routes/matchRoutes'));
+app.use('/api/tournaments', require('./routes/tournaments'));
+app.use('/api/combined', require('./routes/combined'));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
-app.use('/api/tournaments', require('./routes/tournaments'));
-app.use('/api/matches', require('./routes/matches'));
-app.use('/api/wallet', require('./routes/wallet'));
-app.use('/api/notifications', require('./routes/notifications'));
 
-// Health check route
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    success: true,
-    message: '🚀 XOSS Gaming Backend is Running!',
-    timestamp: new Date().toISOString(),
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
-
-// Home route
+// ✅ Base Route
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     success: true,
-    message: '🎮 Welcome to XOSS Gaming Platform API',
-    version: '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
-    endpoints: {
-      auth: '/api/auth',
-      users: '/api/users',
-      tournaments: '/api/tournaments',
-      matches: '/api/matches',
-      wallet: '/api/wallet',
-      notifications: '/api/notifications',
-      health: '/api/health'
-    }
+    message: '✅ Match API is running',
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    timestamp: new Date().toISOString()
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
+// ✅ Health Check Route
+app.get('/api/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'Disconnected',
+    1: 'Connected',
+    2: 'Connecting',
+    3: 'Disconnecting'
+  };
+
+  res.json({
+    success: dbStatus === 1,
+    message: dbStatus === 1 ? '🚀 Server is healthy' : '⚠️ Server has issues',
+    database: statusMap[dbStatus] || 'Unknown',
+    timestamp: new Date().toISOString()
   });
 });
 
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('🔥 Server Error:', err);
-  res.status(500).json({
-    success: false,
-    message: 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { error: err.message })
-  });
-});
-
+// ✅ Start Server
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
-  console.log(`⭐ XOSS Backend Server Started`);
-  console.log(`📍 Port: ${PORT}`);
-  console.log(`🌐 URL: http://localhost:${PORT}`);
-  console.log(`🕒 Time: ${new Date().toLocaleString()}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`💾 Database: MongoDB Atlas`);
-  console.log(`🚀 Status: Running successfully!`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`💾 Database: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
+});
+
+// ✅ Graceful Shutdown (Best Practice)
+process.on('SIGINT', async () => {
+  await mongoose.connection.close();
+  console.log('🛑 MongoDB connection closed through app termination');
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  await mongoose.connection.close();
+  console.log('🛑 MongoDB connection closed through SIGTERM');
+  process.exit(0);
 });

@@ -1,100 +1,84 @@
-// xoss-new/utils/api.js (FINAL)
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// xoss-new/utils/api.js - COMPLETE FIXED VERSION
+import axios from 'axios';
 
-// ✅ Backend base URL (Render)
-export const BASE_URL = 'https://xoss.onrender.com';
+// ✅ আপনার Backend URL
+const BASE_URL = 'https://xoss.onrender.com';
 
-// Get token (if needed)
-export const getToken = async () => {
-  try {
-    const token = await AsyncStorage.getItem('xoss_token');
-    return token;
-  } catch (error) {
-    console.log('getToken error:', error);
-    return null;
-  }
-};
+const axiosInstance = axios.create({
+  baseURL: BASE_URL,
+  timeout: 10000,
+});
 
-// ✅ Fetch all tournaments
-export const fetchTournaments = async () => {
-  try {
-    const token = await getToken();
-    const response = await fetch(`${BASE_URL}/api/tournaments`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
+// ✅ REAL API functions - DIRECT EXPORT
+export const api = {
+  // ✅ Get all matches from combined API
+  getMatches: async (params = {}) => {
+    try {
+      console.log('🔄 Fetching combined matches + tournaments from REAL API...');
+      const response = await axiosInstance.get('/api/combined', { params });
+      console.log('✅ Combined API Response received');
+      return response.data;
+    } catch (error) {
+      console.error('❌ Combined API Error:', error);
+      return {
+        success: false,
+        message: 'Failed to fetch data from backend',
+        data: []
+      };
     }
+  },
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Fetch tournaments error:', error);
-    return {
-      success: false,
-      message: error.message,
-      tournaments: [],
-    };
-  }
-};
-
-// ✅ Create new tournament
-export const createTournament = async (tournamentData) => {
-  try {
-    const token = await getToken();
-    const response = await fetch(`${BASE_URL}/api/tournaments/create`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify(tournamentData),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
+  // ✅ Get match by ID
+  getMatchById: async (id) => {
+    try {
+      const response = await axiosInstance.get(`/api/matches/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching match:', error);
+      return { success: false, message: 'Failed to fetch match' };
     }
+  },
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Create tournament error:', error);
-    return {
-      success: false,
-      message: error.message,
-    };
-  }
-};
-
-// ✅ Update tournament
-export const updateTournament = async (tournamentId, updates) => {
-  try {
-    const token = await getToken();
-    const response = await fetch(`${BASE_URL}/api/tournaments/${tournamentId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify(updates),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
+  // ✅ Join match
+  joinMatch: async (matchId, token) => {
+    try {
+      const response = await axiosInstance.post(`/api/matches/${matchId}/join`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error joining match:', error);
+      return { success: false, message: 'Failed to join match' };
     }
+  },
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Update tournament error:', error);
-    return {
-      success: false,
-      message: error.message,
-    };
+  // ✅ Quick join match
+  quickJoinMatch: async (matchId, token) => {
+    try {
+      const response = await axiosInstance.post(`/api/matches/${matchId}/quick-join`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error quick joining match:', error);
+      return { success: false, message: 'Failed to quick join match' };
+    }
+  },
+
+  // ✅ Create match (এডমিন এর জন্য)
+  createMatch: async (payload, token) => {
+    try {
+      console.log('🎯 Creating match...', payload);
+      const response = await axiosInstance.post('/api/matches', payload, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error creating match:', error);
+      return { success: false, message: 'Failed to create match' };
+    }
   }
 };
+
+// ✅ Default export (পুরানো code এর compatibility এর জন্য)
+export default api;
