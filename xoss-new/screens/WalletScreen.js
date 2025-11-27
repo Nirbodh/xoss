@@ -1,4 +1,4 @@
-// WalletScreen.js
+// WalletScreen.js - UPDATED VERSION (SYNC WITH PROFILE SCREEN)
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, 
@@ -9,9 +9,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWallet } from '../context/WalletContext';
 import { useNotification } from '../context/NotificationContext';
-import NotificationBell from '../components/NotificationBell'; // এই লাইন যোগ করুন
+import NotificationBell from '../components/NotificationBell';
 import * as Haptics from 'expo-haptics';
 
 const { width, height } = Dimensions.get('window');
@@ -19,7 +20,14 @@ const { width, height } = Dimensions.get('window');
 const WalletScreen = () => {
   const navigation = useNavigation();
   const walletContext = useWallet();
-  const [balance, setBalance] = useState(1250.75);
+  const [balance, setBalance] = useState(0);
+  const [userStats, setUserStats] = useState({
+    balance: 0,
+    gamesPlayed: 0,
+    tournaments: 0,
+    wins: 0,
+    winRate: '0%'
+  });
   const [recipientId, setRecipientId] = useState('');
   const [recipientName, setRecipientName] = useState('');
   const [amount, setAmount] = useState('');
@@ -55,8 +63,36 @@ const WalletScreen = () => {
 
   const quickAmounts = [5, 10, 20, 50, 100, 200];
 
-  // Initialize animations
+  // Load user stats from storage
+  const loadUserStats = async () => {
+    try {
+      const stats = await AsyncStorage.getItem('userStats');
+      if (stats) {
+        const parsedStats = JSON.parse(stats);
+        setUserStats(parsedStats);
+        setBalance(parsedStats.balance || 0);
+      } else {
+        // Default stats if not found
+        const defaultStats = {
+          balance: 1250,
+          gamesPlayed: 47,
+          tournaments: 12,
+          wins: 41,
+          winRate: '87%'
+        };
+        setUserStats(defaultStats);
+        setBalance(defaultStats.balance);
+        await AsyncStorage.setItem('userStats', JSON.stringify(defaultStats));
+      }
+    } catch (error) {
+      console.log('Error loading user stats:', error);
+    }
+  };
+
+  // Initialize animations and load data
   useEffect(() => {
+    loadUserStats();
+    
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -92,16 +128,26 @@ const WalletScreen = () => {
     ).start();
   }, []);
 
+  // Focus listener - screen focus হলে data reload করবে
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadUserStats();
+    });
+    return unsubscribe;
+  }, [navigation]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // Simulate API call
+    // Load fresh data from storage
+    await loadUserStats();
+    
     setTimeout(() => {
       setRefreshing(false);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Refreshed', 'Wallet data updated successfully!');
-    }, 1500);
+      Alert.alert('রিফ্রেশ হয়েছে', 'ওয়ালেট ডেটা সফলভাবে আপডেট হয়েছে!');
+    }, 1000);
   };
 
   // Handle notification press
@@ -118,7 +164,7 @@ const WalletScreen = () => {
     }
     // For React Native - show message but don't actually copy
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Alert.alert('Copied!', 'User ID: ' + text);
+    Alert.alert('কপি হয়েছে!', 'ইউজার আইডি: ' + text);
   };
 
   // Filter users based on search
@@ -130,18 +176,18 @@ const WalletScreen = () => {
 
   const handleSend = async () => {
     if (!recipientId || !amount) {
-      Alert.alert('Error', 'Please select a user and enter amount');
+      Alert.alert('ত্রুটি', 'দয়া করে একজন ইউজার সিলেক্ট করুন এবং অ্যামাউন্ট দিন');
       return;
     }
     
     const sendAmount = Number(amount);
     if (sendAmount > balance) {
-      Alert.alert('Error', 'Insufficient balance');
+      Alert.alert('ত্রুটি', 'পর্যাপ্ত ব্যালেন্স নেই');
       return;
     }
 
     if (sendAmount < 1) {
-      Alert.alert('Error', 'Minimum amount is ৳1');
+      Alert.alert('ত্রুটি', 'ন্যূনতম অ্যামাউন্ট ৳১');
       return;
     }
 
@@ -153,16 +199,28 @@ const WalletScreen = () => {
     try {
       setLoading(true);
       
+      const sendAmount = Number(amount);
+      const newBalance = balance - sendAmount;
+      
+      // Update both local state and AsyncStorage
+      setBalance(newBalance);
+      
+      const updatedStats = {
+        ...userStats,
+        balance: newBalance
+      };
+      setUserStats(updatedStats);
+      await AsyncStorage.setItem('userStats', JSON.stringify(updatedStats));
+      
       // Simulate API call
       setTimeout(() => {
         Alert.alert(
-          'Payment Successful!', 
-          `Sent ৳${amount} to ${recipientName}`,
+          'পেমেন্ট সফল!', 
+          `${recipientName}-কে ৳${amount} পাঠানো হয়েছে`,
           [
             { 
-              text: 'OK', 
+              text: 'ঠিক আছে', 
               onPress: () => {
-                setBalance(prev => prev - Number(amount));
                 setRecipientId('');
                 setRecipientName('');
                 setAmount('');
@@ -178,14 +236,14 @@ const WalletScreen = () => {
         setLoading(false);
       }, 1500);
     } catch (err) {
-      Alert.alert('Error', 'Transaction failed. Please try again.');
+      Alert.alert('ত্রুটি', 'ট্রানজেকশন ব্যর্থ হয়েছে। দয়া করে আবার চেষ্টা করুন।');
       setLoading(false);
     }
   };
 
   const submitWithProof = async () => {
     if (!transactionProof.trim()) {
-      Alert.alert('Error', 'Please provide transaction proof');
+      Alert.alert('ত্রুটি', 'দয়া করে ট্রানজেকশন প্রুফ দিন');
       return;
     }
 
@@ -354,14 +412,13 @@ const WalletScreen = () => {
                     }}
                   >
                     <Text style={styles.userId}>
-                      {showUserID ? `ID: ${userData.id}` : 'ID: ••••••••'}
+                      {showUserID ? `আইডি: ${userData.id}` : 'আইডি: ••••••••'}
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
               
               <View style={styles.headerIcons}>
-                {/* এখন শুধু NotificationBell ব্যবহার করুন */}
                 <NotificationBell onPress={handleNotificationPress} />
                 <TouchableOpacity 
                   onPress={() => {
@@ -381,7 +438,7 @@ const WalletScreen = () => {
               ]}
             >
               <View style={styles.balanceHeader}>
-                <Text style={styles.balanceLabel}>Available Balance</Text>
+                <Text style={styles.balanceLabel}>বর্তমান ব্যালেন্স</Text>
                 <TouchableOpacity onPress={toggleBalanceVisibility} style={styles.eyeButton}>
                   <Ionicons 
                     name={balanceVisible ? "eye" : "eye-off"} 
@@ -394,8 +451,8 @@ const WalletScreen = () => {
                 {balanceVisible ? `৳${balance.toFixed(2)}` : '•••••'}
               </Text>
               <View style={styles.balanceStats}>
-                <Text style={styles.statText}>↑ ৳2,500 earned</Text>
-                <Text style={styles.statText}>↓ ৳1,249 spent</Text>
+                <Text style={styles.statText}>↑ ৳২,৫০০ আয়</Text>
+                <Text style={styles.statText}>↓ ৳১,২৪৯ খরচ</Text>
               </View>
             </Animated.View>
 
@@ -408,7 +465,7 @@ const WalletScreen = () => {
                 }}
               >
                 <Ionicons name="add-circle" size={20} color="#ff8a00" />
-                <Text style={styles.topSendText}>Add Money</Text>
+                <Text style={styles.topSendText}>মানি এড করুন</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -416,45 +473,44 @@ const WalletScreen = () => {
                 onPress={handleSend}
               >
                 <Ionicons name="gift" size={20} color="#ff8a00" />
-                <Text style={styles.topSendText}>Send Gift</Text>
+                <Text style={styles.topSendText}>গিফট পাঠান</Text>
               </TouchableOpacity>
             </View>
           </LinearGradient>
         </Animated.View>
 
-        {/* বাকি সব কোড একই থাকবে */}
         {/* Quick Actions Grid */}
         <View style={styles.quickActionsSection}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionTitle}>কুইক একশন্স</Text>
           <View style={styles.quickActionsGrid}>
             <QuickActionButton
               icon="arrow-down-circle"
-              title="Deposit"
+              title="ডিপোজিট"
               color="#4CAF50"
               onPress={() => navigation.navigate('Deposit')}
             />
             <QuickActionButton
               icon="arrow-up-circle"
-              title="Withdraw"
+              title="উইথড্র"
               color="#FF6B35"
               onPress={() => navigation.navigate('Withdraw')}
             />
             <QuickActionButton
               icon="swap-horizontal"
-              title="Transfer"
+              title="ট্রান্সফার"
               color="#2962ff"
-              onPress={() => Alert.alert('Coming Soon', 'Transfer feature will be available soon!')}
+              onPress={() => Alert.alert('শীঘ্রই আসছে', 'ট্রান্সফার ফিচার শীঘ্রই আসছে!')}
             />
             <QuickActionButton
               icon="time"
-              title="History"
+              title="হিস্টোরি"
               color="#9C27B0"
               onPress={() => navigation.navigate('TransactionHistory')}
               badge="3"
             />
             <QuickActionButton
               icon="heart"
-              title="Donate"
+              title="ডোনেট"
               color="#FF6B6B"
               onPress={() => navigation.navigate('Donate')}
             />
@@ -465,12 +521,12 @@ const WalletScreen = () => {
         <View style={styles.transactionsPreview}>
           <View style={styles.sectionHeader}>
             <Ionicons name="list" size={20} color="#ff8a00" />
-            <Text style={styles.sectionTitle}>Recent Transactions</Text>
+            <Text style={styles.sectionTitle}>সাম্প্রতিক ট্রানজেকশন</Text>
             <TouchableOpacity 
               style={styles.seeAllButton}
               onPress={() => navigation.navigate('TransactionHistory')}
             >
-              <Text style={styles.seeAllText}>See All</Text>
+              <Text style={styles.seeAllText}>সব দেখুন</Text>
             </TouchableOpacity>
           </View>
           
@@ -480,10 +536,10 @@ const WalletScreen = () => {
                 <Ionicons name="trophy" size={20} color="#4CAF50" />
               </View>
               <View style={styles.transactionDetails}>
-                <Text style={styles.transactionTitle}>Tournament Win</Text>
-                <Text style={styles.transactionDate}>Today, 14:30</Text>
+                <Text style={styles.transactionTitle}>টুর্নামেন্ট জয়</Text>
+                <Text style={styles.transactionDate}>আজ, ১৪:৩০</Text>
               </View>
-              <Text style={styles.transactionAmount}>+৳500</Text>
+              <Text style={styles.transactionAmount}>+৳৫০০</Text>
             </View>
             
             <View style={styles.transactionItem}>
@@ -491,10 +547,10 @@ const WalletScreen = () => {
                 <Ionicons name="game-controller" size={20} color="#FF6B35" />
               </View>
               <View style={styles.transactionDetails}>
-                <Text style={styles.transactionTitle}>Entry Fee</Text>
-                <Text style={styles.transactionDate}>Today, 13:15</Text>
+                <Text style={styles.transactionTitle}>এন্ট্রি ফি</Text>
+                <Text style={styles.transactionDate}>আজ, ১৩:১৫</Text>
               </View>
-              <Text style={[styles.transactionAmount, styles.negativeAmount]}>-৳50</Text>
+              <Text style={[styles.transactionAmount, styles.negativeAmount]}>-৳৫০</Text>
             </View>
           </View>
         </View>
@@ -503,23 +559,23 @@ const WalletScreen = () => {
         <View style={styles.giftSection}>
           <View style={styles.sectionHeader}>
             <Ionicons name="gift" size={24} color="#ff8a00" />
-            <Text style={styles.sectionTitle}>Send Gift / Balance</Text>
+            <Text style={styles.sectionTitle}>গিফট / ব্যালেন্স পাঠান</Text>
           </View>
           <Text style={styles.giftSubtitle}>
-            Send money to friends instantly with secure transaction
+            নিরাপদ ট্রানজেকশনের মাধ্যমে বন্ধুদের সাথে তাৎক্ষণিক মানি ট্রান্সফার করুন
           </Text>
         </View>
 
         {/* Search User Section */}
         <View style={styles.searchSection}>
-          <Text style={styles.sectionTitle}>Find User</Text>
+          <Text style={styles.sectionTitle}>ইউজার খুঁজুন</Text>
           <View style={styles.searchContainer}>
             <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Search by name, username or ID..."
+              placeholder="নাম, ইউজারনেম বা আইডি দিয়ে সার্চ করুন..."
               placeholderTextColor="#888"
             />
             {searchQuery ? (
@@ -533,7 +589,7 @@ const WalletScreen = () => {
         {/* Users List */}
         <View style={styles.usersSection}>
           <Text style={styles.sectionTitle}>
-            {searchQuery ? 'Search Results' : 'Recent Contacts'}
+            {searchQuery ? 'সার্চ রেজাল্ট' : 'সাম্প্রতিক কন্টাক্টস'}
           </Text>
           <FlatList
             horizontal
@@ -547,7 +603,7 @@ const WalletScreen = () => {
             ListEmptyComponent={
               <View style={styles.emptyResults}>
                 <Ionicons name="people-outline" size={40} color="#666" />
-                <Text style={styles.emptyText}>No users found</Text>
+                <Text style={styles.emptyText}>কোন ইউজার পাওয়া যায়নি</Text>
               </View>
             }
           />
@@ -582,14 +638,14 @@ const WalletScreen = () => {
 
         {/* Amount Input Section */}
         <View style={styles.amountSection}>
-          <Text style={styles.sectionTitle}>Amount</Text>
+          <Text style={styles.sectionTitle}>অ্যামাউন্ট</Text>
           <View style={styles.amountInputContainer}>
             <Text style={styles.currencySymbol}>৳</Text>
             <TextInput
               style={styles.amountInput}
               value={amount}
               onChangeText={setAmount}
-              placeholder="0.00"
+              placeholder="০.০০"
               placeholderTextColor="#ccc"
               keyboardType="numeric"
               selectionColor="#ff8a00"
@@ -597,7 +653,7 @@ const WalletScreen = () => {
           </View>
 
           {/* Quick Amount Buttons */}
-          <Text style={styles.quickAmountsTitle}>Quick Select</Text>
+          <Text style={styles.quickAmountsTitle}>কুইক সিলেক্ট</Text>
           <View style={styles.quickAmounts}>
             {quickAmounts.map((amt) => (
               <TouchableOpacity
@@ -619,12 +675,12 @@ const WalletScreen = () => {
 
         {/* Note Input */}
         <View style={styles.noteSection}>
-          <Text style={styles.sectionTitle}>Note (Optional)</Text>
+          <Text style={styles.sectionTitle}>নোট (ঐচ্ছিক)</Text>
           <TextInput
             style={styles.noteInput}
             value={note}
             onChangeText={setNote}
-            placeholder="Add a note for this transaction..."
+            placeholder="এই ট্রানজেকশনের জন্য একটি নোট যোগ করুন..."
             placeholderTextColor="#888"
             multiline
             numberOfLines={2}
@@ -650,7 +706,7 @@ const WalletScreen = () => {
               <View style={styles.sendButtonContent}>
                 <Ionicons name="gift" size={24} color="white" />
                 <Text style={styles.sendText}>
-                  Send Gift ৳{amount || '0'}
+                  গিফট পাঠান ৳{amount || '০'}
                 </Text>
               </View>
             )}
@@ -661,9 +717,9 @@ const WalletScreen = () => {
         <View style={styles.securityNote}>
           <Ionicons name="shield-checkmark" size={20} color="#4CAF50" />
           <View style={styles.securityTextContainer}>
-            <Text style={styles.securityTitle}>Secure & Encrypted</Text>
+            <Text style={styles.securityTitle}>সুরক্ষিত ও এনক্রিপ্টেড</Text>
             <Text style={styles.securityText}>
-              All transactions are protected with bank-level security
+              সব ট্রানজেকশন ব্যাংক-লেভেল সিকিউরিটি দিয়ে প্রটেক্টেড
             </Text>
           </View>
         </View>
@@ -679,7 +735,7 @@ const WalletScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Transaction Proof Required</Text>
+              <Text style={styles.modalTitle}>ট্রানজেকশন প্রুফ প্রয়োজন</Text>
               <TouchableOpacity 
                 onPress={() => {
                   setShowProofModal(false);
@@ -696,26 +752,26 @@ const WalletScreen = () => {
               </View>
               
               <Text style={styles.modalSubtitle}>
-                Please provide transaction proof for security verification
+                সিকিউরিটি ভেরিফিকেশনের জন্য দয়া করে ট্রানজেকশন প্রুফ প্রদান করুন
               </Text>
 
-              <Text style={styles.proofLabel}>Transaction Proof *</Text>
+              <Text style={styles.proofLabel}>ট্রানজেকশন প্রুফ *</Text>
               <TextInput
                 style={styles.proofInput}
                 value={transactionProof}
                 onChangeText={setTransactionProof}
-                placeholder="Enter transaction ID, screenshot details, or proof..."
+                placeholder="ট্রানজেকশন আইডি, স্ক্রিনশট ডিটেইলস, বা প্রুফ দিন..."
                 placeholderTextColor="#888"
                 multiline
                 numberOfLines={3}
               />
 
-              <Text style={styles.proofLabel}>Additional Notes (Optional)</Text>
+              <Text style={styles.proofLabel}>অতিরিক্ত নোট (ঐচ্ছিক)</Text>
               <TextInput
                 style={styles.noteInput}
                 value={note}
                 onChangeText={setNote}
-                placeholder="Any additional information..."
+                placeholder="যেকোনো অতিরিক্ত তথ্য..."
                 placeholderTextColor="#888"
                 multiline
                 numberOfLines={2}
@@ -724,7 +780,7 @@ const WalletScreen = () => {
               <View style={styles.modalInfo}>
                 <Ionicons name="information-circle" size={16} color="#2962ff" />
                 <Text style={styles.modalInfoText}>
-                  This helps us verify and secure your transaction
+                  এটি আমাদের আপনার ট্রানজেকশন ভেরিফাই ও সিকিউর করতে সাহায্য করে
                 </Text>
               </View>
             </View>
@@ -737,7 +793,7 @@ const WalletScreen = () => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>বাতিল</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -750,7 +806,7 @@ const WalletScreen = () => {
                 disabled={!transactionProof.trim()}
               >
                 <Text style={styles.submitButtonText}>
-                  Submit Proof & Send ৳{amount}
+                  প্রুফ সাবমিট করুন ও ৳{amount} পাঠান
                 </Text>
               </TouchableOpacity>
             </View>

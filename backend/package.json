@@ -7,6 +7,9 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "build": "npm install",
+    "migrate": "node scripts/addWinnersField.js",
+    "migrate:results": "node scripts/addResultFields.js",
+    "migrate:all": "npm run migrate && npm run migrate:results",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["gaming", "tournament", "esports", "xoss"],

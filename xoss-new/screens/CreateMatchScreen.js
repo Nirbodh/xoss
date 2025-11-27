@@ -1,1606 +1,977 @@
-// screens/CreateMatchScreen.js - COMPLETE FIXED VERSION
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, Platform, Dimensions, Animated,
-  ActivityIndicator, Switch, Modal, KeyboardAvoidingView
+// screens/CreateMatchScreen.js - COMPLETELY FIXED WITH CUSTOM DATE PICKER
+import React, { useState } from 'react';
+import { 
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, 
+  TextInput, Alert, Modal, ActivityIndicator 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Haptics from 'expo-haptics';
-import { useAuth } from '../context/AuthContext';
-import { useWallet } from '../context/WalletContext';
+import { Ionicons } from '@expo/vector-icons';
+import { useTournaments } from '../context/TournamentContext';
 
-const { width, height } = Dimensions.get('window');
-
-// 🆕 Expo Compatible Features Only
-const AISuggestionEngine = ({ game, matchType, onSuggestionApply }) => {
-  const [suggestions, setSuggestions] = useState([]);
+// Custom Date Picker Component (No External Dependencies)
+const CustomDatePicker = ({ visible, onConfirm, onCancel, value }) => {
+  const [selectedDate, setSelectedDate] = useState(value || new Date());
   
-  const gamePresets = {
-    freefire: {
-      Solo: { 
-        entryFee: 10, 
-        maxPlayers: 48, 
-        perKill: 5, 
-        prizePool: 400,
-        description: "Popular Solo match with quick joiners"
-      },
-      Duo: { 
-        entryFee: 20, 
-        maxPlayers: 50, 
-        perKill: 10, 
-        prizePool: 800,
-        description: "Perfect for duo partners"
-      },
-      Squad: { 
-        entryFee: 25, 
-        maxPlayers: 48, 
-        perKill: 8, 
-        prizePool: 1000,
-        description: "Squad battle with team coordination"
-      }
-    },
-    pubg: {
-      Solo: { 
-        entryFee: 15, 
-        maxPlayers: 100, 
-        perKill: 8, 
-        prizePool: 1200,
-        description: "Classic PUBG solo experience"
-      },
-      Duo: { 
-        entryFee: 30, 
-        maxPlayers: 100, 
-        perKill: 15, 
-        prizePool: 2400,
-        description: "Duo match with higher stakes"
-      }
-    },
-    bgmi: {
-      Solo: { 
-        entryFee: 12, 
-        maxPlayers: 80, 
-        perKill: 6, 
-        prizePool: 800,
-        description: "BGMI solo with Indian players"
-      },
-      Squad: { 
-        entryFee: 35, 
-        maxPlayers: 80, 
-        perKill: 10, 
-        prizePool: 2400,
-        description: "Squad match for pro teams"
-      }
-    }
+  // Generate months and years
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => currentYear + i);
+  
+  const daysInMonth = (month, year) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+  
+  const getDaysArray = (month, year) => {
+    const daysCount = daysInMonth(month, year);
+    return Array.from({ length: daysCount }, (_, i) => i + 1);
   };
 
-  useEffect(() => {
-    if (game && matchType) {
-      const preset = gamePresets[game]?.[matchType];
-      if (preset) {
-        setSuggestions([{
-          type: 'AI Recommended',
-          ...preset,
-          confidence: '95%'
-        }]);
-      }
+  const [days, setDays] = useState(getDaysArray(selectedDate.getMonth(), selectedDate.getFullYear()));
+  const [hours, setHours] = useState(selectedDate.getHours());
+  const [minutes, setMinutes] = useState(selectedDate.getMinutes());
+
+  const updateDays = (month, year) => {
+    setDays(getDaysArray(month, year));
+  };
+
+  const handleMonthChange = (monthIndex) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(monthIndex);
+    setSelectedDate(newDate);
+    updateDays(monthIndex, newDate.getFullYear());
+  };
+
+  const handleYearChange = (year) => {
+    const newDate = new Date(selectedDate);
+    newDate.setFullYear(year);
+    setSelectedDate(newDate);
+    updateDays(newDate.getMonth(), year);
+  };
+
+  const handleDayChange = (day) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(day);
+    setSelectedDate(newDate);
+  };
+
+  const handleTimeChange = (type, value) => {
+    const newDate = new Date(selectedDate);
+    if (type === 'hour') {
+      newDate.setHours(value);
+      setHours(value);
+    } else {
+      newDate.setMinutes(value);
+      setMinutes(value);
     }
-  }, [game, matchType]);
+    setSelectedDate(newDate);
+  };
 
-  if (!suggestions.length) return null;
+  const handleConfirm = () => {
+    onConfirm(selectedDate);
+  };
 
-  return (
-    <View style={styles.aiSuggestionContainer}>
-      <Text style={styles.aiTitle}>🤖 Smart Suggestions</Text>
-      {suggestions.map((suggestion, index) => (
-        <TouchableOpacity
-          key={index}
-          style={styles.suggestionCard}
-          onPress={() => onSuggestionApply(suggestion)}
-        >
-          <View style={styles.suggestionHeader}>
-            <Ionicons name="sparkles" size={16} color="#FFD700" />
-            <Text style={styles.suggestionType}>{suggestion.type}</Text>
-            <Text style={styles.confidenceBadge}>{suggestion.confidence}</Text>
-          </View>
-          <Text style={styles.suggestionDesc}>{suggestion.description}</Text>
-          <View style={styles.suggestionStats}>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Entry</Text>
-              <Text style={styles.statValue}>৳{suggestion.entryFee}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Players</Text>
-              <Text style={styles.statValue}>{suggestion.maxPlayers}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Per Kill</Text>
-              <Text style={styles.statValue}>৳{suggestion.perKill}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Prize</Text>
-              <Text style={styles.statValue}>৳{suggestion.prizePool}</Text>
-            </View>
-          </View>
-        </TouchableOpacity>
-      ))}
-    </View>
-  );
-};
-
-// 🆕 Real-time Profit Calculator (Expo Compatible)
-const ProfitCalculator = ({ entryFee, maxPlayers, perKill }) => {
-  const totalCollection = (parseFloat(entryFee) || 0) * (parseInt(maxPlayers) || 0);
-  const platformFee = totalCollection * 0.10;
-  const totalPrize = totalCollection - platformFee;
-  const estimatedProfit = platformFee;
-
-  if (totalCollection <= 0) return null;
+  if (!visible) return null;
 
   return (
-    <View style={styles.profitCalculator}>
-      <Text style={styles.calculatorTitle}>💰 Profit Breakdown</Text>
-      <View style={styles.calculatorGrid}>
-        <View style={styles.calcItem}>
-          <Text style={styles.calcLabel}>Total Collection</Text>
-          <Text style={styles.calcValue}>৳{totalCollection}</Text>
-        </View>
-        <View style={styles.calcItem}>
-          <Text style={styles.calcLabel}>Platform Fee (10%)</Text>
-          <Text style={styles.calcValue}>৳{Math.round(platformFee)}</Text>
-        </View>
-        <View style={styles.calcItem}>
-          <Text style={styles.calcLabel}>Prize Pool</Text>
-          <Text style={styles.calcValue}>৳{Math.round(totalPrize)}</Text>
-        </View>
-        <View style={styles.calcItem}>
-          <Text style={styles.calcLabel}>Your Profit</Text>
-          <Text style={[styles.calcValue, styles.profitText]}>৳{Math.round(estimatedProfit)}</Text>
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.customPickerOverlay}>
+        <View style={styles.customPickerContent}>
+          <View style={styles.customPickerHeader}>
+            <Text style={styles.customPickerTitle}>Select Date & Time</Text>
+          </View>
+          
+          <View style={styles.pickerContainer}>
+            {/* Date Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Date</Text>
+              <View style={styles.pickerRow}>
+                {/* Month */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Month</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {months.map((month, index) => (
+                      <TouchableOpacity
+                        key={month}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getMonth() === index && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleMonthChange(index)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getMonth() === index && styles.pickerItemTextSelected
+                        ]}>
+                          {month}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Day */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Day</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {days.map(day => (
+                      <TouchableOpacity
+                        key={day}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getDate() === day && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleDayChange(day)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getDate() === day && styles.pickerItemTextSelected
+                        ]}>
+                          {day}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Year */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Year</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {years.map(year => (
+                      <TouchableOpacity
+                        key={year}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getFullYear() === year && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleYearChange(year)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getFullYear() === year && styles.pickerItemTextSelected
+                        ]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+
+            {/* Time Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Time</Text>
+              <View style={styles.pickerRow}>
+                {/* Hours */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Hour</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 24 }, (_, i) => i).map(hour => (
+                      <TouchableOpacity
+                        key={hour}
+                        style={[
+                          styles.pickerItem,
+                          hours === hour && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('hour', hour)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          hours === hour && styles.pickerItemTextSelected
+                        ]}>
+                          {hour.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Minutes */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Minute</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 60 }, (_, i) => i).map(minute => (
+                      <TouchableOpacity
+                        key={minute}
+                        style={[
+                          styles.pickerItem,
+                          minutes === minute && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('minute', minute)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          minutes === minute && styles.pickerItemTextSelected
+                        ]}>
+                          {minute.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+
+            {/* Selected Date Preview */}
+            <View style={styles.selectedDatePreview}>
+              <Text style={styles.selectedDateText}>
+                Selected: {selectedDate.toLocaleString()}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.customPickerActions}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
+              <Text style={styles.confirmButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
-    </View>
-  );
-};
-
-// 🆕 Smart Rule Generator (Expo Compatible)
-const SmartRuleGenerator = ({ game, matchType, onRulesGenerate }) => {
-  const generateRules = () => {
-    const baseRules = [
-      'No cheating or hacking of any kind allowed',
-      'Screenshots must be submitted within 10 minutes after match ends',
-      'Top performers will receive cash prizes as announced',
-      'Per kill bonus will be added to final prize money',
-      'Match room will be created 15 minutes before start time',
-      'Late entry will not be accepted once match begins',
-      'All decisions by tournament admins will be final and binding',
-      'Players must maintain sportsmanship throughout the tournament',
-      'Any misconduct may lead to immediate disqualification',
-      'Prize money will be distributed within 24 hours of match completion'
-    ];
-
-    const gameSpecificRules = {
-      freefire: [
-        'No use of emulators or external devices',
-        'Character skills must be used fairly',
-        'Team communication should be in designated channels only'
-      ],
-      pubg: [
-        'No teaming in solo matches allowed',
-        'Gameplay recording is recommended for verification',
-        'Sanctioned devices only - no emulators'
-      ],
-      bgmi: [
-        'Comply with BGMI tournament guidelines',
-        'Indian server preferences apply',
-        'Regional restrictions may be enforced'
-      ]
-    };
-
-    const rules = [...baseRules, ...(gameSpecificRules[game] || [])];
-    onRulesGenerate(rules.join('\n• '));
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  };
-
-  return (
-    <TouchableOpacity style={styles.ruleGenerator} onPress={generateRules}>
-      <Ionicons name="bulb" size={18} color="#FFD700" />
-      <Text style={styles.ruleGeneratorText}>Generate Smart Rules</Text>
-    </TouchableOpacity>
-  );
-};
-
-// 🆕 Match Template System
-const MatchTemplates = ({ onTemplateSelect }) => {
-  const templates = [
-    {
-      name: 'Quick Solo',
-      game: 'freefire',
-      type: 'Solo',
-      entryFee: 10,
-      players: 48,
-      perKill: 5,
-      description: 'Fast-paced solo match'
-    },
-    {
-      name: 'Pro Squad',
-      game: 'pubg',
-      type: 'Squad', 
-      entryFee: 40,
-      players: 100,
-      perKill: 12,
-      description: 'Professional squad tournament'
-    },
-    {
-      name: 'Beginner Friendly',
-      game: 'freefire',
-      type: 'Solo',
-      entryFee: 5,
-      players: 25,
-      perKill: 3,
-      description: 'Perfect for new players'
-    }
-  ];
-
-  return (
-    <View style={styles.templatesContainer}>
-      <Text style={styles.templatesTitle}>🎯 Quick Templates</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={styles.templatesList}>
-          {templates.map((template, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.templateCard}
-              onPress={() => onTemplateSelect(template)}
-            >
-              <Text style={styles.templateName}>{template.name}</Text>
-              <Text style={template.game === 'freefire' ? styles.templateGameFF : styles.templateGamePUBG}>
-                {template.game.toUpperCase()}
-              </Text>
-              <View style={styles.templateStats}>
-                <Text style={styles.templateStat}>৳{template.entryFee} Entry</Text>
-                <Text style={styles.templateStat}>{template.players} Players</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
-  );
-};
-
-// 🆕 Fixed DateTimePicker Component
-const CustomDateTimePicker = ({ 
-  value, 
-  onChange, 
-  mode = 'datetime',
-  minimumDate = new Date(),
-  isVisible,
-  onClose 
-}) => {
-  const [currentDate, setCurrentDate] = useState(value);
-
-  const handleChange = (event, selectedDate) => {
-    if (Platform.OS === 'android') {
-      onClose();
-    }
-    
-    if (selectedDate) {
-      setCurrentDate(selectedDate);
-      onChange(selectedDate);
-    }
-  };
-
-  if (!isVisible) return null;
-
-  return (
-    <DateTimePicker
-      value={currentDate}
-      mode={mode}
-      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-      onChange={handleChange}
-      minimumDate={minimumDate}
-      textColor="#ffffff"
-      accentColor="#ff8a00"
-      themeVariant="dark"
-    />
+    </Modal>
   );
 };
 
 const CreateMatchScreen = ({ navigation }) => {
-  const { user } = useAuth();
-  const { balance } = useWallet();
-  
+  const [loading, setLoading] = useState(false);
+  const { createTournament } = useTournaments();
+
+  // Date/Time Picker State
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [currentDateField, setCurrentDateField] = useState('');
+
   const [formData, setFormData] = useState({
-    game: '',
-    matchType: '',
-    title: '',
-    description: '',
-    entryFee: '',
-    totalPrize: '',
-    perKill: '',
-    maxParticipants: '',
-    map: '',
-    version: 'Mobile',
+    title: 'Solo Battle Match',
+    game: 'freefire',
+    type: 'Solo',
+    map: 'Bermuda',
+    entryFee: '50',
+    prizePool: '500',
+    maxPlayers: '100',
+    perKill: '10',
     roomId: '',
-    roomPassword: '',
-    matchDate: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    rules: '',
-    advancedSettings: {
-      autoApprove: true,
-      requireScreenshot: true,
-      allowSpectators: false,
-      minLevel: 1,
-      maxLevel: 100
-    }
+    password: '',
+    description: 'Join this exciting solo battle match!',
+    rules: 'No cheating, fair play only. Respect other players.',
+    scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+    endTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
   });
 
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [manualRoomInput, setManualRoomInput] = useState(false);
-  const slideAnim = useRef(new Animated.Value(0)).current;
-
-  // 🆕 Expo Compatible Game Configuration
-  const GAMES_CONFIG = {
-    freefire: {
-      name: 'Free Fire',
-      icon: 'flame',
-      color: '#FF6B00',
-      modes: ['Solo', 'Duo', 'Squad', 'Clash Squad'],
-      maps: ['Bermuda', 'Purgatory', 'Kalahari', 'Alpine'],
-      versions: ['Mobile', 'MAX']
-    },
-    pubg: {
-      name: 'PUBG Mobile', 
-      icon: 'target',
-      color: '#4CAF50',
-      modes: ['Solo', 'Duo', 'Squad', 'TPP', 'FPP'],
-      maps: ['Erangel', 'Miramar', 'Sanhok', 'Vikendi'],
-      versions: ['Mobile', 'Lite']
-    },
-    cod: {
-      name: 'Call of Duty',
-      icon: 'sports-esports',
-      color: '#2196F3',
-      modes: ['Solo', 'Duo', 'Squad', 'Battle Royale', 'MP'],
-      maps: ['Isolated', 'Blackout', 'Alcatraz'],
-      versions: ['Mobile']
-    },
-    ludo: {
-      name: 'Ludo King',
-      icon: 'dice-five',
-      color: '#9C27B0',
-      modes: ['Single', 'Double', '4 Player'],
-      maps: ['Classic', 'Quick', 'Master'],
-      versions: ['Mobile']
-    },
-    bgmi: {
-      name: 'BGMI',
-      icon: 'mobile-alt',
-      color: '#FF4444',
-      modes: ['Solo', 'Duo', 'Squad'],
-      maps: ['Erangel', 'Miramar', 'Livik', 'Sanhok'],
-      versions: ['Mobile']
-    }
+  // ✅ Date/Time Picker Functions
+  const openDatePicker = (field) => {
+    setCurrentDateField(field);
+    setShowDatePicker(true);
   };
 
-  // 🆕 Handle template selection
-  const handleTemplateSelect = (template) => {
+  const handleDateConfirm = (date) => {
     setFormData(prev => ({
       ...prev,
-      game: template.game,
-      matchType: template.type,
-      entryFee: template.entryFee.toString(),
-      maxParticipants: template.players.toString(),
-      perKill: template.perKill.toString()
+      [currentDateField]: date.toISOString()
     }));
-    setCurrentStep(3);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setShowTemplates(false);
-  };
-
-  // ✅ FIXED: handleInputChange function
-  const handleInputChange = (field, value) => {
-    setFormData(prev => {
-      // Create updated form data
-      const updatedFormData = {
-        ...prev,
-        [field]: value
-      };
-
-      // Auto-calculate total prize when entryFee or maxParticipants changes
-      if (field === 'entryFee' || field === 'maxParticipants') {
-        const entryFee = parseFloat(updatedFormData.entryFee) || 0;
-        const participants = parseInt(updatedFormData.maxParticipants) || 0;
-        
-        if (entryFee > 0 && participants > 0) {
-          const totalPrize = (entryFee * participants) * 0.9; // 90% of total collection
-          updatedFormData.totalPrize = Math.round(totalPrize).toString();
-        } else {
-          updatedFormData.totalPrize = '0';
-        }
-      }
-
-      return updatedFormData;
-    });
-  };
-
-  const handleAISuggestionApply = (suggestion) => {
-    setFormData(prev => ({
-      ...prev,
-      entryFee: suggestion.entryFee.toString(),
-      maxParticipants: suggestion.maxPlayers.toString(),
-      perKill: suggestion.perKill.toString(),
-      totalPrize: suggestion.prizePool.toString()
-    }));
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const handleGameSelect = (gameId) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setFormData(prev => ({
-      ...prev,
-      game: gameId,
-      matchType: '',
-      map: ''
-    }));
-    setCurrentStep(2);
-  };
-
-  const handleMatchTypeSelect = (type) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setFormData(prev => ({
-      ...prev,
-      matchType: type
-    }));
-    setCurrentStep(3);
-  };
-
-  // 🆕 Manual Room ID Input (Removed Auto-generate)
-  const handleManualRoomInput = () => {
-    setManualRoomInput(true);
-  };
-
-  // 🆕 Fixed Date Picker Handler
-  const handleDateChange = (selectedDate) => {
-    if (selectedDate) {
-      setFormData(prev => ({
-        ...prev,
-        matchDate: selectedDate
-      }));
-    }
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-  };
-
-  const handleDatePickerClose = () => {
     setShowDatePicker(false);
   };
 
-  // 🆕 Enhanced Validation
-  const validateForm = () => {
-    if (!formData.game) return 'Please select a game';
-    if (!formData.matchType) return 'Please select match type';
-    if (!formData.title?.trim()) return 'Please enter match title';
-    if (!formData.entryFee || parseFloat(formData.entryFee) < 5) return 'Minimum entry fee is ৳5';
-    if (!formData.maxParticipants || parseInt(formData.maxParticipants) < 2) return 'Minimum 2 participants required';
-    
-    // 🆕 Manual Room ID Validation
-    if (!formData.roomId?.trim()) return 'Please enter Room ID';
-    if (formData.roomId.length < 4) return 'Room ID must be at least 4 characters';
-    if (!formData.roomPassword?.trim()) return 'Please enter Room Password';
-    if (formData.roomPassword.length < 4) return 'Password must be at least 4 characters';
-    
-    if (formData.matchDate <= new Date()) return 'Match time must be in future';
-    
-    if (parseInt(formData.maxParticipants) > 1000) return 'Maximum 1000 participants allowed';
-    if (parseFloat(formData.entryFee) > 1000) return 'Maximum entry fee is ৳1000';
-    
-    return null;
+  const handleDateCancel = () => {
+    setShowDatePicker(false);
   };
 
-  const handleSubmit = async () => {
-    const error = validateForm();
-    if (error) {
-      Alert.alert('Error', error);
-      return;
-    }
-
-    // Check balance
-    if (balance < 10) {
-      Alert.alert(
-        'Insufficient Balance', 
-        'You need at least ৳10 in your wallet to create matches.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Add Money', onPress: () => navigation.navigate('Wallet') }
-        ]
-      );
+  // ✅ FIXED: Single API call with consistent field names
+  const handleCreateMatch = async () => {
+    if (!formData.title || !formData.entryFee || !formData.prizePool || !formData.maxPlayers || !formData.roomId || !formData.password) {
+      Alert.alert('Error', 'Please fill all required fields (*)');
       return;
     }
 
     setLoading(true);
-    
+
     try {
-      // Simulate API call (Expo compatible)
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const newMatch = {
-        _id: Date.now().toString(),
-        ...formData,
-        status: 'pending',
-        createdBy: user?.id || 'user123',
-        creatorName: user?.username || 'Player',
-        createdAt: new Date().toISOString(),
-        currentParticipants: 0,
-        spotsLeft: parseInt(formData.maxParticipants),
-        registered: false,
-        skillLevel: 3,
-        prizeDetails: {
-          first: Math.round(parseFloat(formData.totalPrize) * 0.4),
-          second: Math.round(parseFloat(formData.totalPrize) * 0.3),
-          third: Math.round(parseFloat(formData.totalPrize) * 0.2),
-          fourth: Math.round(parseFloat(formData.totalPrize) * 0.1)
-        }
+      // ✅ IMPORTANT: Set status to 'pending' for admin approval
+      const matchData = {
+        // Basic info
+        title: formData.title,
+        game: formData.game,
+        description: formData.description,
+        rules: formData.rules,
+        
+        // Financial info
+        entryFee: Number(formData.entryFee) || 0,
+        prizePool: Number(formData.prizePool) || 0,
+        perKill: Number(formData.perKill) || 0,
+        
+        // Participants info
+        maxPlayers: Number(formData.maxPlayers) || 25,
+        
+        // Room info
+        roomId: formData.roomId,
+        password: formData.password,
+        
+        // Game settings
+        map: formData.map,
+        type: formData.type,
+        
+        // Status and timing - ✅ CRITICAL: Set to 'pending' for approval
+        status: 'pending', // This will make it appear in MatchControlScreen pending tab
+        matchType: 'match', // This creates a match, not tournament
+        scheduleTime: formData.scheduleTime,
+        endTime: formData.endTime,
+        
+        // Approval status
+        approval_status: 'pending' // Backend field for approval
       };
 
-      console.log('Match created:', newMatch);
+      console.log('🔄 Creating match with PENDING status:', matchData);
 
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // ✅ SINGLE API CALL to matches endpoint
+      const result = await createTournament(matchData);
       
-      Alert.alert(
-        'Success! 🎉',
-        `Match created successfully!\n\n📊 Match Details:\n• ${formData.title}\n• Prize: ৳${formData.totalPrize}\n• Players: ${formData.maxParticipants}\n\n✅ You earned 1 creator point!`,
-        [
-          {
-            text: 'View Match',
-            onPress: () => navigation.navigate('MatchDetails', { match: newMatch })
-          },
-          {
-            text: 'Create Another',
-            style: 'default',
-            onPress: () => {
-              setFormData({
-                game: '',
-                matchType: '',
-                title: '',
-                description: '',
-                entryFee: '',
-                totalPrize: '',
-                perKill: '',
-                maxParticipants: '',
-                map: '',
-                version: 'Mobile',
-                roomId: '',
-                roomPassword: '',
-                matchDate: new Date(Date.now() + 2 * 60 * 60 * 1000),
-                rules: '',
-                advancedSettings: {
-                  autoApprove: true,
-                  requireScreenshot: true,
-                  allowSpectators: false,
-                  minLevel: 1,
-                  maxLevel: 100
-                }
-              });
-              setManualRoomInput(false);
-              setCurrentStep(1);
-            }
-          }
-        ]
-      );
+      if (result && result.success) {
+        Alert.alert(
+          '✅ Success!',
+          'Your match has been created and sent for admin approval!',
+          [{ 
+            text: 'OK', 
+            onPress: () => navigation.goBack() 
+          }]
+        );
+      } else {
+        throw new Error(result?.error || 'Match creation failed');
+      }
 
-    } catch (error) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', 'Failed to create match. Please try again.');
+    } catch (err) {
+      console.error('❌ Create match error:', err);
+      Alert.alert('❌ Error', err.message || 'Failed to create match');
     } finally {
       setLoading(false);
     }
   };
 
-  const renderStep1 = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Select Game</Text>
-      <Text style={styles.stepSubtitle}>Choose the game for your match</Text>
-      
-      {/* Quick Templates Button */}
-      <TouchableOpacity 
-        style={styles.templatesButton}
-        onPress={() => setShowTemplates(true)}
-      >
-        <Ionicons name="rocket" size={20} color="#2962ff" />
-        <Text style={styles.templatesButtonText}>Use Quick Templates</Text>
-      </TouchableOpacity>
+  const generateRoomId = () => {
+    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setFormData(prev => ({ ...prev, roomId }));
+  };
 
-      <View style={styles.gamesGrid}>
-        {Object.entries(GAMES_CONFIG).map(([gameId, game]) => (
-          <TouchableOpacity
-            key={gameId}
-            style={[
-              styles.gameCard,
-              formData.game === gameId && styles.gameCardSelected
-            ]}
-            onPress={() => handleGameSelect(gameId)}
-          >
-            <LinearGradient
-              colors={formData.game === gameId ? 
-                [game.color, `${game.color}DD`] : 
-                ['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.02)']}
-              style={styles.gameGradient}
-            >
-              <Ionicons name={game.icon} size={32} color="white" />
-              <Text style={[
-                styles.gameName,
-                formData.game === gameId && styles.gameNameSelected
-              ]}>
-                {game.name}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  );
+  const generatePassword = () => {
+    const password = Math.random().toString(36).substring(2, 6).toUpperCase();
+    setFormData(prev => ({ ...prev, password }));
+  };
 
-  const renderStep2 = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Match Type</Text>
-      <Text style={styles.stepSubtitle}>Select match format for {GAMES_CONFIG[formData.game]?.name}</Text>
-      
-      <View style={styles.matchTypesGrid}>
-        {GAMES_CONFIG[formData.game]?.modes.map((type) => (
-          <TouchableOpacity
-            key={type}
-            style={[
-              styles.matchTypeCard,
-              formData.matchType === type && styles.matchTypeCardSelected
-            ]}
-            onPress={() => handleMatchTypeSelect(type)}
-          >
-            <Text style={[
-              styles.matchTypeText,
-              formData.matchType === type && styles.matchTypeTextSelected
-            ]}>
-              {type}
-            </Text>
-            <Text style={styles.matchTypeSubtext}>
-              {type === 'Solo' ? '1 Player' : 
-               type === 'Duo' ? '2 Players' : 
-               type === 'Squad' ? '4 Players' : 'Custom Format'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+  // Game Configuration
+  const GAMES = {
+    freefire: { name: 'Free Fire', icon: 'flame', color: '#FF6B00' },
+    pubg: { name: 'PUBG Mobile', icon: 'game-controller', color: '#4CAF50' },
+    cod: { name: 'Call of Duty', icon: 'shield', color: '#2196F3' },
+    ludo: { name: 'Ludo King', icon: 'dice', color: '#9C27B0' },
+    bgmi: { name: 'BGMI', icon: 'phone-portrait', color: '#FF4444' }
+  };
+
+  const GAME_MODES = {
+    freefire: ['Solo', 'Duo', 'Squad', 'Clash Squad'],
+    pubg: ['Solo', 'Duo', 'Squad', 'TPP', 'FPP'],
+    cod: ['MP', 'Battle Royale', 'Zombies'],
+    ludo: ['Classic', 'Quick', 'Master'],
+    bgmi: ['Solo', 'Duo', 'Squad']
+  };
+
+  const GAME_MAPS = {
+    freefire: ['Bermuda', 'Purgatory', 'Kalahari', 'Bermuda Remastered'],
+    pubg: ['Erangel', 'Miramar', 'Sanhok', 'Vikendi'],
+    cod: ['Standoff', 'Crash', 'Raid', 'Firing Range'],
+    ludo: ['Classic Board'],
+    bgmi: ['Erangel', 'Miramar', 'Livik', 'Sanhok']
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="white" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create Match</Text>
+        <View style={styles.placeholder} />
       </View>
 
-      {/* AI Suggestions */}
-      <AISuggestionEngine
-        game={formData.game}
-        matchType={formData.matchType}
-        onSuggestionApply={handleAISuggestionApply}
-      />
-    </View>
-  );
-
-  const renderStep3 = () => (
-    <KeyboardAvoidingView 
-      style={styles.stepContainer}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <Text style={styles.stepTitle}>Match Details</Text>
-        <Text style={styles.stepSubtitle}>Configure your tournament settings</Text>
-
-        {/* Profit Calculator */}
-        {formData.entryFee && formData.maxParticipants && (
-          <ProfitCalculator
-            entryFee={formData.entryFee}
-            maxPlayers={formData.maxParticipants}
-            perKill={formData.perKill}
-          />
-        )}
+      <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionTitle}>🎮 Match Information</Text>
 
         {/* Match Title */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Match Title *</Text>
-          <TextInput
-            style={styles.textInput}
-            value={formData.title}
-            onChangeText={(value) => handleInputChange('title', value)}
-            placeholder="e.g., WEEKEND SHOWDOWN | SOLO MATCH"
-            placeholderTextColor="#666"
-          />
-        </View>
+        <Text style={styles.label}>Match Title *</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.title}
+          onChangeText={(text) => setFormData(prev => ({ ...prev, title: text }))}
+          placeholder="Enter match title"
+          placeholderTextColor="#888"
+        />
 
-        {/* Entry Fee & Participants */}
+        {/* Game Selection */}
+        <Text style={styles.label}>Select Game *</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gameScroll}>
+          <View style={styles.gameSelection}>
+            {Object.keys(GAMES).map((gameId) => (
+              <TouchableOpacity
+                key={gameId}
+                style={[
+                  styles.gameOption,
+                  formData.game === gameId && styles.gameOptionSelected
+                ]}
+                onPress={() => setFormData(prev => ({ 
+                  ...prev, 
+                  game: gameId,
+                  type: GAME_MODES[gameId]?.[0] || 'Solo',
+                  map: GAME_MAPS[gameId]?.[0] || 'Default'
+                }))}
+              >
+                <View style={[
+                  styles.gameOptionContent,
+                  formData.game === gameId && styles.gameOptionContentSelected
+                ]}>
+                  <Ionicons 
+                    name={GAMES[gameId].icon} 
+                    size={20} 
+                    color={formData.game === gameId ? 'white' : GAMES[gameId].color} 
+                  />
+                  <Text style={[
+                    styles.gameOptionText,
+                    formData.game === gameId && styles.gameOptionTextSelected
+                  ]}>
+                    {GAMES[gameId].name}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
+        {/* Game Type and Map */}
         <View style={styles.row}>
-          <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-            <Text style={styles.inputLabel}>Entry Fee (৳) *</Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.entryFee}
-              onChangeText={(value) => handleInputChange('entryFee', value)}
-              placeholder="10"
-              keyboardType="numeric"
-              placeholderTextColor="#666"
-            />
-            <Text style={styles.inputHint}>Min: ৳5, Max: ৳1000</Text>
+          <View style={styles.column}>
+            <Text style={styles.label}>Game Type</Text>
+            <View style={styles.pickerContainer}>
+              {GAME_MODES[formData.game]?.map((mode) => (
+                <TouchableOpacity
+                  key={mode}
+                  style={[
+                    styles.pickerOption,
+                    formData.type === mode && styles.pickerOptionSelected
+                  ]}
+                  onPress={() => setFormData(prev => ({ ...prev, type: mode }))}
+                >
+                  <Text style={[
+                    styles.pickerOptionText,
+                    formData.type === mode && styles.pickerOptionTextSelected
+                  ]}>
+                    {mode}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-
-          <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-            <Text style={styles.inputLabel}>Max Players *</Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.maxParticipants}
-              onChangeText={(value) => handleInputChange('maxParticipants', value)}
-              placeholder="50"
-              keyboardType="numeric"
-              placeholderTextColor="#666"
-            />
-            <Text style={styles.inputHint}>Min: 2, Max: 1000</Text>
-          </View>
-        </View>
-
-        {/* Prize Pool */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Total Prize Pool</Text>
-          <View style={styles.prizeContainer}>
-            <Text style={styles.prizeText}>৳ {formData.totalPrize || '0'}</Text>
-            <Text style={styles.prizeSubtext}>Auto-calculated (90% of total entry fees)</Text>
-          </View>
-        </View>
-
-        {/* Per Kill Prize */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Per Kill Prize (৳)</Text>
-          <TextInput
-            style={styles.textInput}
-            value={formData.perKill}
-            onChangeText={(value) => handleInputChange('perKill', value)}
-            placeholder="5"
-            keyboardType="numeric"
-            placeholderTextColor="#666"
-          />
-        </View>
-
-        {/* Map Selection */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Map</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.mapsContainer}>
-              {GAMES_CONFIG[formData.game]?.maps.map((map) => (
+          
+          <View style={styles.column}>
+            <Text style={styles.label}>Map</Text>
+            <View style={styles.pickerContainer}>
+              {GAME_MAPS[formData.game]?.map((map) => (
                 <TouchableOpacity
                   key={map}
                   style={[
-                    styles.mapButton,
-                    formData.map === map && styles.mapButtonSelected
+                    styles.pickerOption,
+                    formData.map === map && styles.pickerOptionSelected
                   ]}
-                  onPress={() => handleInputChange('map', map)}
+                  onPress={() => setFormData(prev => ({ ...prev, map }))}
                 >
                   <Text style={[
-                    styles.mapText,
-                    formData.map === map && styles.mapTextSelected
+                    styles.pickerOptionText,
+                    formData.map === map && styles.pickerOptionTextSelected
                   ]}>
                     {map}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
-          </ScrollView>
+          </View>
         </View>
 
-        {/* Match Date & Time - FIXED */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Match Date & Time *</Text>
-          <TouchableOpacity 
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Ionicons name="calendar" size={20} color="#ff8a00" />
-            <Text style={styles.dateText}>
-              {formData.matchDate.toLocaleString()}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Fixed DateTimePicker */}
-          <CustomDateTimePicker
-            value={formData.matchDate}
-            onChange={handleDateChange}
-            isVisible={showDatePicker}
-            onClose={handleDatePickerClose}
-          />
-        </View>
+        {/* Date & Time Selection */}
+        <Text style={styles.sectionTitle}>⏰ Timing Information</Text>
 
-        {/* 🆕 Manual Room Information Input */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Room Information *</Text>
-          
-          {!manualRoomInput ? (
+        <View style={styles.row}>
+          <View style={styles.column}>
+            <Text style={styles.label}>Schedule Time *</Text>
             <TouchableOpacity 
-              style={styles.manualInputButton}
-              onPress={handleManualRoomInput}
+              style={styles.dateInput}
+              onPress={() => openDatePicker('scheduleTime')}
             >
-              <Ionicons name="create-outline" size={20} color="#ff8a00" />
-              <Text style={styles.manualInputText}>Enter Room Details Manually</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.manualRoomContainer}>
-              <View style={styles.roomInputRow}>
-                <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.inputLabel}>Room ID *</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={formData.roomId}
-                    onChangeText={(value) => handleInputChange('roomId', value)}
-                    placeholder="Enter Room ID"
-                    placeholderTextColor="#666"
-                    maxLength={20}
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.inputLabel}>Password *</Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={formData.roomPassword}
-                    onChangeText={(value) => handleInputChange('roomPassword', value)}
-                    placeholder="Enter Password"
-                    placeholderTextColor="#666"
-                    maxLength={20}
-                    secureTextEntry
-                  />
-                </View>
-              </View>
-              <Text style={styles.roomInputHint}>
-                💡 Enter the Room ID and Password you created in the game
+              <Text style={styles.dateInputText}>
+                {new Date(formData.scheduleTime).toLocaleString()}
               </Text>
-            </View>
-          )}
+              <Ionicons name="calendar" size={20} color="#2962ff" />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.column}>
+            <Text style={styles.label}>End Time *</Text>
+            <TouchableOpacity 
+              style={styles.dateInput}
+              onPress={() => openDatePicker('endTime')}
+            >
+              <Text style={styles.dateInputText}>
+                {new Date(formData.endTime).toLocaleString()}
+              </Text>
+              <Ionicons name="time" size={20} color="#2962ff" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Additional Rules */}
-        <View style={styles.inputGroup}>
-          <View style={styles.rulesHeader}>
-            <Text style={styles.inputLabel}>Additional Rules</Text>
-            <SmartRuleGenerator
-              game={formData.game}
-              matchType={formData.matchType}
-              onRulesGenerate={(rules) => handleInputChange('rules', rules)}
+        {/* Financial Information */}
+        <Text style={styles.sectionTitle}>💰 Financial Information</Text>
+
+        <View style={styles.row}>
+          <View style={styles.column}>
+            <Text style={styles.label}>Entry Fee (৳) *</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.entryFee}
+              onChangeText={(text) => setFormData(prev => ({ 
+                ...prev, 
+                entryFee: text.replace(/[^0-9]/g, '')
+              }))}
+              placeholder="50"
+              keyboardType="numeric"
+              placeholderTextColor="#888"
             />
           </View>
-          <TextInput
-            style={[styles.textInput, styles.textArea]}
-            value={formData.rules}
-            onChangeText={(value) => handleInputChange('rules', value)}
-            placeholder="Any special rules or instructions..."
-            placeholderTextColor="#666"
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
-          />
+          <View style={styles.column}>
+            <Text style={styles.label}>Prize Pool (৳) *</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.prizePool}
+              onChangeText={(text) => setFormData(prev => ({ 
+                ...prev, 
+                prizePool: text.replace(/[^0-9]/g, '')
+              }))}
+              placeholder="500"
+              keyboardType="numeric"
+              placeholderTextColor="#888"
+            />
+          </View>
         </View>
 
-        {/* Advanced Settings */}
-        <TouchableOpacity 
-          style={styles.advancedToggle}
-          onPress={() => setShowAdvanced(!showAdvanced)}
-        >
-          <Ionicons 
-            name={showAdvanced ? "chevron-up" : "chevron-down"} 
-            size={20} 
-            color="#ff8a00" 
-          />
-          <Text style={styles.advancedToggleText}>
-            Advanced Settings
-          </Text>
-        </TouchableOpacity>
-
-        {showAdvanced && (
-          <View style={styles.advancedSettings}>
-            <Text style={styles.advancedTitle}>⚙️ Advanced Settings</Text>
-            
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Auto Approve Players</Text>
-                <Text style={styles.settingDescription}>Automatically approve join requests</Text>
-              </View>
-              <Switch
-                value={formData.advancedSettings.autoApprove}
-                onValueChange={(value) => setFormData(prev => ({
-                  ...prev,
-                  advancedSettings: { ...prev.advancedSettings, autoApprove: value }
-                }))}
-                trackColor={{ false: '#767577', true: '#81b0ff' }}
-                thumbColor={formData.advancedSettings.autoApprove ? '#ff8a00' : '#f4f3f4'}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>Require Screenshot Proof</Text>
-                <Text style={styles.settingDescription}>Players must submit match results</Text>
-              </View>
-              <Switch
-                value={formData.advancedSettings.requireScreenshot}
-                onValueChange={(value) => setFormData(prev => ({
-                  ...prev,
-                  advancedSettings: { ...prev.advancedSettings, requireScreenshot: value }
-                }))}
-                trackColor={{ false: '#767577', true: '#81b0ff' }}
-                thumbColor={formData.advancedSettings.requireScreenshot ? '#ff8a00' : '#f4f3f4'}
-              />
-            </View>
+        <View style={styles.row}>
+          <View style={styles.column}>
+            <Text style={styles.label}>Max Players *</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.maxPlayers}
+              onChangeText={(text) => setFormData(prev => ({ 
+                ...prev, 
+                maxPlayers: text.replace(/[^0-9]/g, '')
+              }))}
+              placeholder="100"
+              keyboardType="numeric"
+              placeholderTextColor="#888"
+            />
           </View>
-        )}
+          <View style={styles.column}>
+            <Text style={styles.label}>Per Kill Prize (৳)</Text>
+            <TextInput
+              style={styles.input}
+              value={formData.perKill}
+              onChangeText={(text) => setFormData(prev => ({ 
+                ...prev, 
+                perKill: text.replace(/[^0-9]/g, '')
+              }))}
+              placeholder="10"
+              keyboardType="numeric"
+              placeholderTextColor="#888"
+            />
+          </View>
+        </View>
 
-        {/* Submit Button */}
-        <TouchableOpacity
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
+        {/* Room Information */}
+        <Text style={styles.sectionTitle}>🔐 Room Information</Text>
+
+        <Text style={styles.label}>Room ID *</Text>
+        <View style={styles.inputWithButton}>
+          <TextInput
+            style={[styles.input, { flex: 1 }]}
+            value={formData.roomId}
+            onChangeText={(text) => setFormData(prev => ({ ...prev, roomId: text }))}
+            placeholder="Enter room ID"
+            placeholderTextColor="#888"
+          />
+          <TouchableOpacity style={styles.generateButton} onPress={generateRoomId}>
+            <Text style={styles.generateButtonText}>Generate</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.label}>Password *</Text>
+        <View style={styles.inputWithButton}>
+          <TextInput
+            style={[styles.input, { flex: 1 }]}
+            value={formData.password}
+            onChangeText={(text) => setFormData(prev => ({ ...prev, password: text }))}
+            placeholder="Enter password"
+            placeholderTextColor="#888"
+            secureTextEntry
+          />
+          <TouchableOpacity style={styles.generateButton} onPress={generatePassword}>
+            <Text style={styles.generateButtonText}>Generate</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Description and Rules */}
+        <Text style={styles.sectionTitle}>📝 Additional Information</Text>
+
+        <Text style={styles.label}>Description</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={formData.description}
+          onChangeText={(text) => setFormData(prev => ({ ...prev, description: text }))}
+          placeholder="Describe your match..."
+          placeholderTextColor="#888"
+          multiline
+          numberOfLines={3}
+          textAlignVertical="top"
+        />
+
+        <Text style={styles.label}>Rules</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={formData.rules}
+          onChangeText={(text) => setFormData(prev => ({ ...prev, rules: text }))}
+          placeholder="Enter match rules..."
+          placeholderTextColor="#888"
+          multiline
+          numberOfLines={2}
+          textAlignVertical="top"
+        />
+
+        {/* Create Button */}
+        <TouchableOpacity 
+          style={[styles.createButton, loading && styles.createButtonDisabled]}
+          onPress={handleCreateMatch}
           disabled={loading}
         >
-          <LinearGradient
-            colors={['#ff8a00', '#ff5252']}
-            style={styles.submitGradient}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <>
-                <Ionicons name="add-circle" size={24} color="white" />
-                <Text style={styles.submitText}>Create Match & Earn 1 Point</Text>
-              </>
-            )}
-          </LinearGradient>
+          {loading ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Text style={styles.createButtonText}>CREATE MATCH</Text>
+          )}
         </TouchableOpacity>
 
-        {/* Creator Rewards */}
-        <View style={styles.pointsInfo}>
-          <Ionicons name="trophy" size={20} color="#FFD700" />
-          <View style={styles.pointsTextContainer}>
-            <Text style={styles.pointsTitle}>Creator Rewards</Text>
-            <Text style={styles.pointsSubtitle}>
-              • 1 point per match creation{'\n'}
-              • 100 points = ৳10 withdrawal{'\n'}
-              • Bonus points for popular matches
-            </Text>
-          </View>
-        </View>
+        <Text style={styles.note}>
+          Note: Your match will be reviewed by admin before going live
+        </Text>
       </ScrollView>
-    </KeyboardAvoidingView>
-  );
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
-      <LinearGradient colors={['#1a237e', '#303f9f']} style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="white" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Match</Text>
-          <View style={styles.stepsIndicator}>
-            <Text style={styles.stepsText}>Step {currentStep} of 3</Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      {/* Progress Bar */}
-      <View style={styles.progressBar}>
-        <View 
-          style={[
-            styles.progressFill,
-            { width: `${(currentStep / 3) * 100}%` }
-          ]} 
-        />
-      </View>
-
-      {/* Content */}
-      <View style={styles.content}>
-        {currentStep === 1 && renderStep1()}
-        {currentStep === 2 && renderStep2()}
-        {currentStep === 3 && renderStep3()}
-      </View>
-
-      {/* Navigation Buttons */}
-      {currentStep > 1 && (
-        <View style={styles.navigationButtons}>
-          <TouchableOpacity
-            style={styles.navButton}
-            onPress={() => setCurrentStep(prev => prev - 1)}
-          >
-            <Ionicons name="arrow-back" size={20} color="#ff8a00" />
-            <Text style={styles.navButtonText}>Back</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Templates Modal */}
-      <Modal
-        visible={showTemplates}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowTemplates(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Quick Templates</Text>
-              <TouchableOpacity onPress={() => setShowTemplates(false)}>
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-            <MatchTemplates onTemplateSelect={handleTemplateSelect} />
-          </View>
-        </View>
-      </Modal>
+      {/* Custom Date Picker Modal */}
+      <CustomDatePicker 
+        visible={showDatePicker}
+        onConfirm={handleDateConfirm}
+        onCancel={handleDateCancel}
+        value={new Date(formData[currentDateField] || formData.scheduleTime)}
+      />
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#0a0c23',
+  container: { 
+    flex: 1, 
+    backgroundColor: '#0a0c23' 
   },
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 15,
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    padding: 16, 
+    backgroundColor: '#1a237e' 
   },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  backButton: { 
+    padding: 8 
   },
-  backButton: {
-    padding: 8,
+  headerTitle: { 
+    color: 'white', 
+    fontSize: 18, 
+    fontWeight: 'bold' 
   },
-  headerTitle: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
+  placeholder: { 
+    width: 40 
   },
-  stepsIndicator: {
-    backgroundColor: 'rgba(255,138,0,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+  formContainer: { 
+    flex: 1, 
+    padding: 16 
   },
-  stepsText: {
-    color: '#ff8a00',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  progressBar: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#ff8a00',
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  stepContainer: {
-    flex: 1,
-  },
-  stepTitle: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  stepSubtitle: {
-    color: '#b0b8ff',
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  // Templates
-  templatesButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(41,98,255,0.1)',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-    gap: 8,
-  },
-  templatesButtonText: {
-    color: '#2962ff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  templatesContainer: {
-    marginBottom: 20,
-  },
-  templatesTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  templatesList: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  templateCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
-    borderRadius: 12,
-    width: 140,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  templateName: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  templateGameFF: {
-    color: '#FF6B00',
-    fontSize: 10,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  templateGamePUBG: {
-    color: '#4CAF50',
-    fontSize: 10,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  templateStats: {
-    gap: 4,
-  },
-  templateStat: {
-    color: '#b0b8ff',
-    fontSize: 10,
-  },
-  // Games Grid
-  gamesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  gameCard: {
-    width: '48%',
-    height: 120,
-    marginBottom: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  gameGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  gameName: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  gameNameSelected: {
-    color: 'white',
-  },
-  gameCardSelected: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  // Match Types
-  matchTypesGrid: {
-    gap: 12,
-  },
-  matchTypeCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  matchTypeCardSelected: {
-    borderColor: '#ff8a00',
-    backgroundColor: 'rgba(255,138,0,0.1)',
-  },
-  matchTypeText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  matchTypeTextSelected: {
-    color: '#ff8a00',
-  },
-  matchTypeSubtext: {
-    color: '#b0b8ff',
-    fontSize: 14,
-  },
-  // AI Suggestions
-  aiSuggestionContainer: {
+  sectionTitle: { 
+    color: 'white', 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    marginBottom: 16, 
     marginTop: 20,
-    padding: 16,
-    backgroundColor: 'rgba(255,215,0,0.1)',
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FFD700',
+    textAlign: 'left' 
   },
-  aiTitle: {
-    color: '#FFD700',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 12,
+  label: { 
+    color: 'white', 
+    fontSize: 14, 
+    fontWeight: '600', 
+    marginBottom: 8, 
+    marginTop: 12 
   },
-  suggestionCard: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    padding: 12,
-    borderRadius: 8,
+  input: { 
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    borderWidth: 1, 
+    borderColor: '#2962ff', 
+    borderRadius: 8, 
+    padding: 12, 
+    color: 'white', 
+    fontSize: 16 
   },
-  suggestionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
-  },
-  suggestionType: {
-    color: '#FFD700',
-    fontSize: 14,
-    fontWeight: 'bold',
-    flex: 1,
-  },
-  confidenceBadge: {
-    color: '#4CAF50',
-    fontSize: 10,
-    fontWeight: 'bold',
-    backgroundColor: 'rgba(76,175,80,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  suggestionDesc: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-    marginBottom: 12,
-  },
-  suggestionStats: {
+  dateInput: {
+    backgroundColor: 'rgba(255,255,255,0.1)', 
+    borderWidth: 1, 
+    borderColor: '#2962ff', 
+    borderRadius: 8, 
+    padding: 12, 
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  statItem: {
     alignItems: 'center',
   },
-  statLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 10,
-    marginBottom: 2,
-  },
-  statValue: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  // Profit Calculator
-  profitCalculator: {
-    backgroundColor: 'rgba(76,175,80,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: '#4CAF50',
-  },
-  calculatorTitle: {
-    color: '#4CAF50',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  calculatorGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  calcItem: {
-    width: '48%',
-    alignItems: 'center',
-  },
-  calcLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  calcValue: {
-    color: 'white',
+  dateInputText: {
+    color: 'white', 
     fontSize: 14,
-    fontWeight: 'bold',
-  },
-  profitText: {
-    color: '#4CAF50',
-  },
-  // Form Inputs
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  textInput: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    padding: 16,
-    color: 'white',
-    fontSize: 16,
   },
   textArea: {
-    minHeight: 100,
+    height: 80,
     textAlignVertical: 'top',
   },
-  inputHint: {
-    color: '#666',
+  inputWithButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  generateButton: { 
+    backgroundColor: '#2962ff', 
+    paddingHorizontal: 12, 
+    paddingVertical: 12, 
+    borderRadius: 8, 
+    marginLeft: 8 
+  },
+  generateButtonText: { 
+    color: 'white', 
+    fontSize: 12, 
+    fontWeight: 'bold' 
+  },
+  createButton: { 
+    backgroundColor: '#2962ff', 
+    padding: 16, 
+    borderRadius: 8, 
+    alignItems: 'center', 
+    marginTop: 30,
+    marginBottom: 10
+  },
+  createButtonDisabled: { 
+    opacity: 0.6 
+  },
+  createButtonText: { 
+    color: 'white', 
+    fontSize: 16, 
+    fontWeight: 'bold' 
+  },
+  note: { 
+    color: '#FF9800', 
+    fontSize: 12, 
+    textAlign: 'center', 
+    marginTop: 16, 
+    fontStyle: 'italic' 
+  },
+  gameScroll: {
+    marginBottom: 10,
+  },
+  gameSelection: {
+    flexDirection: 'row',
+    paddingVertical: 5,
+  },
+  gameOption: {
+    marginRight: 10,
+  },
+  gameOptionSelected: {},
+  gameOptionContent: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+    minWidth: 80,
+  },
+  gameOptionContentSelected: {
+    backgroundColor: '#2962ff',
+    borderColor: '#2962ff',
+  },
+  gameOptionText: {
     fontSize: 12,
+    color: 'white',
     marginTop: 4,
+    fontWeight: '500',
+  },
+  gameOptionTextSelected: {
+    color: 'white',
   },
   row: {
     flexDirection: 'row',
+    marginHorizontal: -5,
+    marginBottom: 10,
   },
-  // Prize Container
-  prizeContainer: {
-    backgroundColor: 'rgba(255,215,0,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FFD700',
-  },
-  prizeText: {
-    color: '#FFD700',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  prizeSubtext: {
-    color: '#b0b8ff',
-    fontSize: 12,
-  },
-  // Maps
-  mapsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  mapButton: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  mapButtonSelected: {
-    borderColor: '#ff8a00',
-    backgroundColor: 'rgba(255,138,0,0.1)',
-  },
-  mapText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  mapTextSelected: {
-    color: '#ff8a00',
-  },
-  // Date Picker
-  dateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-  },
-  dateText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Manual Room Input
-  manualInputButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,138,0,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#ff8a00',
-  },
-  manualInputText: {
-    color: '#ff8a00',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  manualRoomContainer: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
-    borderRadius: 12,
-  },
-  roomInputRow: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  roomInputHint: {
-    color: '#b0b8ff',
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  // Rules Generator
-  rulesHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  ruleGenerator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,215,0,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 6,
-  },
-  ruleGeneratorText: {
-    color: '#FFD700',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  // Advanced Settings
-  advancedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: 'rgba(255,138,0,0.1)',
-    borderRadius: 8,
-    marginBottom: 12,
-    gap: 8,
-  },
-  advancedToggleText: {
-    color: '#ff8a00',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  advancedSettings: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  advancedTitle: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  settingItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  settingInfo: {
+  column: {
     flex: 1,
+    paddingHorizontal: 5,
   },
-  settingLabel: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  settingDescription: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-  },
-  // Submit Button
-  submitButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginTop: 20,
-    marginBottom: 16,
-  },
-  submitButtonDisabled: {
-    opacity: 0.6,
-  },
-  submitGradient: {
-    padding: 20,
-    alignItems: 'center',
+  pickerContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 5,
   },
-  submitText: {
+  pickerOption: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#444',
+    marginBottom: 5,
+  },
+  pickerOptionSelected: {
+    backgroundColor: '#2962ff',
+    borderColor: '#2962ff',
+  },
+  pickerOptionText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  pickerOptionTextSelected: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  // Custom Picker Styles
+  customPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  customPickerContent: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 15,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  customPickerHeader: {
+    marginBottom: 15,
+  },
+  customPickerTitle: {
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
-  // Points Info
-  pointsInfo: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,215,0,0.1)',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
-  },
-  pointsTextContainer: {
-    flex: 1,
-  },
-  pointsTitle: {
-    color: '#FFD700',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  pointsSubtitle: {
-    color: '#b0b8ff',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  // Navigation Buttons
-  navigationButtons: {
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-  },
-  navButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: 16,
-  },
-  navButtonText: {
-    color: '#ff8a00',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: '#1a1f3d',
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: '60%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  pickerContainer: {
     marginBottom: 20,
   },
-  modalTitle: {
+  pickerSection: {
+    marginBottom: 20,
+  },
+  pickerLabel: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 16,
+    marginBottom: 10,
+    fontWeight: '600',
+  },
+  pickerSubLabel: {
+    color: '#bbb',
+    fontSize: 12,
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  pickerColumn: {
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  pickerScroll: {
+    maxHeight: 150,
+    backgroundColor: '#2d2d2d',
+    borderRadius: 8,
+  },
+  pickerItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#444',
+    alignItems: 'center',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#2962ff',
+  },
+  pickerItemText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  pickerItemTextSelected: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  selectedDatePreview: {
+    backgroundColor: '#2d2d2d',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  selectedDateText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  customPickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#666',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmButton: {
+    backgroundColor: '#2962ff',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginLeft: 8,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
     fontWeight: 'bold',
   },
 });

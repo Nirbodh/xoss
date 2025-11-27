@@ -1,3 +1,4 @@
+// screens/DepositScreen.js - COMPLETELY FIXED VERSION
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -20,10 +21,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../context/AuthContext';
+import { useWallet } from '../context/WalletContext';
 
 const { width } = Dimensions.get('window');
 
+// ✅ Use the same BASE_URL as tournamentsAPI
+const API_URL = 'https://xoss.onrender.com/api';
+
 const DepositScreen = ({ navigation, route }) => {
+  const { user, token, getUserId } = useAuth();
+  const { balance, refreshWallet } = useWallet();
+  
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState(route.params?.defaultMethod || 'bkash');
   const [transactionId, setTransactionId] = useState('');
@@ -34,6 +43,9 @@ const DepositScreen = ({ navigation, route }) => {
   const [screenshot, setScreenshot] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [depositStatus, setDepositStatus] = useState('pending');
+  const [adminMessage, setAdminMessage] = useState('');
+  const [userId, setUserId] = useState('');
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -48,7 +60,7 @@ const DepositScreen = ({ navigation, route }) => {
       color: '#e2136e', 
       number: '01751332386',
       type: 'Personal',
-      instructions: ['Go to bKash app', 'Send Money', 'Enter Number', 'Enter Amount', 'Enter Reference: XOSS']
+      instructions: ['bKash app-এ যান', 'Send Money সিলেক্ট করুন', 'নাম্বার দিন', 'অ্যামাউন্ট দিন', 'Reference: XOSS দিন']
     },
     { 
       id: 'nagad', 
@@ -57,7 +69,7 @@ const DepositScreen = ({ navigation, route }) => {
       color: '#f60', 
       number: '01751332386',
       type: 'Personal',
-      instructions: ['Go to Nagad app', 'Send Money', 'Enter Number', 'Enter Amount', 'Enter Reference: XOSS']
+      instructions: ['Nagad app-এ যান', 'Send Money সিলেক্ট করুন', 'নাম্বার দিন', 'অ্যামাউন্ট দিন', 'Reference: XOSS দিন']
     },
     { 
       id: 'rocket', 
@@ -66,14 +78,16 @@ const DepositScreen = ({ navigation, route }) => {
       color: '#784bd1', 
       number: '01751332386',
       type: 'Personal',
-      instructions: ['Go to Rocket app', 'Send Money', 'Enter Number', 'Enter Amount', 'Enter Reference: XOSS']
+      instructions: ['Rocket app-এ যান', 'Send Money সিলেক্ট করুন', 'নাম্বার দিন', 'অ্যামাউন্ট দিন', 'Reference: XOSS দিন']
     },
   ];
 
   const quickAmounts = [100, 200, 500, 1000, 2000, 5000];
 
-  // Initialize animations
+  // Load user data
   useEffect(() => {
+    loadRecentDeposits();
+    
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -87,7 +101,6 @@ const DepositScreen = ({ navigation, route }) => {
       })
     ]).start();
 
-    // Pulse animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -102,42 +115,86 @@ const DepositScreen = ({ navigation, route }) => {
         })
       ])
     ).start();
-
-    loadRecentDeposits();
   }, []);
 
+  // ✅ FIXED: Set user ID from AuthContext
+  useEffect(() => {
+    if (user && getUserId) {
+      const currentUserId = getUserId();
+      setUserId(currentUserId);
+      console.log('👤 User ID from AuthContext:', currentUserId);
+      console.log('🔐 Token from AuthContext:', token ? 'Yes' : 'No');
+    }
+  }, [user, getUserId, token]);
+
+  // ✅ FIXED: Load recent deposits - REAL API CALL
   const loadRecentDeposits = async () => {
     try {
-      const transactions = JSON.parse(await AsyncStorage.getItem('walletTransactions') || '[]');
-      const deposits = transactions
-        .filter(t => t.type === 'deposit')
-        .slice(0, 3);
-      setRecentDeposits(deposits);
+      console.log('📊 Loading deposits...');
+      
+      const currentUserId = getUserId();
+      
+      if (!currentUserId) {
+        console.log('❌ User ID not available');
+        return;
+      }
+
+      if (!token) {
+        console.log('❌ No token available - user not authenticated');
+        return;
+      }
+
+      console.log('🔐 Using REAL token for deposits');
+      
+      // ✅ REAL API CALL - User's deposits
+      const response = await fetch(`${API_URL}/deposits/user/${currentUserId}?limit=3`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('📨 Deposits API response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Deposits loaded from API:', data.data?.length || 0);
+        setRecentDeposits(data.data || []);
+      } else {
+        console.log('❌ Deposits API failed:', response.status);
+        // Set empty array if API fails
+        setRecentDeposits([]);
+      }
     } catch (error) {
-      console.log('Error loading recent deposits:', error);
+      console.log('❌ Error loading deposits:', error);
+      setRecentDeposits([]);
     }
   };
 
-  // Simple clipboard function without expo-clipboard
+  // Copy to clipboard function
   const copyToClipboard = async () => {
     const selected = paymentMethods.find(m => m.id === method);
     if (selected) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setCopiedNumber(true);
-      Alert.alert('Number Copied!', `Phone number: ${selected.number}`);
+      Alert.alert('নাম্বার কপি হয়েছে!', `ফোন নাম্বার: ${selected.number}`);
       setTimeout(() => setCopiedNumber(false), 2000);
     }
   };
 
-  // Image Picker Functions
+  // ✅ FIXED: Image Picker with updated API
   const pickImage = async () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'We need camera roll permissions to upload screenshots');
+        Alert.alert(
+          'Permission Required',
+          'Sorry, we need camera roll permissions to select images!',
+          [{ text: 'OK' }]
+        );
         return;
       }
 
@@ -146,14 +203,17 @@ const DepositScreen = ({ navigation, route }) => {
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setScreenshot(result.assets[0]);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('সফল', 'ছবি সিলেক্ট হয়েছে!');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to pick image');
+      console.log('Image picker error:', error);
+      Alert.alert('ত্রুটি', 'ছবি নির্বাচন করতে ব্যর্থ হয়েছে');
     }
   };
 
@@ -164,7 +224,7 @@ const DepositScreen = ({ navigation, route }) => {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'We need camera permissions to take photos');
+        Alert.alert('অনুমতি প্রয়োজন', 'ক্যামেরা ব্যবহারের অনুমতি প্রয়োজন');
         return;
       }
 
@@ -172,6 +232,7 @@ const DepositScreen = ({ navigation, route }) => {
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
+        base64: true,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -179,7 +240,7 @@ const DepositScreen = ({ navigation, route }) => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to take photo');
+      Alert.alert('ত্রুটি', 'ছবি তুলতে ব্যর্থ হয়েছে');
     }
   };
 
@@ -188,91 +249,183 @@ const DepositScreen = ({ navigation, route }) => {
     setScreenshot(null);
   };
 
-  const uploadScreenshot = async () => {
-    if (!screenshot) return;
-
-    setUploading(true);
-    
+  // ✅ FIXED: Convert image to Base64
+  const convertImageToBase64 = async (imageUri) => {
     try {
-      // Simulate upload process
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // For React Native, we can use the base64 from image picker directly
+      if (screenshot?.base64) {
+        return `data:image/jpeg;base64,${screenshot.base64}`;
+      }
       
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Success', 'Screenshot uploaded successfully!');
-      setUploading(false);
+      // Fallback: fetch and convert
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve(reader.result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
     } catch (error) {
-      Alert.alert('Upload Failed', 'Please try again');
-      setUploading(false);
+      console.error('Image conversion error:', error);
+      throw error;
     }
   };
 
+  // ✅ FIXED: Create deposit request - REAL API CALL
+  const createDepositRequest = async (depositData) => {
+    try {
+      console.log('🔐 Preparing deposit request...');
+      
+      if (!token) {
+        throw new Error('User not authenticated. Please login again.');
+      }
+
+      console.log('🔐 Sending request with REAL token');
+      
+      // ✅ REAL API CALL - এখন ডেটাবেসে সেভ হবে
+      const response = await fetch(`${API_URL}/deposits`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(depositData)
+      });
+
+      console.log('📨 Deposit API response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Deposit failed: ${response.status} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Deposit created successfully in database');
+      return result;
+
+    } catch (error) {
+      console.error('❌ Deposit API Error:', error);
+      throw error;
+    }
+  };
+
+  // ✅ FIXED: Handle Deposit - COMPLETE VERSION
   const handleDeposit = async () => {
     const depositAmount = parseInt(amount);
     
+    // ✅ Check authentication with REAL TOKEN
+    if (!token) {
+      Alert.alert(
+        'লগিন প্রয়োজন', 
+        'দয়া করে আগে লগিন করুন',
+        [
+          { text: 'লগিন', onPress: () => navigation.navigate('Login') },
+          { text: 'বাতিল' }
+        ]
+      );
+      return;
+    }
+
+    const currentUserId = getUserId();
+    if (!currentUserId) {
+      Alert.alert('ত্রুটি', 'ইউজার আইডি পাওয়া যায়নি। দয়া করে আবার লগিন করুন।');
+      return;
+    }
+
+    // Validation
     if (!depositAmount || depositAmount < 10) {
-      Alert.alert('Error', 'Minimum deposit amount is ৳10');
+      Alert.alert('ত্রুটি', 'ন্যূনতম ডিপোজিট অ্যামাউন্ট ৳১০');
       return;
     }
 
     if (depositAmount > 50000) {
-      Alert.alert('Error', 'Maximum deposit amount is ৳50,000');
+      Alert.alert('ত্রুটি', 'সর্বোচ্চ ডিপোজিট অ্যামাউন্ট ৳৫০,০০০');
       return;
     }
 
     if (!transactionId.trim()) {
-      Alert.alert('Error', 'Please enter transaction ID');
+      Alert.alert('ত্রুটি', 'দয়া করে ট্রানজেকশন আইডি দিন');
       return;
     }
 
     if (transactionId.length < 8) {
-      Alert.alert('Error', 'Please enter a valid transaction ID (min 8 characters)');
+      Alert.alert('ত্রুটি', 'দয়া করে একটি বৈধ ট্রানজেকশন আইডি দিন (ন্যূনতম ৮ অক্ষর)');
       return;
     }
 
     if (!screenshot) {
-      Alert.alert('Proof Required', 'Please upload payment screenshot for verification');
+      Alert.alert('প্রুফ প্রয়োজন', 'ভেরিফিকেশনের জন্য পেমেন্ট স্ক্রিনশট আপলোড করুন');
       return;
     }
 
     setLoading(true);
+    setDepositStatus('processing');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    // Simulate API call
-    setTimeout(async () => {
-      try {
-        // Update balance
-        const currentBalance = parseInt(await AsyncStorage.getItem('walletBalance') || '1500');
-        const newBalance = currentBalance + depositAmount;
-        
-        // Save transaction
-        const newTransaction = {
-          id: Date.now(),
-          type: 'deposit',
-          amount: depositAmount,
-          description: `${method.toUpperCase()} Deposit`,
-          date: new Date().toLocaleString(),
-          status: 'completed',
-          method: method,
-          transactionId: transactionId,
-          screenshot: screenshot.uri,
-          timestamp: new Date().toISOString()
-        };
+    try {
+      // 1. Convert screenshot to Base64
+      setUploading(true);
+      const screenshotBase64 = await convertImageToBase64(screenshot.uri);
+      setUploading(false);
 
-        const currentTransactions = JSON.parse(await AsyncStorage.getItem('walletTransactions') || '[]');
-        const updatedTransactions = [newTransaction, ...currentTransactions];
+      // 2. Create deposit data according to BACKEND STRUCTURE
+      const depositData = {
+        amount: depositAmount,
+        method: method,
+        transactionId: transactionId,
+        screenshot: screenshotBase64
+      };
 
-        await AsyncStorage.setItem('walletBalance', newBalance.toString());
-        await AsyncStorage.setItem('walletTransactions', JSON.stringify(updatedTransactions));
+      console.log('📦 Sending deposit data to backend:', depositData);
 
-        // Show success modal
-        setShowSuccessModal(true);
-        
-      } catch (error) {
-        Alert.alert('Error', 'Deposit failed. Please try again.');
-      } finally {
-        setLoading(false);
+      // 3. Send to backend with REAL TOKEN
+      const result = await createDepositRequest(depositData);
+
+      if (result.success) {
+        setDepositStatus('pending');
+        setAdminMessage('আপনার ডিপোজিট রিকুয়েস্ট এডমিন ভেরিফিকেশনের জন্য প্রেরণ করা হয়েছে। ভেরিফিকেশন সময়: ৫-১৫ মিনিট');
+
+        Alert.alert(
+          'রিকুয়েস্ট প্রেরিত!',
+          'আপনার ডিপোজিট রিকুয়েস্ট সফলভাবে তৈরি হয়েছে। এডমিন ভেরিফিকেশনের পর টাকা আপনার ওয়ালেটে যোগ হবে।',
+          [{ 
+            text: 'ঠিক আছে', 
+            onPress: () => {
+              // Reset form
+              setAmount('');
+              setTransactionId('');
+              setScreenshot(null);
+              loadRecentDeposits();
+              refreshWallet(); // Refresh wallet balance
+            }
+          }]
+        );
+      } else {
+        throw new Error(result.message || 'Deposit request failed');
       }
-    }, 2000);
+
+    } catch (error) {
+      console.error('Deposit error details:', error);
+      
+      if (error.message.includes('Authentication failed') || error.message.includes('401')) {
+        Alert.alert(
+          'সেশন শেষ', 
+          'দয়া করে আবার লগিন করুন',
+          [{ text: 'লগিন', onPress: () => navigation.navigate('Login') }]
+        );
+      } else if (error.message.includes('Transaction ID already used')) {
+        Alert.alert('ত্রুটি', 'এই ট্রানজেকশন আইডি ইতিমধ্যে ব্যবহৃত হয়েছে। নতুন ট্রানজেকশন আইডি দিন।');
+      } else {
+        Alert.alert('ত্রুটি', error.message || 'ডিপোজিট রিকুয়েস্ট করতে সমস্যা হয়েছে। দয়া করে আবার চেষ্টা করুন।');
+      }
+    } finally {
+      setLoading(false);
+      setUploading(false);
+    }
   };
 
   const closeSuccessModal = () => {
@@ -280,13 +433,15 @@ const DepositScreen = ({ navigation, route }) => {
     setAmount('');
     setTransactionId('');
     setScreenshot(null);
+    setDepositStatus('pending');
+    setAdminMessage('');
     loadRecentDeposits();
     navigation.goBack();
   };
 
   const selectedMethod = paymentMethods.find(m => m.id === method);
 
-  // Animated Method Button Component
+  // ✅ FIXED: AnimatedMethodButton
   const AnimatedMethodButton = ({ paymentMethod }) => {
     const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -312,6 +467,7 @@ const DepositScreen = ({ navigation, route }) => {
         }}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
+        activeOpacity={0.8}
       >
         <Animated.View 
           style={[
@@ -332,12 +488,59 @@ const DepositScreen = ({ navigation, route }) => {
     );
   };
 
+  // Status Display Component
+  const StatusIndicator = () => {
+    if (depositStatus === 'pending') {
+      return null;
+    }
+
+    const statusConfig = {
+      processing: {
+        color: '#FFA500',
+        icon: 'time',
+        text: 'এডমিন ভেরিফিকেশন চলছে...',
+        message: adminMessage || 'আপনার ডিপোজিট রিকুয়েস্ট এডমিন ভেরিফিকেশনের জন্য প্রেরণ করা হয়েছে।'
+      },
+      approved: {
+        color: '#4CAF50',
+        icon: 'checkmark-circle',
+        text: 'ডিপোজিট Approved!',
+        message: adminMessage
+      },
+      rejected: {
+        color: '#ff4444',
+        icon: 'close-circle',
+        text: 'ডিপোজিট Rejected',
+        message: adminMessage
+      }
+    };
+
+    const config = statusConfig[depositStatus];
+
+    return (
+      <View style={[styles.statusContainer, { borderLeftColor: config.color }]}>
+        <View style={styles.statusHeader}>
+          <Ionicons name={config.icon} size={20} color={config.color} />
+          <Text style={[styles.statusTitle, { color: config.color }]}>{config.text}</Text>
+        </View>
+        <Text style={styles.statusMessage}>{config.message}</Text>
+        {depositStatus === 'processing' && (
+          <ActivityIndicator size="small" color="#FFA500" style={styles.statusLoader} />
+        )}
+      </View>
+    );
+  };
+
   return (
     <KeyboardAvoidingView 
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header with Animation */}
         <Animated.View 
           style={[
@@ -348,16 +551,29 @@ const DepositScreen = ({ navigation, route }) => {
             }
           ]}
         >
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()} 
+            style={styles.backButton}
+            activeOpacity={0.7}
+          >
             <Ionicons name="arrow-back" size={24} color="white" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Money to Wallet</Text>
+          <Text style={styles.headerTitle}>ওয়ালেটে মানি যোগ করুন</Text>
           <View style={{ width: 24 }} />
         </Animated.View>
 
+        {/* Current Balance Display */}
+        <View style={styles.balanceSection}>
+          <Text style={styles.balanceLabel}>বর্তমান ব্যালেন্স</Text>
+          <Text style={styles.balanceAmount}>৳{balance}</Text>
+        </View>
+
+        {/* Status Indicator */}
+        <StatusIndicator />
+
         {/* Payment Method Selection */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Select Payment Method</Text>
+          <Text style={styles.sectionTitle}>পেমেন্ট মেথড সিলেক্ট করুন</Text>
           <View style={styles.methodsGrid}>
             {paymentMethods.map((paymentMethod) => (
               <AnimatedMethodButton 
@@ -369,7 +585,7 @@ const DepositScreen = ({ navigation, route }) => {
 
           {/* Payment Instructions */}
           <View style={styles.instructionsBox}>
-            <Text style={styles.instructionsTitle}>How to Deposit:</Text>
+            <Text style={styles.instructionsTitle}>কিভাবে ডিপোজিট করবেন:</Text>
             {selectedMethod?.instructions.map((step, index) => (
               <View key={index} style={styles.instructionStep}>
                 <View style={styles.stepNumber}>
@@ -387,8 +603,12 @@ const DepositScreen = ({ navigation, route }) => {
               { transform: [{ scale: pulseAnim }] }
             ]}
           >
-            <Text style={styles.paymentNumberLabel}>Send Money to:</Text>
-            <TouchableOpacity onPress={copyToClipboard} style={styles.copyButton}>
+            <Text style={styles.paymentNumberLabel}>টাকা পাঠান এই নাম্বারে:</Text>
+            <TouchableOpacity 
+              onPress={copyToClipboard} 
+              style={styles.copyButton}
+              activeOpacity={0.7}
+            >
               <Text style={styles.paymentNumber}>{selectedMethod?.number}</Text>
               <Ionicons 
                 name={copiedNumber ? "checkmark" : "copy"} 
@@ -397,44 +617,50 @@ const DepositScreen = ({ navigation, route }) => {
               />
             </TouchableOpacity>
             <Text style={styles.paymentInstruction}>
-              Send exact amount via {selectedMethod?.name} app
+              {selectedMethod?.name} app-এর মাধ্যমে সঠিক অ্যামাউন্ট পাঠান
             </Text>
             <Text style={styles.paymentType}>
-              {selectedMethod?.type} Account
+              {selectedMethod?.type} অ্যাকাউন্ট
             </Text>
           </Animated.View>
         </View>
 
         {/* Amount Input */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Deposit Amount</Text>
+          <Text style={styles.sectionTitle}>ডিপোজিট অ্যামাউন্ট</Text>
           
           <View style={styles.amountInputContainer}>
             <Text style={styles.currencySymbol}>৳</Text>
             <TextInput
               style={styles.amountInput}
-              placeholder="0"
+              placeholder="০"
               placeholderTextColor="#999"
               value={amount}
               onChangeText={setAmount}
               keyboardType="numeric"
+              editable={depositStatus === 'pending'}
             />
           </View>
 
           {/* Quick Amount Buttons */}
-          <Text style={styles.quickAmountsTitle}>Quick Select</Text>
+          <Text style={styles.quickAmountsTitle}>কুইক সিলেক্ট</Text>
           <View style={styles.quickAmounts}>
             {quickAmounts.map((quickAmount) => (
               <TouchableOpacity
                 key={quickAmount}
                 style={[
                   styles.quickAmountButton,
-                  amount === quickAmount.toString() && styles.quickAmountActive
+                  amount === quickAmount.toString() && styles.quickAmountActive,
+                  depositStatus !== 'pending' && styles.quickAmountDisabled
                 ]}
                 onPress={() => {
-                  setAmount(quickAmount.toString());
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  if (depositStatus === 'pending') {
+                    setAmount(quickAmount.toString());
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
                 }}
+                disabled={depositStatus !== 'pending'}
+                activeOpacity={0.7}
               >
                 <Text style={styles.quickAmountText}>৳{quickAmount}</Text>
               </TouchableOpacity>
@@ -444,27 +670,31 @@ const DepositScreen = ({ navigation, route }) => {
 
         {/* Transaction ID */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Transaction ID</Text>
+          <Text style={styles.sectionTitle}>ট্রানজেকশন আইডি</Text>
           
           <TextInput
-            style={styles.transactionInput}
-            placeholder="Enter transaction ID from payment"
+            style={[
+              styles.transactionInput,
+              depositStatus !== 'pending' && styles.inputDisabled
+            ]}
+            placeholder="পেমেন্ট থেকে ট্রানজেকশন আইডি দিন"
             placeholderTextColor="#999"
             value={transactionId}
             onChangeText={setTransactionId}
             maxLength={20}
+            editable={depositStatus === 'pending'}
           />
           
           <Text style={styles.helperText}>
-            Find this in your {selectedMethod?.name} transaction history
+            এটি আপনার {selectedMethod?.name} ট্রানজেকশন হিস্ট্রিতে পাবেন
           </Text>
         </View>
 
         {/* Screenshot Upload Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Upload Payment Proof</Text>
+          <Text style={styles.sectionTitle}>পেমেন্ট প্রুফ আপলোড করুন</Text>
           <Text style={styles.uploadSubtitle}>
-            Take a screenshot of your successful payment for verification
+            ভেরিফিকেশনের জন্য আপনার সফল পেমেন্টের একটি স্ক্রিনশট আপলোড করুন
           </Text>
 
           {screenshot ? (
@@ -472,6 +702,8 @@ const DepositScreen = ({ navigation, route }) => {
               <TouchableOpacity 
                 style={styles.previewImageContainer}
                 onPress={() => setShowPreview(true)}
+                disabled={depositStatus !== 'pending'}
+                activeOpacity={0.8}
               >
                 <Image 
                   source={{ uri: screenshot.uri }} 
@@ -482,102 +714,98 @@ const DepositScreen = ({ navigation, route }) => {
                 </View>
               </TouchableOpacity>
               
-              <View style={styles.screenshotActions}>
+              {depositStatus === 'pending' && (
+                <View style={styles.screenshotActions}>
+                  <TouchableOpacity 
+                    style={styles.actionButton}
+                    onPress={removeScreenshot}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="trash" size={20} color="#ff4444" />
+                    <Text style={styles.actionTextRemove}>মুছুন</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : (
+            depositStatus === 'pending' && (
+              <View style={styles.uploadOptions}>
                 <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={removeScreenshot}
+                  style={styles.uploadOption}
+                  onPress={takePhoto}
+                  activeOpacity={0.8}
                 >
-                  <Ionicons name="trash" size={20} color="#ff4444" />
-                  <Text style={styles.actionTextRemove}>Remove</Text>
+                  <LinearGradient
+                    colors={['#2962ff', '#2196F3']}
+                    style={styles.uploadOptionIcon}
+                  >
+                    <Ionicons name="camera" size={28} color="white" />
+                  </LinearGradient>
+                  <Text style={styles.uploadOptionText}>ছবি তুলুন</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={uploadScreenshot}
-                  disabled={uploading}
+                  style={styles.uploadOption}
+                  onPress={pickImage}
+                  activeOpacity={0.8}
                 >
-                  {uploading ? (
-                    <ActivityIndicator size="small" color="#2962ff" />
-                  ) : (
-                    <Ionicons name="cloud-upload" size={20} color="#2962ff" />
-                  )}
-                  <Text style={styles.actionTextUpload}>
-                    {uploading ? 'Uploading...' : 'Upload'}
-                  </Text>
+                  <LinearGradient
+                    colors={['#4CAF50', '#45a049']}
+                    style={styles.uploadOptionIcon}
+                  >
+                    <Ionicons name="image" size={28} color="white" />
+                  </LinearGradient>
+                  <Text style={styles.uploadOptionText}>গ্যালারী থেকে নির্বাচন</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          ) : (
-            <View style={styles.uploadOptions}>
-              <TouchableOpacity 
-                style={styles.uploadOption}
-                onPress={takePhoto}
-              >
-                <LinearGradient
-                  colors={['#2962ff', '#2196F3']}
-                  style={styles.uploadOptionIcon}
-                >
-                  <Ionicons name="camera" size={28} color="white" />
-                </LinearGradient>
-                <Text style={styles.uploadOptionText}>Take Photo</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.uploadOption}
-                onPress={pickImage}
-              >
-                <LinearGradient
-                  colors={['#4CAF50', '#45a049']}
-                  style={styles.uploadOptionIcon}
-                >
-                  <Ionicons name="image" size={28} color="white" />
-                </LinearGradient>
-                <Text style={styles.uploadOptionText}>Choose from Gallery</Text>
-              </TouchableOpacity>
-            </View>
+            )
           )}
         </View>
 
         {/* Recent Deposits */}
         {recentDeposits.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Deposits</Text>
+            <Text style={styles.sectionTitle}>সাম্প্রতিক ডিপোজিট</Text>
             {recentDeposits.map((deposit, index) => (
-              <View key={deposit.id} style={styles.recentDeposit}>
+              <View key={deposit.id || deposit._id || index} style={[
+                styles.recentDeposit,
+                deposit.status === 'approved' && styles.depositCompleted,
+                deposit.status === 'rejected' && styles.depositRejected,
+                deposit.status === 'pending' && styles.depositPending
+              ]}>
                 <View style={styles.depositInfo}>
-                  <Text style={styles.depositMethod}>{deposit.method.toUpperCase()}</Text>
+                  <Text style={styles.depositMethod}>{deposit.method?.toUpperCase()}</Text>
                   <Text style={styles.depositAmount}>৳{deposit.amount}</Text>
                 </View>
-                <Text style={styles.depositDate}>{deposit.date}</Text>
-                <Text style={styles.depositStatus}>{deposit.status}</Text>
+                <Text style={styles.depositDate}>
+                  {new Date(deposit.createdAt).toLocaleDateString('bn-BD')}
+                </Text>
+                <View style={styles.depositStatusRow}>
+                  <Text style={[
+                    styles.depositStatus,
+                    deposit.status === 'approved' && styles.statusCompleted,
+                    deposit.status === 'rejected' && styles.statusRejected,
+                    deposit.status === 'pending' && styles.statusPending
+                  ]}>
+                    {deposit.status === 'approved' ? 'অনুমোদিত' : 
+                     deposit.status === 'rejected' ? 'বাতিল' : 
+                     'পেন্ডিং'}
+                  </Text>
+                </View>
               </View>
             ))}
           </View>
         )}
 
-        {/* Deposit Info */}
-        <View style={styles.infoBox}>
-          <Ionicons name="information-circle" size={20} color="#2962ff" />
-          <View style={styles.infoContent}>
-            <Text style={styles.infoTitle}>Instant Deposit</Text>
-            <Text style={styles.infoText}>
-              • Minimum deposit: ৳10{'\n'}
-              • Maximum deposit: ৳50,000{'\n'}
-              • Processed instantly{'\n'}
-              • 24/7 support available{'\n'}
-              • No hidden fees
-            </Text>
-          </View>
-        </View>
-
         {/* Deposit Button */}
         <TouchableOpacity 
           style={[
             styles.depositButton,
-            (loading || !amount || !transactionId || !screenshot) && styles.depositButtonDisabled
+            (loading || !amount || !transactionId || !screenshot || depositStatus !== 'pending') && styles.depositButtonDisabled
           ]}
           onPress={handleDeposit}
-          disabled={loading || !amount || !transactionId || !screenshot}
+          disabled={loading || !amount || !transactionId || !screenshot || depositStatus !== 'pending'}
+          activeOpacity={0.8}
         >
           <LinearGradient
             colors={['#4CAF50', '#45a049']}
@@ -589,22 +817,15 @@ const DepositScreen = ({ navigation, route }) => {
               <>
                 <Ionicons name="add-circle" size={20} color="white" />
                 <Text style={styles.depositButtonText}>
-                  Add ৳{amount || '0'} to Wallet
+                  {depositStatus === 'processing' ? 'ভেরিফাই হচ্ছে...' : 
+                   depositStatus !== 'pending' ? 'রিকুয়েস্ট প্রেরিত' : 
+                   `ওয়ালেটে ৳${amount || '০'} যোগ করুন`}
                 </Text>
               </>
             )}
           </LinearGradient>
         </TouchableOpacity>
 
-        {/* Support Info */}
-        <View style={styles.supportBox}>
-          <Text style={styles.supportText}>
-            💬 Need help? WhatsApp: +880123456789
-          </Text>
-          <Text style={styles.supportSubText}>
-            Response time: 5-10 minutes
-          </Text>
-        </View>
       </ScrollView>
 
       {/* Success Modal */}
@@ -619,16 +840,14 @@ const DepositScreen = ({ navigation, route }) => {
             <View style={styles.successIcon}>
               <Ionicons name="checkmark-circle" size={80} color="#4CAF50" />
             </View>
-            <Text style={styles.successTitle}>Deposit Successful! 🎉</Text>
-            <Text style={styles.successAmount}>৳{amount} added to your wallet</Text>
-            <Text style={styles.successMessage}>
-              Your funds are now available for gaming and withdrawals
-            </Text>
+            <Text style={styles.successTitle}>ডিপোজিট Approved! 🎉</Text>
+            <Text style={styles.successAmount}>৳{amount} আপনার ওয়ালেটে যোগ হয়েছে</Text>
             <TouchableOpacity 
               style={styles.successButton}
               onPress={closeSuccessModal}
+              activeOpacity={0.8}
             >
-              <Text style={styles.successButtonText}>Continue</Text>
+              <Text style={styles.successButtonText}>চালিয়ে যান</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -645,6 +864,7 @@ const DepositScreen = ({ navigation, route }) => {
           <TouchableOpacity 
             style={styles.previewClose}
             onPress={() => setShowPreview(false)}
+            activeOpacity={0.8}
           >
             <Ionicons name="close" size={30} color="white" />
           </TouchableOpacity>
@@ -667,8 +887,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0c23',
   },
+  scrollView: {
+    flex: 1,
+  },
   scrollContent: {
-    flexGrow: 1,
     paddingBottom: 30,
   },
   header: {
@@ -681,12 +903,57 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a237e',
   },
   backButton: {
-    padding: 5,
+    padding: 8,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
+  },
+  balanceSection: {
+    backgroundColor: 'rgba(255,138,0,0.1)',
+    margin: 15,
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff8a00',
+  },
+  balanceLabel: {
+    color: '#ff8a00',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  balanceAmount: {
+    color: 'white',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  statusContainer: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    margin: 15,
+    padding: 15,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  statusMessage: {
+    color: '#ccc',
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  statusLoader: {
+    marginTop: 10,
   },
   section: {
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -695,7 +962,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#2962ff20',
+    borderColor: 'rgba(41,98,255,0.1)',
   },
   sectionTitle: {
     color: 'white',
@@ -854,6 +1121,9 @@ const styles = StyleSheet.create({
     borderColor: '#2962ff',
     backgroundColor: 'rgba(41,98,255,0.2)',
   },
+  quickAmountDisabled: {
+    opacity: 0.5,
+  },
   quickAmountText: {
     color: 'white',
     fontWeight: 'bold',
@@ -868,13 +1138,15 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
   },
+  inputDisabled: {
+    opacity: 0.6,
+  },
   helperText: {
     color: '#ccc',
     fontSize: 12,
     marginTop: 8,
     fontStyle: 'italic',
   },
-  // Screenshot Upload Styles
   uploadSubtitle: {
     color: '#ccc',
     fontSize: 12,
@@ -946,19 +1218,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
-  actionTextUpload: {
-    color: '#2962ff',
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: 4,
-  },
   recentDeposit: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderLeftWidth: 3,
+  },
+  depositCompleted: {
     borderLeftColor: '#4CAF50',
+  },
+  depositRejected: {
+    borderLeftColor: '#ff4444',
+  },
+  depositPending: {
+    borderLeftColor: '#FFA500',
   },
   depositInfo: {
     flexDirection: 'row',
@@ -981,34 +1255,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 2,
   },
+  depositStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   depositStatus: {
-    color: '#4CAF50',
     fontSize: 11,
     fontWeight: 'bold',
   },
-  infoBox: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(41,98,255,0.1)',
-    margin: 15,
-    padding: 15,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2962ff',
+  statusCompleted: {
+    color: '#4CAF50',
   },
-  infoContent: {
-    flex: 1,
-    marginLeft: 10,
+  statusRejected: {
+    color: '#ff4444',
   },
-  infoTitle: {
-    color: '#2962ff',
-    fontWeight: 'bold',
-    marginBottom: 5,
-    fontSize: 16,
-  },
-  infoText: {
-    color: '#ccc',
-    fontSize: 12,
-    lineHeight: 18,
+  statusPending: {
+    color: '#FFA500',
   },
   depositButton: {
     margin: 15,
@@ -1035,21 +1298,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  supportBox: {
-    alignItems: 'center',
-    padding: 15,
-  },
-  supportText: {
-    color: '#2962ff',
-    fontWeight: 'bold',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  supportSubText: {
-    color: '#888',
-    fontSize: 12,
-  },
-  // Success Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.8)',
@@ -1081,13 +1329,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 15,
   },
-  successMessage: {
-    color: '#ccc',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 25,
-    lineHeight: 20,
-  },
   successButton: {
     backgroundColor: '#4CAF50',
     paddingVertical: 15,
@@ -1101,7 +1342,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  // Preview Modal Styles
   previewModal: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.9)',

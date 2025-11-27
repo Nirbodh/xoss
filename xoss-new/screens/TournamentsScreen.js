@@ -1,4 +1,4 @@
-// xoss-new/screens/TournamentsScreen.js
+// screens/TournamentsScreen.js - COMPLETE VERSION
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, 
@@ -13,7 +13,6 @@ import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../context/AuthContext';
 import { useWallet } from '../context/WalletContext';
 import { useTournaments } from '../context/TournamentContext';
-import { useMatches } from '../context/MatchContext'; // ✅ ADDED: MatchContext import
 
 const { width, height } = Dimensions.get('window');
 
@@ -348,43 +347,11 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
   );
 };
 
-// ✅ UPDATED: Debug Component integrated into TournamentsScreen
-const DebugSection = () => {
-  const { debugTournamentsAPI, tournaments, refreshTournaments } = useTournaments();
-
-  const handleDebugAPIs = async () => {
-    console.log('🔹 Debugging Combined API...');
-    
-    // API ডিবাগ
-    await debugTournamentsAPI();
-    
-    // লোকাল ডেটা অ্যানালাইসিস
-    const tournamentsCount = tournaments.filter(t => t.matchType === 'tournament').length;
-    const matchesCount = tournaments.filter(t => t.matchType === 'match').length;
-    
-    Alert.alert(
-      'Debug Information', 
-      `🏆 Tournaments: ${tournamentsCount}\n⚡ Matches: ${matchesCount}\n📊 Total: ${tournaments.length}`
-    );
-  };
-
-  return (
-    <TouchableOpacity 
-      style={styles.debugButton}
-      onPress={handleDebugAPIs}
-    >
-      <LinearGradient colors={['#FF4081', '#F50057']} style={styles.debugButtonGradient}>
-        <Ionicons name="bug" size={16} color="#fff" />
-        <Text style={styles.debugButtonText}>DEBUG DATA</Text>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-};
-
 // Main TournamentsScreen Component
 const TournamentsScreen = ({ navigation }) => {
   const { tournaments, loading, error, refreshTournaments, joinTournament } = useTournaments();
   const [refreshing, setRefreshing] = useState(false);
+  const [currentMainTab, setCurrentMainTab] = useState('all');
   const [currentGame, setCurrentGame] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -402,13 +369,17 @@ const TournamentsScreen = ({ navigation }) => {
     { id: 'ludo', name: 'Ludo King', icon: 'dice-five', color: '#9C27B0' }
   ];
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      refreshTournaments();
-    });
-    return unsubscribe;
-  }, [navigation]);
+  const mainTabs = [
+    { id: 'all', name: 'All Events', icon: 'grid' },
+    { id: 'matches', name: 'Matches', icon: 'flash' },
+    { id: 'tournaments', name: 'Tournaments', icon: 'trophy' }
+  ];
 
+  // Get matches and tournaments from context
+  const userMatches = tournaments.filter(t => t.matchType === 'match');
+  const userTournaments = tournaments.filter(t => t.matchType === 'tournament');
+
+  // Refresh function
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -416,6 +387,14 @@ const TournamentsScreen = ({ navigation }) => {
     setRefreshing(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
+
+  // Auto-refresh when screen focuses
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      refreshTournaments();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const handleJoinPress = async (tournament) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -471,14 +450,42 @@ const TournamentsScreen = ({ navigation }) => {
     }
   };
 
-  // Filter tournaments
-  const filteredMatches = tournaments.filter(match => {
-    if (!match) return false;
-    if (currentGame !== 'all' && match.game !== currentGame) return false;
-    if (searchQuery && !match.title?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return match.status === 'upcoming' || match.status === 'live';
-  });
+  // Filtering logic
+  const getFilteredData = () => {
+    let data = [];
+    
+    // Main tab filtering
+    if (currentMainTab === 'matches') {
+      data = userMatches;
+    } else if (currentMainTab === 'tournaments') {
+      data = userTournaments;
+    } else {
+      data = tournaments;
+    }
+    
+    // Game filtering
+    if (currentGame !== 'all') {
+      data = data.filter(match => match.game === currentGame);
+    }
+    
+    // Search filtering
+    if (searchQuery) {
+      data = data.filter(match => 
+        match.title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    // Status filtering - show upcoming and live only
+    data = data.filter(match => 
+      match.status === 'upcoming' || match.status === 'live'
+    );
+    
+    return data;
+  };
 
+  const filteredMatches = getFilteredData();
+
+  // Sort by status and time
   const sortedMatches = [...filteredMatches].sort((a, b) => {
     if (a.status === 'live' && b.status !== 'live') return -1;
     if (a.status !== 'live' && b.status === 'live') return 1;
@@ -488,12 +495,14 @@ const TournamentsScreen = ({ navigation }) => {
     return 0;
   });
 
+  // Header animations
   const headerBackground = scrollY.interpolate({
     inputRange: [0, 100],
     outputRange: ['rgba(26, 35, 126, 1)', 'rgba(26, 35, 126, 0.95)'],
     extrapolate: 'clamp',
   });
 
+  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -510,6 +519,7 @@ const TournamentsScreen = ({ navigation }) => {
     );
   }
 
+  // Loading state
   if (loading && tournaments.length === 0) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -536,22 +546,23 @@ const TournamentsScreen = ({ navigation }) => {
             </View>
             
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerActionButton} onPress={() => setShowSearch(!showSearch)}>
+              <TouchableOpacity 
+                style={styles.headerActionButton}
+                onPress={() => navigation.navigate('CreateMatch')}
+              >
+                <Ionicons name="add" size={22} color="white" />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.headerActionButton}
+                onPress={() => setShowSearch(!showSearch)}
+              >
                 <Ionicons name="search" size={22} color="white" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.headerActionButton} onPress={() => setShowQuickJoin(true)}>
+              <TouchableOpacity 
+                style={styles.headerActionButton}
+                onPress={() => setShowQuickJoin(true)}
+              >
                 <Ionicons name="rocket" size={22} color="white" />
-              </TouchableOpacity>
-              {/* ✅ ADDED: Debug Button in Header */}
-              <TouchableOpacity style={styles.headerActionButton} onPress={() => {
-                console.log('🔹 Debugging APIs...');
-                const { debugTournamentsAPI } = useTournaments();
-                const { debugMatchesAPI } = useMatches();
-                debugTournamentsAPI();
-                if (debugMatchesAPI) debugMatchesAPI();
-                Alert.alert('Debug Started', 'Check console for API data');
-              }}>
-                <Ionicons name="bug" size={22} color="white" />
               </TouchableOpacity>
             </View>
           </View>
@@ -587,7 +598,10 @@ const TournamentsScreen = ({ navigation }) => {
               </View>
             </View>
             
-            <TouchableOpacity style={styles.walletBalance} onPress={() => navigation.navigate('Wallet')}>
+            <TouchableOpacity 
+              style={styles.walletBalance}
+              onPress={() => navigation.navigate('Wallet')}
+            >
               <Ionicons name="wallet" size={16} color="#4CAF50" />
               <Text style={styles.balanceText}>৳ {balance || '1,250'}</Text>
             </TouchableOpacity>
@@ -595,12 +609,58 @@ const TournamentsScreen = ({ navigation }) => {
         </View>
       </Animated.View>
 
-      {/* Game Filter Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterSection} contentContainerStyle={styles.filterContainer}>
+      {/* Main Tabs - All Events, Matches, Tournaments */}
+      <View style={styles.mainTabSection}>
+        <View style={styles.mainTabs}>
+          {mainTabs.map((tab) => (
+            <TouchableOpacity
+              key={tab.id}
+              style={[
+                styles.mainTab,
+                currentMainTab === tab.id && styles.mainTabActive
+              ]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setCurrentMainTab(tab.id);
+                setCurrentGame('all');
+              }}
+            >
+              <Ionicons 
+                name={tab.icon} 
+                size={16} 
+                color={currentMainTab === tab.id ? 'white' : '#b0b8ff'} 
+              />
+              <Text style={[
+                styles.mainTabText,
+                currentMainTab === tab.id && styles.mainTabTextActive
+              ]}>
+                {tab.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        <Text style={styles.matchesCount}>
+          {sortedMatches.length} {currentMainTab === 'matches' ? 'matches' : 
+                                   currentMainTab === 'tournaments' ? 'tournaments' : 'events'} found
+          {currentGame !== 'all' && ` in ${getGameDisplayName(currentGame)}`}
+        </Text>
+      </View>
+
+      {/* Game Filter Tabs - HEIGHT REDUCED */}
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterSection}
+        contentContainerStyle={styles.filterContainer}
+      >
         {games.map((game) => (
           <TouchableOpacity
             key={game.id}
-            style={[styles.gameFilter, currentGame === game.id && styles.gameFilterActive]}
+            style={[
+              styles.gameFilter,
+              currentGame === game.id && styles.gameFilterActive
+            ]}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setCurrentGame(game.id);
@@ -610,8 +670,15 @@ const TournamentsScreen = ({ navigation }) => {
               colors={currentGame === game.id ? ['#2962ff', '#448AFF'] : ['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
               style={styles.gameFilterGradient}
             >
-              <Ionicons name={game.icon} size={18} color={currentGame === game.id ? 'white' : '#b0b8ff'} />
-              <Text style={[styles.gameFilterText, currentGame === game.id && styles.gameFilterTextActive]}>
+              <Ionicons 
+                name={game.icon} 
+                size={16} 
+                color={currentGame === game.id ? 'white' : '#b0b8ff'} 
+              />
+              <Text style={[
+                styles.gameFilterText,
+                currentGame === game.id && styles.gameFilterTextActive
+              ]}>
                 {game.name}
               </Text>
             </LinearGradient>
@@ -619,22 +686,22 @@ const TournamentsScreen = ({ navigation }) => {
         ))}
       </ScrollView>
 
-      {/* ✅ ADDED: Debug Button Section */}
-      <View style={styles.debugSection}>
-        <DebugSection />
-      </View>
-
-      {/* Matches Count */}
-      <View style={styles.matchesCountContainer}>
-        <Text style={styles.matchesCount}>{sortedMatches.length} matches found</Text>
-      </View>
-
       {/* Matches List */}
       <Animated.ScrollView
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2962ff']} tintColor="#2962ff" />}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            colors={['#2962ff']}
+            tintColor="#2962ff"
+          />
+        }
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: false }
+        )}
         scrollEventThrottle={16}
       >
         <View style={styles.matchesContainer}>
@@ -652,11 +719,19 @@ const TournamentsScreen = ({ navigation }) => {
           {sortedMatches.length === 0 && !loading && (
             <View style={styles.noMatchesFound}>
               <Ionicons name="trophy-outline" size={64} color="#2962ff" />
-              <Text style={styles.noMatchesText}>No matches found</Text>
-              <Text style={styles.noMatchesSubtext}>
-                {searchQuery ? 'Try a different search' : 'Check back later for new tournaments'}
+              <Text style={styles.noMatchesText}>
+                {currentGame !== 'all' 
+                  ? `No ${getGameDisplayName(currentGame)} ${currentMainTab} found` 
+                  : `No ${currentMainTab} found`
+                }
               </Text>
-              <TouchableOpacity style={styles.refreshButton} onPress={refreshTournaments}>
+              <Text style={styles.noMatchesSubtext}>
+                {searchQuery ? 'Try a different search' : 'Check back later for new events'}
+              </Text>
+              <TouchableOpacity 
+                style={styles.refreshButton}
+                onPress={refreshTournaments}
+              >
                 <Text style={styles.refreshButtonText}>Refresh</Text>
               </TouchableOpacity>
             </View>
@@ -667,13 +742,16 @@ const TournamentsScreen = ({ navigation }) => {
       {/* Quick Join Modal */}
       <QuickJoinModal
         visible={showQuickJoin}
-        matches={tournaments.filter(match => !match.registered && match.status === 'upcoming' && match.spotsLeft > 0)}
+        matches={userMatches}
         onClose={() => setShowQuickJoin(false)}
         onJoin={handleJoinPress}
       />
 
       {/* Floating Refresh Button */}
-      <TouchableOpacity style={styles.floatingRefresh} onPress={refreshTournaments}>
+      <TouchableOpacity 
+        style={styles.floatingRefresh}
+        onPress={refreshTournaments}
+      >
         <Ionicons name="refresh" size={20} color="white" />
       </TouchableOpacity>
     </SafeAreaView>
@@ -681,133 +759,602 @@ const TournamentsScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#0a0c23' },
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  errorText: { color: '#FF6B6B', fontSize: 18, fontWeight: 'bold', marginTop: 16, textAlign: 'center' },
-  errorSubtext: { color: '#b0b8ff', fontSize: 14, marginTop: 8, textAlign: 'center' },
-  retryButton: { backgroundColor: '#2962ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
-  retryButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, borderBottomLeftRadius: 25, borderBottomRightRadius: 25 },
-  headerContent: { marginTop: 10 },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  logoContainer: { alignItems: 'flex-start' },
-  logoText: { fontSize: 28, fontWeight: 'bold', color: 'white' },
-  logoSubtitle: { fontSize: 12, color: '#2962ff', fontWeight: '600', marginTop: 2 },
-  headerActions: { flexDirection: 'row', gap: 10 },
-  headerActionButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 12, marginBottom: 15 },
-  searchInput: { flex: 1, color: 'white', fontSize: 14, marginLeft: 10 },
-  statusBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  userInfo: { flexDirection: 'row', alignItems: 'center' },
-  userAvatar: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  userName: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  userLevel: { color: '#b0b8ff', fontSize: 12 },
-  walletBalance: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  balanceText: { color: '#4CAF50', fontSize: 14, fontWeight: 'bold', marginLeft: 6 },
-  filterSection: { paddingVertical: 12, backgroundColor: 'rgba(255,255,255,0.02)' },
-  filterContainer: { paddingHorizontal: 15 },
-  gameFilter: { marginRight: 8, borderRadius: 16, overflow: 'hidden' },
-  gameFilterGradient: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16 },
-  gameFilterText: { color: '#b0b8ff', fontSize: 12, fontWeight: 'bold', marginLeft: 6 },
-  gameFilterTextActive: { color: 'white' },
-  gameFilterActive: { shadowColor: '#2962ff', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-  
-  // ✅ ADDED: Debug Section Styles
-  debugSection: { 
-    paddingHorizontal: 20, 
-    paddingVertical: 8, 
-    alignItems: 'flex-end' 
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#0a0c23',
   },
-  debugButton: { 
-    borderRadius: 10, 
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    color: '#b0b8ff',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+  },
+  headerContent: {
+    marginTop: 10,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  logoContainer: {
+    alignItems: 'flex-start',
+  },
+  logoText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  logoSubtitle: {
+    fontSize: 12,
+    color: '#2962ff',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  headerActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 15,
+  },
+  searchInput: {
+    flex: 1,
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 10,
+  },
+  statusBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  userName: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  userLevel: {
+    color: '#b0b8ff',
+    fontSize: 12,
+  },
+  walletBalance: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  balanceText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  // Main Tabs Section
+  mainTabSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  mainTabs: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 8,
+  },
+  mainTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  mainTabActive: {
+    backgroundColor: '#2962ff',
+  },
+  mainTabText: {
+    color: '#b0b8ff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  mainTabTextActive: {
+    color: 'white',
+  },
+  matchesCount: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  // Game Filter Tabs - HEIGHT REDUCED
+  filterSection: {
+    paddingVertical: 8, // Reduced from 12
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    maxHeight: 50, // Reduced from 70
+  },
+  filterContainer: {
+    paddingHorizontal: 15,
+  },
+  gameFilter: {
+    marginRight: 8,
+    borderRadius: 16,
     overflow: 'hidden',
-    alignSelf: 'flex-end'
+    height: 36, // Reduced from 50
+    minWidth: 90, // Reduced from 100
   },
-  debugButtonGradient: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    gap: 6 
+  gameFilterGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6, // Reduced from 8
+    borderRadius: 16,
+    height: '100%',
+    gap: 6, // Reduced from 8
   },
-  debugButtonText: { 
-    color: 'white', 
-    fontSize: 12, 
-    fontWeight: 'bold' 
+  gameFilterText: {
+    color: '#b0b8ff',
+    fontSize: 11, // Reduced from 12
+    fontWeight: 'bold',
+    marginLeft: 4, // Reduced from 6
   },
-
-  matchesCountContainer: { paddingHorizontal: 20, paddingVertical: 12 },
-  matchesCount: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  scrollView: { flex: 1 },
-  matchesContainer: { padding: 16 },
-  tournamentCard: { marginBottom: 16, borderRadius: 16, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8 },
-  cardGradient: { padding: 16 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-  gameInfo: { flexDirection: 'row', alignItems: 'flex-start', flex: 1 },
-  gameIconImage: { width: 40, height: 40, borderRadius: 8, marginRight: 12 },
-  gameTextContainer: { flex: 1 },
-  gameName: { color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '500', marginBottom: 4 },
-  tournamentTitle: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  matchTypeBadge: { color: '#FFD700', fontSize: 10, fontWeight: 'bold', marginTop: 2 },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, marginLeft: 8 },
-  statusText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  detailsContainer: { marginBottom: 16 },
-  detailsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  detailItem: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
-  detailLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 4, marginBottom: 2 },
-  detailValue: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  progressSection: { marginBottom: 16 },
-  progressBar: { height: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 3, overflow: 'hidden', marginBottom: 4 },
-  progressFill: { height: '100%', borderRadius: 3 },
-  progressText: { color: 'rgba(255,255,255,0.7)', fontSize: 12, textAlign: 'center' },
-  actionButtons: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
-  leftButtons: { flex: 2, flexDirection: 'row', gap: 8 },
-  detailsButton: { flex: 1, borderRadius: 10, overflow: 'hidden' },
-  roomCodeButton: { flex: 1, borderRadius: 10, overflow: 'hidden' },
-  largeButtonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 8 },
-  largeButtonText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  joinButton: { flex: 1, borderRadius: 10, overflow: 'hidden', maxWidth: 100 },
-  liveJoinButton: { flex: 1, borderRadius: 10, overflow: 'hidden', maxWidth: 100 },
-  joinButtonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 6 },
-  joinButtonText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  registeredBadge: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(76, 175, 80, 0.2)', paddingVertical: 12, borderRadius: 10, gap: 6, maxWidth: 120 },
-  registeredText: { color: '#4CAF50', fontSize: 12, fontWeight: 'bold' },
-  completedBadge: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(33, 150, 243, 0.2)', paddingVertical: 12, borderRadius: 10, gap: 6, maxWidth: 100 },
-  completedText: { color: '#2196F3', fontSize: 12, fontWeight: 'bold' },
-  liveIndicator: { position: 'absolute', top: 12, right: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF4444', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, gap: 4 },
-  livePulse: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'white' },
-  liveIndicatorText: { color: 'white', fontSize: 10, fontWeight: 'bold' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  loadingText: { color: '#2962ff', fontSize: 16, marginTop: 16 },
-  noMatchesFound: { alignItems: 'center', padding: 40 },
-  noMatchesText: { color: '#2962ff', fontSize: 18, fontWeight: 'bold', marginTop: 16, textAlign: 'center' },
-  noMatchesSubtext: { color: 'rgba(255,255,255,0.7)', fontSize: 14, marginTop: 8, textAlign: 'center' },
-  refreshButton: { backgroundColor: '#2962ff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
-  refreshButtonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
-  floatingRefresh: { position: 'absolute', bottom: 24, right: 24, width: 50, height: 50, borderRadius: 25, backgroundColor: '#2962ff', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject },
-  quickJoinModal: { backgroundColor: '#0a0c23', borderTopLeftRadius: 25, borderTopRightRadius: 25, maxHeight: '80%' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', color: 'white' },
-  quickJoinList: { padding: 16 },
-  quickJoinItem: { marginBottom: 12, borderRadius: 16, overflow: 'hidden' },
-  quickJoinGradient: { padding: 16 },
-  quickJoinContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  quickJoinInfo: { flex: 1 },
-  quickJoinTitle: { fontSize: 16, fontWeight: 'bold', color: 'white', marginBottom: 4 },
-  quickJoinGame: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginBottom: 8 },
-  quickJoinDetails: { flexDirection: 'row', gap: 12 },
-  quickJoinPrize: { fontSize: 14, color: '#FFD700', fontWeight: 'bold' },
-  quickJoinFee: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
-  quickJoinSpots: { fontSize: 12, color: '#4CAF50' },
-  quickJoinAction: { marginLeft: 12 },
-  quickJoinButton: { backgroundColor: '#4CAF50', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  quickJoinButtonText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
-  noMatchesContainer: { alignItems: 'center', padding: 40 },
-  noMatchesText: { color: '#666', fontSize: 18, fontWeight: 'bold', marginTop: 16 },
-  noMatchesSubtext: { color: '#666', fontSize: 14, marginTop: 8, textAlign: 'center' },
+  gameFilterTextActive: {
+    color: 'white',
+  },
+  gameFilterActive: {
+    shadowColor: '#2962ff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  matchesContainer: {
+    padding: 16,
+  },
+  tournamentCard: {
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  cardGradient: {
+    padding: 16,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  gameInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flex: 1,
+  },
+  gameIconImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  gameTextContainer: {
+    flex: 1,
+  },
+  gameName: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  tournamentTitle: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  matchTypeBadge: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  detailsContainer: {
+    marginBottom: 16,
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  detailItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  detailLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  detailValue: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  progressSection: {
+    marginBottom: 16,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  leftButtons: {
+    flex: 2,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  detailsButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  roomCodeButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  largeButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  largeButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  joinButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    maxWidth: 100,
+  },
+  liveJoinButton: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    maxWidth: 100,
+  },
+  joinButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 6,
+  },
+  joinButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  registeredBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+    maxWidth: 120,
+  },
+  registeredText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  completedBadge: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(33, 150, 243, 0.2)',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+    maxWidth: 100,
+  },
+  completedText: {
+    color: '#2196F3',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  liveIndicator: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF4444',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  livePulse: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'white',
+  },
+  liveIndicatorText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    color: '#2962ff',
+    fontSize: 16,
+    marginTop: 16,
+  },
+  noMatchesFound: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  noMatchesText: {
+    color: '#2962ff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  noMatchesSubtext: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  refreshButton: {
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  refreshButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  floatingRefresh: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#2962ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  quickJoinModal: {
+    backgroundColor: '#0a0c23',
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  quickJoinList: {
+    padding: 16,
+  },
+  quickJoinItem: {
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  quickJoinGradient: {
+    padding: 16,
+  },
+  quickJoinContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quickJoinInfo: {
+    flex: 1,
+  },
+  quickJoinTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 4,
+  },
+  quickJoinGame: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 8,
+  },
+  quickJoinDetails: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  quickJoinPrize: {
+    fontSize: 14,
+    color: '#FFD700',
+    fontWeight: 'bold',
+  },
+  quickJoinFee: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  quickJoinSpots: {
+    fontSize: 12,
+    color: '#4CAF50',
+  },
+  quickJoinAction: {
+    marginLeft: 12,
+  },
+  quickJoinButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  quickJoinButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  noMatchesContainer: {
+    alignItems: 'center',
+    padding: 40,
+  },
+  noMatchesText: {
+    color: '#666',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  noMatchesSubtext: {
+    color: '#666',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
 });
 
 export default TournamentsScreen;

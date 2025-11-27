@@ -1,10 +1,13 @@
-// navigation/AppNavigator.js - COMPLETELY FIXED VERSION
+// navigation/AppNavigator.js - UPDATED WITH AUTH SCREENS
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { Platform, StatusBar, View } from 'react-native';
+import { Platform, StatusBar, View, ActivityIndicator, Text } from 'react-native';
+
+// ✅ Import useAuth from context
+import { useAuth } from '../context/AuthContext';
 
 // Import screens
 import EnhancedHomeScreen from '../screens/EnhancedHomeScreen';
@@ -30,8 +33,28 @@ import CreateMatchScreen from '../screens/CreateMatchScreen';
 import PrivacySecurityScreen from '../screens/PrivacySecurityScreen';
 import PaymentMethodsScreen from '../screens/PaymentMethodsScreen';
 
+// ✅ Import Auth Screens
+import LoginScreen from '../screens/LoginScreen';
+import RegisterScreen from '../screens/RegisterScreen';
+
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
+
+// ✅ Auth Stack - Login and Register screens
+function AuthStack() {
+  return (
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        animationEnabled: true 
+      }}
+      initialRouteName="Login"
+    >
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+    </Stack.Navigator>
+  );
+}
 
 // Home Stack
 function HomeStack() {
@@ -154,10 +177,31 @@ function MainTabs() {
   );
 }
 
+// ✅ Root Navigator - Handles Auth and Main App
 export default function AppNavigator() {
+  const { isAuthenticated, isLoading } = useAuth(); // ✅ Now useAuth is imported
+
+  // Show loading while checking auth state
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0a0c23' }}>
+        <ActivityIndicator size="large" color="#2962ff" />
+        <Text style={{ color: 'white', marginTop: 10 }}>Loading XOSS Gaming...</Text>
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer>
-      <MainTabs />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {isAuthenticated ? (
+          // ✅ User is authenticated - Show Main App
+          <Stack.Screen name="MainApp" component={MainTabs} />
+        ) : (
+          // ✅ User is not authenticated - Show Auth Screens
+          <Stack.Screen name="Auth" component={AuthStack} />
+        )}
+      </Stack.Navigator>
     </NavigationContainer>
   );
 }

@@ -1,10 +1,9 @@
+// api/tournamentsAPI.js - COMPLETELY FIXED VERSION
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// ✅ LOCAL DEVELOPMENT URL
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'https://xoss.onrender.com/api'; // ✅ FIXED URL
 
-// Create axios instance with default config
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 15000,
@@ -13,16 +12,21 @@ const api = axios.create({
   }
 });
 
-// Add auth token to requests
+// ✅ IMPROVED Auth Interceptor
 api.interceptors.request.use(
   async (config) => {
     try {
       const token = await AsyncStorage.getItem('token');
+      console.log('🔑 Token from storage:', token ? 'Found' : 'Not found');
+      
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
+        console.log('✅ Token attached to request');
+      } else {
+        console.warn('⚠️ No token found for request');
       }
     } catch (error) {
-      console.error('Error getting token from AsyncStorage:', error);
+      console.error('❌ Token interceptor error:', error);
     }
     return config;
   },
@@ -31,49 +35,81 @@ api.interceptors.request.use(
   }
 );
 
+// ✅ Response Interceptor for Auth Errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      console.log('🔐 401 Unauthorized - Token invalid');
+      AsyncStorage.removeItem('token');
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const tournamentsAPI = {
-  // ✅ Health check first
+  // ✅ Health check
   health: async () => {
     try {
       const res = await api.get('/health');
       return res.data;
     } catch (err) {
-      console.error('❌ Health check failed:', err.message);
       return { success: false, message: 'Server not reachable' };
     }
   },
 
-  // ✅ Get all tournaments/matches - FIXED
+  // ✅ GET ALL EVENTS (matches + tournaments) - FIXED
   getAll: async (params = {}) => {
     try {
-      console.log('🔍 Fetching from:', `${API_BASE_URL}/matches`);
-      const res = await api.get('/matches', { params });
-      console.log('✅ GET Response:', res.data);
+      console.log('🔍 Fetching ALL events from combined endpoint...');
+      
+      const res = await api.get('/combined', { params });
+      console.log('✅ GET Combined Response:', res.data);
+      
       return res.data;
     } catch (err) {
       console.error('❌ API getAll error:', {
         message: err.message,
-        code: err.code,
-        url: err.config?.url,
-        status: err.response?.status
+        status: err.response?.status,
+        data: err.response?.data
       });
-      return { 
-        success: false, 
-        message: err.response?.data?.message || err.message
-      };
+      
+      // Fallback: Try separate endpoints if combined fails
+      try {
+        console.log('🔄 Trying separate endpoints...');
+        const [tournamentsRes, matchesRes] = await Promise.all([
+          api.get('/tournaments'),
+          api.get('/matches')
+        ]);
+
+        const combinedData = [
+          ...(tournamentsRes.data.tournaments || []).map(item => ({ ...item, matchType: 'tournament' })),
+          ...(matchesRes.data.data || []).map(item => ({ ...item, matchType: 'match' }))
+        ];
+
+        return {
+          success: true,
+          data: combinedData,
+          count: combinedData.length,
+          message: 'Used fallback method'
+        };
+      } catch (fallbackError) {
+        return { 
+          success: false, 
+          message: 'Failed to fetch events',
+          error: err.message 
+        };
+      }
     }
   },
 
-  // ✅ Create tournament/match - FIXED ROUTE
+  // ✅ CREATE TOURNAMENT - FIXED ENDPOINT
   create: async (data) => {
     try {
-      console.log('📤 Sending to:', `${API_BASE_URL}/matches`);
-      console.log('📦 Data:', data);
+      console.log('📤 Creating tournament...', data);
       
-      // ✅ CORRECT: POST to /matches (not /matches/create)
-      const res = await api.post('/matches', data);
-      
-      console.log('✅ CREATE Response:', res.data);
+      const res = await api.post('/tournaments/create', data);
+      console.log('✅ CREATE Tournament Response:', res.data);
       return res.data;
     } catch (err) {
       console.error('❌ API create error:', {
@@ -83,18 +119,17 @@ export const tournamentsAPI = {
       });
       return { 
         success: false, 
-        message: err.response?.data?.message || err.message
+        message: err.response?.data?.message || err.message 
       };
     }
   },
 
-  // ✅ Update tournament/match
+  // ✅ UPDATE TOURNAMENT
   update: async (id, data) => {
     try {
-      const res = await api.put(`/matches/${id}`, data);
+      const res = await api.put(`/tournaments/${id}`, data);
       return res.data;
     } catch (err) {
-      console.error('❌ API update error:', err.response?.data || err.message);
       return { 
         success: false, 
         message: err.response?.data?.message || err.message 
@@ -102,13 +137,12 @@ export const tournamentsAPI = {
     }
   },
 
-  // ✅ Delete tournament/match
+  // ✅ DELETE TOURNAMENT
   delete: async (id) => {
     try {
-      const res = await api.delete(`/matches/${id}`);
+      const res = await api.delete(`/tournaments/${id}`);
       return res.data;
     } catch (err) {
-      console.error('❌ API delete error:', err.response?.data || err.message);
       return { 
         success: false, 
         message: err.response?.data?.message || err.message 
@@ -116,13 +150,25 @@ export const tournamentsAPI = {
     }
   },
 
-  // ✅ Get single tournament/match
+  // ✅ GET SINGLE TOURNAMENT
   getById: async (id) => {
     try {
-      const res = await api.get(`/matches/${id}`);
+      const res = await api.get(`/tournaments/${id}`);
       return res.data;
     } catch (err) {
-      console.error('❌ API getById error:', err.response?.data || err.message);
+      return { 
+        success: false, 
+        message: err.response?.data?.message || err.message 
+      };
+    }
+  },
+
+  // ✅ JOIN TOURNAMENT
+  join: async (id) => {
+    try {
+      const res = await api.post(`/tournaments/${id}/join`);
+      return res.data;
+    } catch (err) {
       return { 
         success: false, 
         message: err.response?.data?.message || err.message 
@@ -130,3 +176,5 @@ export const tournamentsAPI = {
     }
   }
 };
+
+export default tournamentsAPI;

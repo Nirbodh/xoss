@@ -1,32 +1,58 @@
-// context/AuthContext.js - ENHANCED VERSION
-import React, { createContext, useContext, useState, useEffect } from 'react';
+// context/AuthContext.js - COMPLETELY FIXED
+import React, { createContext, useState, useContext, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Haptics from 'expo-haptics';
+import axios from 'axios';
+
+const BASE_URL = 'https://xoss.onrender.com/api';
+const axiosInstance = axios.create({
+  baseURL: BASE_URL,
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+axiosInstance.interceptors.request.use(async (config) => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (error) {
+    console.log('❌ Token interceptor error:', error);
+  }
+  return config;
+});
 
 const AuthContext = createContext();
 
-export function AuthProvider({ children }) {
+export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [token, setToken] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load user from storage on app start
   useEffect(() => {
-    loadUserFromStorage();
+    checkAuthState();
   }, []);
 
-  const loadUserFromStorage = async () => {
+  const checkAuthState = async () => {
     try {
-      const userData = await AsyncStorage.getItem('user_data');
-      const token = await AsyncStorage.getItem('auth_token');
+      console.log('🔄 Loading user from storage...');
+      const userData = await AsyncStorage.getItem('user');
+      const userToken = await AsyncStorage.getItem('token');
       
-      if (userData && token) {
+      if (userData && userToken) {
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
+        setToken(userToken);
         setIsAuthenticated(true);
+        console.log('✅ User loaded from storage:', parsedUser.email);
+      } else {
+        console.log('❌ No user data found in storage');
+        setIsAuthenticated(false);
       }
     } catch (error) {
-      console.error('Error loading user data:', error);
+      console.log('❌ Error loading auth state:', error);
+      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
@@ -34,184 +60,117 @@ export function AuthProvider({ children }) {
 
   const login = async (credentials) => {
     try {
-      setIsLoading(true);
+      console.log('🔐 Attempting login with:', credentials.email);
       
-      // Mock login - replace with actual API call
-      const mockUser = {
-        id: 'XOSS_789123',
-        username: 'ProPlayer',
-        name: 'Robert Fox',
-        email: credentials.email || 'robert.fox@example.com',
-        phone: '+8801XXXXXXXXX',
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-        walletBalance: 1250.75,
-        level: 15,
-        experience: 1250,
-        nextLevelExp: 2000,
-        joinDate: '2024-01-15',
-        totalEarnings: 5250,
-        matchesPlayed: 45,
-        matchesWon: 25,
-        winRate: '55%',
-        favoriteGame: 'Free Fire',
-        achievements: ['First Win', '5 Wins Streak', 'Team Player'],
-        rank: 'Gold III',
-        team: 'Bangladesh Warriors',
-        isVerified: true,
-        referralCode: `XOSS${Math.random().toString(36).substr(2, 6).toUpperCase()}`
-      };
+      const response = await axiosInstance.post('/auth/login', {
+        email: credentials.email,
+        password: credentials.password
+      });
 
-      const mockToken = 'demo-token-xoss-2024';
+      if (response.data.success) {
+        const { user: userData, token: userToken } = response.data;
+        
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        await AsyncStorage.setItem('token', userToken);
 
-      // Save to storage
-      await AsyncStorage.setItem('user_data', JSON.stringify(mockUser));
-      await AsyncStorage.setItem('auth_token', mockToken);
-
-      setUser(mockUser);
-      setIsAuthenticated(true);
-      
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return { success: true, user: mockUser, token: mockToken };
+        setUser(userData);
+        setToken(userToken);
+        setIsAuthenticated(true);
+        
+        console.log('✅ Login successful');
+        return { success: true, user: userData, token: userToken };
+      } else {
+        return { success: false, error: response.data.message };
+      }
     } catch (error) {
-      console.error('Login error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: 'Login failed' };
-    } finally {
-      setIsLoading(false);
+      console.log('❌ Login failed:', error);
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
     }
   };
 
   const register = async (userData) => {
     try {
-      setIsLoading(true);
+      console.log('📝 Attempting registration with:', userData.email);
       
-      const newUser = {
-        id: `XOSS_${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-        username: userData.username,
-        name: userData.name || userData.username,
+      const response = await axiosInstance.post('/auth/register', {
+        name: userData.name,
         email: userData.email,
-        phone: userData.phone,
-        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-        walletBalance: 100, // Starting bonus
-        level: 1,
-        experience: 0,
-        nextLevelExp: 100,
-        joinDate: new Date().toISOString().split('T')[0],
-        totalEarnings: 0,
-        matchesPlayed: 0,
-        matchesWon: 0,
-        winRate: '0%',
-        favoriteGame: 'Free Fire',
-        achievements: ['Welcome Bonus'],
-        rank: 'Bronze V',
-        team: null,
-        isVerified: false,
-        referralCode: `XOSS${Math.random().toString(36).substr(2, 6).toUpperCase()}`
-      };
+        password: userData.password,
+        phone: userData.phone
+      });
 
-      const mockToken = 'demo-token-new-user';
+      if (response.data.success) {
+        const { user: newUser, token: userToken } = response.data;
+        
+        await AsyncStorage.setItem('user', JSON.stringify(newUser));
+        await AsyncStorage.setItem('token', userToken);
 
-      await AsyncStorage.setItem('user_data', JSON.stringify(newUser));
-      await AsyncStorage.setItem('auth_token', mockToken);
-
-      setUser(newUser);
-      setIsAuthenticated(true);
-      
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return { success: true, user: newUser, token: mockToken };
+        setUser(newUser);
+        setToken(userToken);
+        setIsAuthenticated(true);
+        
+        console.log('✅ Registration successful');
+        return { success: true, user: newUser, token: userToken };
+      } else {
+        return { success: false, error: response.data.message };
+      }
     } catch (error) {
-      console.error('Registration error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: 'Registration failed' };
-    } finally {
-      setIsLoading(false);
+      console.log('❌ Registration failed:', error);
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
     }
   };
 
   const logout = async () => {
     try {
-      setIsLoading(true);
+      console.log('🚪 Logging out...');
       
-      await AsyncStorage.removeItem('user_data');
-      await AsyncStorage.removeItem('auth_token');
-      
+      await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem('token');
+
       setUser(null);
+      setToken(null);
       setIsAuthenticated(false);
       
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      console.log('✅ Logout successful');
       return { success: true };
     } catch (error) {
-      console.error('Logout error:', error);
-      return { success: false, error: 'Logout failed' };
-    } finally {
-      setIsLoading(false);
+      console.log('❌ Logout failed:', error);
+      return { success: false, error: error.message };
     }
   };
 
-  const updateProfile = async (updates) => {
-    try {
-      const updatedUser = { ...user, ...updates };
-      await AsyncStorage.setItem('user_data', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-      
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return { success: true, user: updatedUser };
-    } catch (error) {
-      console.error('Profile update error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: 'Update failed' };
-    }
-  };
-
-  const refreshUser = async () => {
-    try {
-      const userData = await AsyncStorage.getItem('user_data');
-      if (userData) {
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-        return parsedUser;
-      }
-      return null;
-    } catch (error) {
-      console.error('Refresh user error:', error);
-      return null;
-    }
-  };
-
-  const value = {
-    // State
-    user,
-    isLoading,
-    isAuthenticated,
-    
-    // Actions
-    login,
-    logout,
-    register,
-    updateProfile,
-    refreshUser,
-    
-    // Getters
-    getUserLevel: () => user?.level || 1,
-    getUserStats: () => ({
-      matchesPlayed: user?.matchesPlayed || 0,
-      matchesWon: user?.matchesWon || 0,
-      winRate: user?.winRate || '0%',
-      totalEarnings: user?.totalEarnings || 0
-    })
+  const getUserId = () => {
+    return user?.id || user?._id || null;
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        isAuthenticated,
+        isLoading,
+        getUserId,
+        login,
+        register,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}
+};

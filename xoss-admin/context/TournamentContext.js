@@ -1,3 +1,4 @@
+// context/TournamentContext.js - COMPLETELY FIXED WITH BOTH FIELDS AND APPROVAL
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { tournamentsAPI } from '../api/tournamentsAPI';
 import { useAuth } from './AuthContext';
@@ -10,143 +11,113 @@ export const TournamentProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // ✅ Fetch tournaments - FIXED data mapping
-  const fetchTournaments = async () => {
+  const refreshTournaments = async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await tournamentsAPI.getAll();
-      
-      console.log('📥 Admin API Response:', result);
-      
-      if (result.success && result.data) {
-        // ✅ FIXED: Transform backend data to frontend format
-        const transformedTournaments = result.data.map(tournament => ({
-          id: tournament._id,
-          _id: tournament._id,
-          title: tournament.title,
-          game: tournament.game,
-          type: tournament.type,
-          map: tournament.map,
-          entryFee: tournament.entry_fee,
-          prizePool: tournament.total_prize,
-          totalPrize: tournament.total_prize,
-          perKill: tournament.perKill || 0,
-          maxPlayers: tournament.max_participants,
-          maxParticipants: tournament.max_participants,
-          currentPlayers: tournament.current_participants || 0,
-          currentParticipants: tournament.current_participants || 0,
-          roomId: tournament.room_code || tournament.roomId,
-          password: tournament.room_password || tournament.password,
-          description: tournament.description,
-          rules: tournament.rules,
-          status: tournament.status || 'upcoming',
-          scheduleTime: tournament.scheduleTime,
-          startTime: tournament.start_time || tournament.scheduleTime,
-          endTime: tournament.end_time,
-          createdBy: tournament.created_by,
-          matchType: tournament.matchType,
-          spotsLeft: (tournament.max_participants || 0) - (tournament.current_participants || 0)
-        }));
-        
-        console.log('🔄 Admin Transformed tournaments:', transformedTournaments);
-        setTournaments(transformedTournaments);
+      console.log('🔄 Fetching tournaments from REAL API...');
+
+      const res = await tournamentsAPI.getAll();
+      console.log('📥 Tournaments API Response:', res);
+
+      if (res && res.success) {
+        const tournamentData = res.data?.filter(item => item.matchType === 'tournament') || [];
+        setTournaments(tournamentData);
+        console.log(`✅ Loaded ${tournamentData.length} tournaments from backend`);
       } else {
-        console.warn('⚠️ No data from API, using empty array');
+        setError(res?.message || 'Failed to load tournaments');
         setTournaments([]);
       }
     } catch (err) {
-      console.error('❌ Admin Fetch error:', err.message);
-      setError(err.message);
+      console.error('❌ Tournament fetch error:', err);
+      setError(err.message || 'Network error');
       setTournaments([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ Create tournament - COMPLETELY FIXED
-  const createTournament = async (formData) => {
+  const createTournament = async (tournamentData) => {
     try {
       setLoading(true);
       setError(null);
-      
-      // ✅ FIXED: Proper data transformation for backend
+      console.log('🎯 Creating tournament with data:', tournamentData);
+
+      // ✅ CRITICAL FIX: SEND BOTH camelCase AND snake_case FIELDS
       const backendData = {
-        // Basic info
-        title: formData.title,
-        game: formData.game,
-        description: formData.description,
-        rules: formData.rules,
+        title: tournamentData.title,
+        game: tournamentData.game,
+        description: tournamentData.description || '',
+        rules: tournamentData.rules || '',
         
-        // Financial info - ✅ FIXED: Proper number conversion
-        entry_fee: Number(formData.entryFee) || 0,
-        total_prize: Number(formData.prizePool) || 0,
-        perKill: Number(formData.perKill) || 0,
+        // Financial fields - send both versions
+        entry_fee: Number(tournamentData.entryFee) || 0,
+        entryFee: Number(tournamentData.entryFee) || 0,
         
-        // Participants info - ✅ CRITICAL FIX: max_participants
-        max_participants: Number(formData.maxPlayers) || 25,
+        total_prize: Number(tournamentData.prizePool) || 0,
+        prizePool: Number(tournamentData.prizePool) || 0,
+        
+        per_kill: Number(tournamentData.perKill) || 0,
+        perKill: Number(tournamentData.perKill) || 0,
+        
+        // Participants - send both versions
+        max_participants: Number(tournamentData.maxPlayers) || 100,
+        maxPlayers: Number(tournamentData.maxPlayers) || 100,
+        
         current_participants: 0,
-        
-        // Room info
-        roomId: formData.roomId,
-        room_code: formData.roomId,
-        password: formData.password,
-        room_password: formData.password,
+        currentPlayers: 0,
         
         // Game settings
-        map: formData.map,
-        type: formData.type,
-        matchType: formData.matchType || 'match',
+        type: tournamentData.type || 'Squad',
+        map: tournamentData.map || 'Bermuda',
+        match_type: 'tournament',
+        matchType: 'tournament',
         
-        // Status and timing
-        status: 'upcoming',
-        start_time: formData.scheduleTime,
-        end_time: formData.endTime,
-        scheduleTime: formData.scheduleTime,
+        // Room info
+        room_id: tournamentData.roomId || '',
+        roomId: tournamentData.roomId || '',
         
-        // Creator info - ✅ FIXED: Use string instead of ObjectId
+        room_password: tournamentData.password || '',
+        password: tournamentData.password || '',
+        
+        // ✅ CRITICAL FIX: SEND BOTH scheduleTime AND schedule_time
+        schedule_time: tournamentData.scheduleTime,
+        scheduleTime: tournamentData.scheduleTime, // ✅ THIS IS WHAT BACKEND WANTS!
+        
+        start_time: tournamentData.scheduleTime,
+        startTime: tournamentData.scheduleTime,
+        
+        end_time: tournamentData.endTime,
+        endTime: tournamentData.endTime,
+        
+        // Status & Approval - ✅ SET TO PENDING FOR APPROVAL
+        status: 'pending',
+        approval_status: 'pending',
+        approvalStatus: 'pending',
+        
         created_by: user?.userId || 'admin'
       };
 
-      console.log('🔄 Admin Sending to backend:', backendData);
+      console.log('📤 Sending to backend (WITH BOTH FIELDS):', backendData);
 
       const result = await tournamentsAPI.create(backendData);
       
-      if (result.success && result.data) {
-        // Transform new tournament for frontend
-        const newTournament = {
-          id: result.data._id,
-          _id: result.data._id,
-          title: result.data.title,
-          game: result.data.game,
-          type: result.data.type,
-          map: result.data.map,
-          entryFee: result.data.entry_fee,
-          prizePool: result.data.total_prize,
-          totalPrize: result.data.total_prize,
-          perKill: result.data.perKill,
-          maxPlayers: result.data.max_participants,
-          currentPlayers: result.data.current_participants,
-          roomId: result.data.room_code,
-          password: result.data.room_password,
-          description: result.data.description,
-          rules: result.data.rules,
-          status: result.data.status,
-          scheduleTime: result.data.scheduleTime,
-          startTime: result.data.start_time,
-          endTime: result.data.end_time,
-          createdBy: result.data.created_by,
-          matchType: result.data.matchType,
-          spotsLeft: result.data.max_participants - result.data.current_participants
+      if (result && result.success) {
+        console.log('✅ Tournament created successfully in backend (Pending Approval)');
+        await refreshTournaments();
+        return { 
+          success: true, 
+          message: 'Tournament created successfully! Waiting for admin approval.',
+          data: result.data 
         };
-
-        setTournaments(prev => [newTournament, ...prev]);
-        return { success: true, message: 'Tournament created successfully' };
       } else {
-        throw new Error(result.message || 'Failed to create tournament');
+        return { 
+          success: false, 
+          error: result?.message || 'Create failed' 
+        };
       }
     } catch (err) {
-      console.error('❌ Admin Create error:', err.message);
+      console.error('❌ Create tournament error:', err);
       setError(err.message);
       return { success: false, error: err.message };
     } finally {
@@ -154,65 +125,124 @@ export const TournamentProvider = ({ children }) => {
     }
   };
 
-  // ✅ Delete tournament
-  const deleteTournament = async (id) => {
+  const updateTournament = async (tournamentId, updateData) => {
     try {
-      const result = await tournamentsAPI.delete(id);
-      if (result.success) {
-        setTournaments(prev => prev.filter(t => t._id !== id && t.id !== id));
-        return { success: true, message: 'Tournament deleted successfully' };
-      } else {
-        throw new Error(result.message);
-      }
-    } catch (err) {
-      console.error('❌ Admin Delete error:', err.message);
-      setError(err.message);
-      return { success: false, error: err.message };
-    }
-  };
-
-  // ✅ Update tournament
-  const updateTournament = async (id, data) => {
-    try {
-      const result = await tournamentsAPI.update(id, data);
-      if (result.success && result.data) {
-        setTournaments(prev => prev.map(t => 
-          t._id === id ? { ...t, ...result.data } : t
-        ));
+      setLoading(true);
+      const result = await tournamentsAPI.update(tournamentId, updateData);
+      
+      if (result && result.success) {
+        await refreshTournaments();
         return { success: true, message: 'Tournament updated successfully' };
       } else {
-        throw new Error(result.message);
+        return { success: false, error: result?.message || 'Update failed' };
       }
     } catch (err) {
-      console.error('❌ Admin Update error:', err.message);
-      setError(err.message);
       return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
     }
   };
 
-  // ✅ Refresh tournaments
-  const refreshTournaments = fetchTournaments;
+  const deleteTournament = async (tournamentId) => {
+    try {
+      setLoading(true);
+      const result = await tournamentsAPI.delete(tournamentId);
+      
+      if (result && result.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Tournament deleted successfully' };
+      } else {
+        return { success: false, error: result?.message || 'Delete failed' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // ✅ Clear error
-  const clearError = () => setError(null);
+  // ✅ NEW: Approve Tournament Function
+  const approveTournament = async (tournamentId) => {
+    try {
+      setLoading(true);
+      const result = await tournamentsAPI.update(tournamentId, { 
+        status: 'upcoming',
+        approval_status: 'approved'
+      });
+      
+      if (result && result.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Tournament approved successfully!' };
+      } else {
+        return { success: false, error: result?.message || 'Approval failed' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Load tournaments when component mounts
+  // ✅ NEW: Reject Tournament Function
+  const rejectTournament = async (tournamentId) => {
+    try {
+      setLoading(true);
+      const result = await tournamentsAPI.update(tournamentId, { 
+        status: 'rejected',
+        approval_status: 'rejected'
+      });
+      
+      if (result && result.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Tournament rejected successfully!' };
+      } else {
+        return { success: false, error: result?.message || 'Rejection failed' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const joinTournament = async (tournamentId) => {
+    try {
+      setLoading(true);
+      const result = await tournamentsAPI.join(tournamentId);
+      
+      if (result && result.success) {
+        await refreshTournaments();
+        return { success: true, message: 'Successfully joined tournament' };
+      } else {
+        return { success: false, error: result?.message || 'Join failed' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchTournaments();
+    refreshTournaments();
   }, []);
 
   return (
-    <TournamentContext.Provider value={{
-      tournaments,
-      fetchTournaments,
-      refreshTournaments,
-      createTournament,
-      deleteTournament,
-      updateTournament,
-      loading,
-      error,
-      clearError,
-    }}>
+    <TournamentContext.Provider
+      value={{
+        tournaments,
+        loading,
+        error,
+        refreshTournaments,
+        createTournament,
+        updateTournament,
+        deleteTournament,
+        approveTournament, // ✅ NEW
+        rejectTournament,  // ✅ NEW
+        joinTournament,
+        clearError: () => setError(null),
+      }}
+    >
       {children}
     </TournamentContext.Provider>
   );
@@ -220,6 +250,8 @@ export const TournamentProvider = ({ children }) => {
 
 export const useTournaments = () => {
   const context = useContext(TournamentContext);
-  if (!context) throw new Error('useTournaments must be used within a TournamentProvider');
+  if (!context) {
+    throw new Error('useTournaments must be used within a TournamentProvider');
+  }
   return context;
 };

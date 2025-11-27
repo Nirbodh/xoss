@@ -1,193 +1,96 @@
-// context/WalletContext.js - ENHANCED VERSION
+// context/WalletContext.js - COMPLETELY FIXED
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Haptics from 'expo-haptics';
+import { useAuth } from './AuthContext';
+import axios from 'axios';
+
+const BASE_URL = 'https://xoss.onrender.com/api';
+const axiosInstance = axios.create({
+  baseURL: BASE_URL,
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+axiosInstance.interceptors.request.use(async (config) => {
+  try {
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch (error) {
+    console.log('❌ Token interceptor error:', error);
+  }
+  return config;
+});
 
 const WalletContext = createContext();
 
 export function WalletProvider({ children }) {
-  const [balance, setBalance] = useState(1250.75);
+  const { user, token } = useAuth();
+  const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    loadWalletData();
-  }, []);
-
-  const loadWalletData = async () => {
+  const fetchWalletFromServer = async () => {
+    if (!user || !token) {
+      await loadFromStorage();
+      return;
+    }
+    
     try {
-      const [balanceData, transactionsData] = await Promise.all([
-        AsyncStorage.getItem('wallet_balance'),
-        AsyncStorage.getItem('wallet_transactions')
-      ]);
-
-      if (balanceData) {
-        setBalance(parseFloat(balanceData));
-      }
-
-      if (transactionsData) {
-        setTransactions(JSON.parse(transactionsData));
+      setIsLoading(true);
+      console.log('🔄 Fetching wallet from server...');
+      
+      const response = await axiosInstance.get('/wallet');
+      
+      if (response.data.success) {
+        const walletData = response.data.data || response.data;
+        setBalance(walletData.balance || walletData.wallet_balance || 0);
+        
+        await AsyncStorage.setItem('wallet_balance', (walletData.balance || 0).toString());
+        console.log(`✅ Server wallet balance: ${walletData.balance}`);
+      } else {
+        console.error('❌ Server wallet fetch failed');
+        await loadFromStorage();
       }
     } catch (error) {
-      console.error('Error loading wallet data:', error);
+      console.error('❌ Server wallet error:', error);
+      await loadFromStorage();
     } finally {
       setIsLoading(false);
     }
   };
 
-  const addMoney = async (amount, method = 'Card', description = 'Deposit') => {
+  const loadFromStorage = async () => {
     try {
-      if (amount <= 0) {
-        throw new Error('Amount must be positive');
+      const balanceData = await AsyncStorage.getItem('wallet_balance');
+      if (balanceData) {
+        setBalance(parseFloat(balanceData));
+        console.log(`📱 Local wallet balance: ${balanceData}`);
       }
-
-      const newBalance = balance + amount;
-      const transaction = {
-        id: `txn_${Date.now()}`,
-        type: 'credit',
-        amount,
-        method,
-        description,
-        date: new Date().toISOString(),
-        status: 'completed',
-        balanceAfter: newBalance
-      };
-
-      setBalance(newBalance);
-      setTransactions(prev => [transaction, ...prev]);
-
-      await Promise.all([
-        AsyncStorage.setItem('wallet_balance', newBalance.toString()),
-        AsyncStorage.setItem('wallet_transactions', JSON.stringify([transaction, ...transactions]))
-      ]);
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return { success: true, newBalance, transaction };
     } catch (error) {
-      console.error('Add money error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: error.message };
+      console.error('❌ Error loading local wallet:', error);
     }
   };
 
-  const withdrawMoney = async (amount, method = 'Bank Transfer', description = 'Withdrawal') => {
-    try {
-      if (amount <= 0) {
-        throw new Error('Amount must be positive');
-      }
+  const refreshWallet = () => {
+    fetchWalletFromServer();
+  };
 
-      if (amount > balance) {
-        throw new Error('Insufficient balance');
-      }
-
-      const newBalance = balance - amount;
-      const transaction = {
-        id: `txn_${Date.now()}`,
-        type: 'debit',
-        amount,
-        method,
-        description,
-        date: new Date().toISOString(),
-        status: 'pending', // Withdrawals are typically pending
-        balanceAfter: newBalance
-      };
-
-      setBalance(newBalance);
-      setTransactions(prev => [transaction, ...prev]);
-
-      await Promise.all([
-        AsyncStorage.setItem('wallet_balance', newBalance.toString()),
-        AsyncStorage.setItem('wallet_transactions', JSON.stringify([transaction, ...transactions]))
-      ]);
-
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      return { success: true, newBalance, transaction };
-    } catch (error) {
-      console.error('Withdraw money error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: error.message };
+  useEffect(() => {
+    if (user && token) {
+      fetchWalletFromServer();
+    } else {
+      setIsLoading(false);
+      loadFromStorage();
     }
-  };
-
-  const makePayment = async (amount, recipient, description = 'Payment') => {
-    try {
-      if (amount <= 0) {
-        throw new Error('Amount must be positive');
-      }
-
-      if (amount > balance) {
-        throw new Error('Insufficient balance');
-      }
-
-      const newBalance = balance - amount;
-      const transaction = {
-        id: `txn_${Date.now()}`,
-        type: 'debit',
-        amount,
-        recipient,
-        description,
-        date: new Date().toISOString(),
-        status: 'completed',
-        balanceAfter: newBalance
-      };
-
-      setBalance(newBalance);
-      setTransactions(prev => [transaction, ...prev]);
-
-      await Promise.all([
-        AsyncStorage.setItem('wallet_balance', newBalance.toString()),
-        AsyncStorage.setItem('wallet_transactions', JSON.stringify([transaction, ...transactions]))
-      ]);
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      return { success: true, newBalance, transaction };
-    } catch (error) {
-      console.error('Payment error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      return { success: false, error: error.message };
-    }
-  };
-
-  const getTransactionHistory = async (limit = 50) => {
-    try {
-      return transactions.slice(0, limit);
-    } catch (error) {
-      console.error('Get transaction history error:', error);
-      return [];
-    }
-  };
-
-  const getTransactionStats = () => {
-    const totalDeposits = transactions
-      .filter(t => t.type === 'credit')
-      .reduce((sum, t) => sum + t.amount, 0);
-    
-    const totalWithdrawals = transactions
-      .filter(t => t.type === 'debit')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    return {
-      totalDeposits,
-      totalWithdrawals,
-      netBalance: totalDeposits - totalWithdrawals,
-      transactionCount: transactions.length
-    };
-  };
+  }, [user, token]);
 
   const value = {
-    // State
     balance,
     transactions,
     isLoading,
-    
-    // Actions
-    addMoney,
-    withdrawMoney,
-    makePayment,
-    getTransactionHistory,
-    
-    // Getters
-    getTransactionStats,
+    refreshWallet,
     getRecentTransactions: (count = 5) => transactions.slice(0, count),
     canAfford: (amount) => balance >= amount
   };

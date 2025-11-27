@@ -1,9 +1,9 @@
-// navigation/AppNavigator.js - COMPLETE ADMIN NAVIGATION WITH SUB-MODULES
+// navigation/AppNavigator.js - COMPLETE FIXED VERSION
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
-// Import All Admin Screens
+// Import All Admin Screens - EXACTLY as they exist in your project
 import AdminDashboard from '../screens/AdminDashboard';
 import EnhancedHomeControl from '../screens/EnhancedHomeControl';
 import TournamentControlScreen from '../screens/TournamentControlScreen';
@@ -12,7 +12,7 @@ import ProfileControlScreen from '../screens/ProfileControlScreen';
 import MyGameControlScreen from '../screens/MyGameControlScreen';
 import TopUpControlScreen from '../screens/TopUpControlScreen';
 
-// ✅ Import All Sub-Modules for Tournament Control
+// Import Tournament Sub-Modules
 import TournamentManagementScreen from '../screens/TournamentManagementScreen';
 import PlayerManagementScreen from '../screens/PlayerManagementScreen';
 import MatchControlScreen from '../screens/MatchControlScreen';
@@ -21,6 +21,11 @@ import PrizeManagementScreen from '../screens/PrizeManagementScreen';
 import NotificationControlScreen from '../screens/NotificationControlScreen';
 import AnalyticsControlScreen from '../screens/AnalyticsControlScreen';
 import BracketViewScreen from '../screens/BracketViewScreen';
+
+// Import Additional Admin Screens
+import ResultVerificationScreen from '../screens/ResultVerificationScreen';
+import CreateAdmin from '../screens/CreateAdmin';
+import EditMatchModal from '../screens/EditMatchModal';
 
 const Stack = createStackNavigator();
 
@@ -35,24 +40,86 @@ function AdminStack() {
         gestureEnabled: true
       }}
     >
-      {/* Main Admin Screens */}
-      <Stack.Screen name="AdminDashboard" component={AdminDashboard} />
-      <Stack.Screen name="EnhancedHomeControl" component={EnhancedHomeControl} />
-      <Stack.Screen name="TournamentControl" component={TournamentControlScreen} />
-      <Stack.Screen name="WalletControl" component={WalletControlScreen} />
-      <Stack.Screen name="ProfileControl" component={ProfileControlScreen} />
-      <Stack.Screen name="MyGameControl" component={MyGameControlScreen} />
-      <Stack.Screen name="TopUpControl" component={TopUpControlScreen} />
+      {/* Main Admin Dashboard */}
+      <Stack.Screen 
+        name="AdminDashboard" 
+        component={AdminDashboard} 
+      />
+      
+      {/* ✅ 6 Main Control Screens - EXACT names as used in AdminDashboard.js */}
+      <Stack.Screen 
+        name="EnhancedHomeControl" 
+        component={EnhancedHomeControl} 
+      />
+      <Stack.Screen 
+        name="TournamentControl" 
+        component={TournamentControlScreen} 
+      />
+      <Stack.Screen 
+        name="WalletControl" 
+        component={WalletControlScreen} 
+      />
+      <Stack.Screen 
+        name="ProfileControl" 
+        component={ProfileControlScreen} 
+      />
+      <Stack.Screen 
+        name="MyGameControl" 
+        component={MyGameControlScreen} 
+      />
+      <Stack.Screen 
+        name="TopUpControl" 
+        component={TopUpControlScreen} 
+      />
 
       {/* ✅ Tournament Control Sub-Modules */}
-      <Stack.Screen name="TournamentManagement" component={TournamentManagementScreen} />
-      <Stack.Screen name="PlayerManagement" component={PlayerManagementScreen} />
-      <Stack.Screen name="MatchControl" component={MatchControlScreen} />
-      <Stack.Screen name="ScoreboardControl" component={ScoreboardControlScreen} />
-      <Stack.Screen name="PrizeManagement" component={PrizeManagementScreen} />
-      <Stack.Screen name="NotificationControl" component={NotificationControlScreen} />
-      <Stack.Screen name="AnalyticsControl" component={AnalyticsControlScreen} />
-      <Stack.Screen name="BracketView" component={BracketViewScreen} />
+      <Stack.Screen 
+        name="TournamentManagement" 
+        component={TournamentManagementScreen} 
+      />
+      <Stack.Screen 
+        name="PlayerManagement" 
+        component={PlayerManagementScreen} 
+      />
+      <Stack.Screen 
+        name="MatchControl" 
+        component={MatchControlScreen} 
+      />
+      <Stack.Screen 
+        name="ScoreboardControl" 
+        component={ScoreboardControlScreen} 
+      />
+      <Stack.Screen 
+        name="PrizeManagement" 
+        component={PrizeManagementScreen} 
+      />
+      <Stack.Screen 
+        name="NotificationControl" 
+        component={NotificationControlScreen} 
+      />
+      <Stack.Screen 
+        name="AnalyticsControl" 
+        component={AnalyticsControlScreen} 
+      />
+      <Stack.Screen 
+        name="BracketView" 
+        component={BracketViewScreen} 
+      />
+
+      {/* ✅ Additional Admin Screens */}
+      <Stack.Screen 
+        name="ResultVerification" 
+        component={ResultVerificationScreen} 
+      />
+      <Stack.Screen 
+        name="CreateAdmin" 
+        component={CreateAdmin} 
+      />
+      <Stack.Screen 
+        name="EditMatchModal" 
+        component={EditMatchModal} 
+      />
+
     </Stack.Navigator>
   );
 }

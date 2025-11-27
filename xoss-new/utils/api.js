@@ -1,4 +1,3 @@
-// xoss-new/utils/api.js - COMPLETE FIXED VERSION
 import axios from 'axios';
 
 // ✅ আপনার Backend URL
@@ -76,6 +75,58 @@ export const api = {
     } catch (error) {
       console.error('Error creating match:', error);
       return { success: false, message: 'Failed to create match' };
+    }
+  },
+
+  // ✅ User create match (with pending status)
+  userCreateMatch: async (payload, token) => {
+    try {
+      const response = await axiosInstance.post('/api/matches', payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error user creating match:', error);
+      return { success: false, message: 'Failed to create match' };
+    }
+  },
+
+  // ✅ Admin: Get pending matches
+  getPendingMatches: async (token) => {
+    try {
+      const response = await axiosInstance.get('/api/matches/admin/pending', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error getting pending matches:', error);
+      return { success: false, message: 'Failed to fetch pending matches' };
+    }
+  },
+
+  // ✅ Admin: Approve match
+  approveMatch: async (matchId, token, adminNotes = '') => {
+    try {
+      const response = await axiosInstance.post(`/api/matches/admin/approve/${matchId}`, { adminNotes }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error approving match:', error);
+      return { success: false, message: 'Failed to approve match' };
+    }
+  },
+
+  // ✅ Admin: Reject match
+  rejectMatch: async (matchId, token, rejectionReason = '') => {
+    try {
+      const response = await axiosInstance.post(`/api/matches/admin/reject/${matchId}`, { rejectionReason }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error rejecting match:', error);
+      return { success: false, message: 'Failed to reject match' };
     }
   }
 };

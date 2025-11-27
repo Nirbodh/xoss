@@ -1,4 +1,4 @@
-// screens/ProfileScreen.js - COMPLETELY FIXED VERSION
+// screens/ProfileScreen.js - COMPLETELY FIXED VERSION WITH POINTS CONVERSION
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
@@ -11,7 +11,8 @@ import {
   StatusBar,
   Alert,
   Linking,
-  Share
+  Share,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -29,6 +30,8 @@ const ProfileScreen = ({ navigation }) => {
     wins: 41,
     winRate: '87%'
   });
+  const [points, setPoints] = useState(350);
+  const [converting, setConverting] = useState(false);
 
   // Load user stats from storage
   useEffect(() => {
@@ -47,8 +50,54 @@ const ProfileScreen = ({ navigation }) => {
       if (savedImage) {
         setProfileImage(savedImage);
       }
+
+      // Load points if exists
+      const savedPoints = await AsyncStorage.getItem('userPoints');
+      if (savedPoints) {
+        setPoints(parseInt(savedPoints));
+      }
     } catch (error) {
       console.log('Error loading user stats:', error);
+    }
+  };
+
+  // Handle points conversion
+  const handleConvertPoints = async () => {
+    if (points < 100) {
+      Alert.alert('ত্রুটি', 'কনভার্ট করতে ন্যূনতম ১০০ পয়েন্ট প্রয়োজন।');
+      return;
+    }
+
+    setConverting(true);
+    
+    try {
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const convertiblePoints = Math.floor(points / 100) * 100;
+      const amount = convertiblePoints * 0.1;
+      
+      // Update points and balance
+      const newPoints = points - convertiblePoints;
+      const newBalance = userStats.balance + amount;
+      
+      setPoints(newPoints);
+      setUserStats(prev => ({ ...prev, balance: newBalance }));
+      
+      // Save to storage
+      await AsyncStorage.setItem('userPoints', newPoints.toString());
+      await AsyncStorage.setItem('userStats', JSON.stringify({ ...userStats, balance: newBalance }));
+      
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'সফল!', 
+        `আপনার ${convertiblePoints} পয়েন্ট সফলভাবে ৳${amount} তে কনভার্ট হয়েছে!`,
+        [{ text: 'ঠিক আছে' }]
+      );
+    } catch (error) {
+      Alert.alert('ত্রুটি', 'পয়েন্ট কনভার্ট করতে সমস্যা হয়েছে।');
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -384,6 +433,40 @@ const ProfileScreen = ({ navigation }) => {
           </View>
         </View>
 
+        {/* Points Conversion Card */}
+        <View style={styles.pointsConversionCard}>
+          <View style={styles.pointsHeader}>
+            <Ionicons name="star" size={24} color="#FFD700" />
+            <Text style={styles.pointsTitle}>পয়েন্ট কনভার্সন</Text>
+          </View>
+          <Text style={styles.pointsDescription}>
+            আপনার পয়েন্টগুলো টাকায় কনভার্ট করুন। ১০০ পয়েন্ট = ৳১০
+          </Text>
+          <View style={styles.pointsInfo}>
+            <View style={styles.pointsInfoItem}>
+              <Text style={styles.pointsLabel}>বর্তমান পয়েন্ট:</Text>
+              <Text style={styles.pointsValue}>{points}</Text>
+            </View>
+            <View style={styles.pointsInfoItem}>
+              <Text style={styles.pointsLabel}>কনভার্টযোগ্য:</Text>
+              <Text style={styles.pointsValue}>৳{(Math.floor(points / 100) * 100) * 0.1}</Text>
+            </View>
+          </View>
+          <TouchableOpacity 
+            style={[styles.convertButton, (points < 100 || converting) && styles.convertButtonDisabled]}
+            onPress={handleConvertPoints}
+            disabled={points < 100 || converting}
+          >
+            {converting ? (
+              <ActivityIndicator size="small" color="#000" />
+            ) : (
+              <Text style={styles.convertButtonText}>
+                {points >= 100 ? 'পয়েন্ট কনভার্ট করুন' : 'ন্যূনতম ১০০ পয়েন্ট প্রয়োজন'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Menu Items */}
         <View style={styles.menuSection}>
           <Text style={styles.sectionTitle}>অ্যাকাউন্ট সেটিংস</Text>
@@ -634,6 +717,65 @@ const styles = StyleSheet.create({
   bonusStatLabel: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
+  },
+  pointsConversionCard: {
+    backgroundColor: 'rgba(255,215,0,0.1)',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,215,0,0.3)',
+  },
+  pointsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  pointsTitle: {
+    color: '#FFD700',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  pointsDescription: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 15,
+  },
+  pointsInfo: {
+    marginBottom: 15,
+  },
+  pointsInfoItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  pointsLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+  },
+  pointsValue: {
+    color: '#FFD700',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  convertButton: {
+    backgroundColor: '#FFD700',
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  convertButtonDisabled: {
+    backgroundColor: '#666',
+    opacity: 0.6,
+  },
+  convertButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   menuSection: {
     marginHorizontal: 20,

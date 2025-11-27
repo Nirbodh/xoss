@@ -1,56 +1,303 @@
-// screens/TournamentManagementScreen.js - COMPLETE WORKING VERSION
+// screens/TournamentManagementScreen.js - COMPLETELY FIXED WITH CUSTOM DATE PICKER
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, 
   TextInput, Alert, Modal, RefreshControl, FlatList,
-  ActivityIndicator
+  ActivityIndicator 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTournaments } from '../context/TournamentContext';
+
+// Custom Date Picker Component (No External Dependencies)
+const CustomDatePicker = ({ visible, onConfirm, onCancel, value }) => {
+  const [selectedDate, setSelectedDate] = useState(value || new Date());
+  
+  // Generate months and years
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => currentYear + i);
+  
+  const daysInMonth = (month, year) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+  
+  const getDaysArray = (month, year) => {
+    const daysCount = daysInMonth(month, year);
+    return Array.from({ length: daysCount }, (_, i) => i + 1);
+  };
+
+  const [days, setDays] = useState(getDaysArray(selectedDate.getMonth(), selectedDate.getFullYear()));
+  const [hours, setHours] = useState(selectedDate.getHours());
+  const [minutes, setMinutes] = useState(selectedDate.getMinutes());
+
+  const updateDays = (month, year) => {
+    setDays(getDaysArray(month, year));
+  };
+
+  const handleMonthChange = (monthIndex) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(monthIndex);
+    setSelectedDate(newDate);
+    updateDays(monthIndex, newDate.getFullYear());
+  };
+
+  const handleYearChange = (year) => {
+    const newDate = new Date(selectedDate);
+    newDate.setFullYear(year);
+    setSelectedDate(newDate);
+    updateDays(newDate.getMonth(), year);
+  };
+
+  const handleDayChange = (day) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(day);
+    setSelectedDate(newDate);
+  };
+
+  const handleTimeChange = (type, value) => {
+    const newDate = new Date(selectedDate);
+    if (type === 'hour') {
+      newDate.setHours(value);
+      setHours(value);
+    } else {
+      newDate.setMinutes(value);
+      setMinutes(value);
+    }
+    setSelectedDate(newDate);
+  };
+
+  const handleConfirm = () => {
+    onConfirm(selectedDate);
+  };
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.customPickerOverlay}>
+        <View style={styles.customPickerContent}>
+          <View style={styles.customPickerHeader}>
+            <Text style={styles.customPickerTitle}>Select Date & Time</Text>
+          </View>
+          
+          <View style={styles.pickerContainer}>
+            {/* Date Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Date</Text>
+              <View style={styles.pickerRow}>
+                {/* Month */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Month</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {months.map((month, index) => (
+                      <TouchableOpacity
+                        key={month}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getMonth() === index && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleMonthChange(index)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getMonth() === index && styles.pickerItemTextSelected
+                        ]}>
+                          {month}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Day */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Day</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {days.map(day => (
+                      <TouchableOpacity
+                        key={day}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getDate() === day && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleDayChange(day)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getDate() === day && styles.pickerItemTextSelected
+                        ]}>
+                          {day}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Year */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Year</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {years.map(year => (
+                      <TouchableOpacity
+                        key={year}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getFullYear() === year && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleYearChange(year)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getFullYear() === year && styles.pickerItemTextSelected
+                        ]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+
+            {/* Time Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Time</Text>
+              <View style={styles.pickerRow}>
+                {/* Hours */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Hour</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 24 }, (_, i) => i).map(hour => (
+                      <TouchableOpacity
+                        key={hour}
+                        style={[
+                          styles.pickerItem,
+                          hours === hour && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('hour', hour)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          hours === hour && styles.pickerItemTextSelected
+                        ]}>
+                          {hour.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Minutes */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Minute</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 60 }, (_, i) => i).map(minute => (
+                      <TouchableOpacity
+                        key={minute}
+                        style={[
+                          styles.pickerItem,
+                          minutes === minute && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('minute', minute)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          minutes === minute && styles.pickerItemTextSelected
+                        ]}>
+                          {minute.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+
+            {/* Selected Date Preview */}
+            <View style={styles.selectedDatePreview}>
+              <Text style={styles.selectedDateText}>
+                Selected: {selectedDate.toLocaleString()}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.customPickerActions}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
+              <Text style={styles.confirmButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
 
 const TournamentManagementScreen = ({ navigation }) => {
-  const [tournaments, setTournaments] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const { tournaments, loading, error, refreshTournaments, createTournament, deleteTournament } = useTournaments();
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
+  
+  // Date/Time Picker State
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [currentDateField, setCurrentDateField] = useState('');
+  
+  // ✅ FIXED: Proper initial state with ALL required fields
   const [newTournament, setNewTournament] = useState({
-    title: 'New Tournament',
+    title: 'Weekend Tournament',
     game: 'freefire',
     entryFee: '50',
     prizePool: '500',
     maxPlayers: '100',
-    roomId: '1234',
-    password: '1234',
-    description: 'A new tournament',
-    rules: 'Standard rules apply'
+    perKill: '10',
+    roomId: '',
+    password: '',
+    description: 'Join our exciting weekend tournament!',
+    rules: 'No cheating, fair play only',
+    type: 'Squad',
+    map: 'Bermuda',
+    scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // ✅ REQUIRED
+    endTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString() // ✅ REQUIRED
   });
 
   const GAMES = {
     freefire: { name: 'Free Fire', icon: 'flame', color: '#FF6B00' },
     pubg: { name: 'PUBG Mobile', icon: 'game-controller', color: '#4CAF50' },
     cod: { name: 'Call of Duty', icon: 'shield', color: '#2196F3' },
-    ludo: { name: 'Ludo King', icon: 'dice', color: '#9C27B0' }
-  };
-
-  // Temporary functions - context remove korar jonno
-  const createTournament = async (tournamentData) => {
-    console.log('Creating tournament:', tournamentData);
-    return { success: true, message: 'Tournament created successfully' };
-  };
-
-  const refreshTournaments = async () => {
-    setTournaments([]);
-  };
-
-  const deleteTournament = async (id) => {
-    return { success: true };
+    ludo: { name: 'Ludo King', icon: 'dice', color: '#9C27B0' },
+    bgmi: { name: 'BGMI', icon: 'phone-portrait', color: '#FF4444' }
   };
 
   useEffect(() => {
     refreshTournaments();
   }, []);
+
+  // ✅ Date/Time Picker Functions
+  const openDatePicker = (field) => {
+    setCurrentDateField(field);
+    setShowDatePicker(true);
+  };
+
+  const handleDateConfirm = (date) => {
+    setNewTournament(prev => ({
+      ...prev,
+      [currentDateField]: date.toISOString()
+    }));
+    setShowDatePicker(false);
+  };
+
+  const handleDateCancel = () => {
+    setShowDatePicker(false);
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -58,9 +305,12 @@ const TournamentManagementScreen = ({ navigation }) => {
     setRefreshing(false);
   };
 
+  // ✅ FIXED: Proper tournament creation
   const handleCreateTournament = async () => {
-    if (!newTournament.title || !newTournament.entryFee || !newTournament.prizePool || !newTournament.maxPlayers) {
-      Alert.alert('Error', 'Please fill all required fields');
+    // ✅ VALIDATE ALL REQUIRED FIELDS
+    if (!newTournament.title || !newTournament.entryFee || !newTournament.prizePool || 
+        !newTournament.maxPlayers || !newTournament.scheduleTime) {
+      Alert.alert('Error', 'Please fill all required fields (*)');
       return;
     }
 
@@ -69,44 +319,53 @@ const TournamentManagementScreen = ({ navigation }) => {
     const tournamentData = {
       title: newTournament.title,
       game: newTournament.game,
-      entry_fee: Number(newTournament.entryFee),
-      total_prize: Number(newTournament.prizePool),
-      max_participants: Number(newTournament.maxPlayers),
-      start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-      end_time: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-      scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      entryFee: newTournament.entryFee,
+      prizePool: newTournament.prizePool,
+      maxPlayers: newTournament.maxPlayers,
+      perKill: newTournament.perKill || 0,
       roomId: newTournament.roomId,
       password: newTournament.password,
       description: newTournament.description,
       rules: newTournament.rules,
-      map: 'Bermuda',
-      type: 'Squad',
-      status: 'upcoming',
-      matchType: 'tournament',
-      created_by: 'admin',
-      current_participants: 0
+      type: newTournament.type,
+      map: newTournament.map,
+      scheduleTime: newTournament.scheduleTime, // ✅ REQUIRED
+      endTime: newTournament.endTime, // ✅ REQUIRED
+      matchType: 'tournament'
     };
 
-    console.log('Creating tournament:', tournamentData);
+    console.log('🔄 Creating tournament with data:', tournamentData);
 
     const result = await createTournament(tournamentData);
     
     setCreateLoading(false);
     
     if (result.success) {
-      Alert.alert('Success', 'Tournament created successfully!');
-      setShowCreateModal(false);
-      setNewTournament({
-        title: 'New Tournament',
-        game: 'freefire',
-        entryFee: '50',
-        prizePool: '500',
-        maxPlayers: '100',
-        roomId: '1234',
-        password: '1234',
-        description: 'A new tournament',
-        rules: 'Standard rules apply'
-      });
+      Alert.alert('Success! 🎉', 'Tournament created successfully!', [
+        { 
+          text: 'OK', 
+          onPress: () => {
+            setShowCreateModal(false);
+            // Reset form
+            setNewTournament({
+              title: 'Weekend Tournament',
+              game: 'freefire',
+              entryFee: '50',
+              prizePool: '500',
+              maxPlayers: '100',
+              perKill: '10',
+              roomId: '',
+              password: '',
+              description: 'Join our exciting weekend tournament!',
+              rules: 'No cheating, fair play only',
+              type: 'Squad',
+              map: 'Bermuda',
+              scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+              endTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+            });
+          }
+        }
+      ]);
     } else {
       Alert.alert('Error', result.error || 'Failed to create tournament');
     }
@@ -125,6 +384,7 @@ const TournamentManagementScreen = ({ navigation }) => {
             const result = await deleteTournament(tournamentId);
             if (result.success) {
               Alert.alert('Success', 'Tournament deleted successfully!');
+              refreshTournaments();
             } else {
               Alert.alert('Error', result.error || 'Failed to delete tournament');
             }
@@ -147,6 +407,14 @@ const TournamentManagementScreen = ({ navigation }) => {
   const TournamentCard = ({ tournament }) => {
     const gameInfo = GAMES[tournament.game] || GAMES.freefire;
     
+    const participants = {
+      current: tournament.currentPlayers || tournament.current_participants || 0,
+      max: tournament.maxPlayers || tournament.max_participants || 50
+    };
+
+    const prizePool = tournament.prizePool || tournament.total_prize || 0;
+    const entryFee = tournament.entryFee || tournament.entry_fee || 0;
+    
     return (
       <View style={styles.tournamentCard}>
         <LinearGradient colors={['#1a237e', '#283593']} style={styles.cardGradient}>
@@ -157,29 +425,57 @@ const TournamentManagementScreen = ({ navigation }) => {
               </View>
               <View style={styles.tournamentInfo}>
                 <Text style={styles.tournamentTitle}>{tournament.title}</Text>
-                <Text style={styles.tournamentSubtitle}>{gameInfo.name}</Text>
+                <Text style={styles.tournamentSubtitle}>{gameInfo.name} • {tournament.type || 'Squad'}</Text>
+                <Text style={styles.matchTypeBadge}>
+                  {tournament.matchType === 'tournament' ? '🏆 TOURNAMENT' : '⚡ MATCH'}
+                </Text>
               </View>
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: '#FF9800' }]}>
-              <Text style={styles.statusText}>UPCOMING</Text>
+            <View style={[
+              styles.statusBadge,
+              { 
+                backgroundColor: tournament.status === 'live' ? '#4CAF50' : 
+                                tournament.status === 'completed' ? '#2196F3' : '#FF9800'
+              }
+            ]}>
+              <Text style={styles.statusText}>
+                {tournament.status ? tournament.status.toUpperCase() : 'UPCOMING'}
+              </Text>
             </View>
           </View>
 
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>৳{tournament.entry_fee || 0}</Text>
+              <Text style={styles.statValue}>৳{entryFee}</Text>
               <Text style={styles.statLabel}>Entry</Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>৳{tournament.total_prize || 0}</Text>
+              <Text style={styles.statValue}>৳{prizePool}</Text>
               <Text style={styles.statLabel}>Prize</Text>
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>
-                {tournament.current_participants || 0}/{tournament.max_participants || 50}
+                {participants.current}/{participants.max}
               </Text>
               <Text style={styles.statLabel}>Players</Text>
             </View>
+          </View>
+
+          <View style={styles.progressSection}>
+            <View style={styles.progressBar}>
+              <View 
+                style={[
+                  styles.progressFill, 
+                  { 
+                    width: `${(participants.current / participants.max) * 100}%`,
+                    backgroundColor: tournament.status === 'live' ? '#4CAF50' : '#2962ff'
+                  }
+                ]} 
+              />
+            </View>
+            <Text style={styles.progressText}>
+              {participants.current}/{participants.max} registered • {Math.round((participants.current / participants.max) * 100)}% full
+            </Text>
           </View>
 
           <View style={styles.actionButtons}>
@@ -188,11 +484,22 @@ const TournamentManagementScreen = ({ navigation }) => {
               <Text style={styles.editButtonText}>Edit</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteTournament(tournament._id)}>
+            <TouchableOpacity 
+              style={styles.deleteButton} 
+              onPress={() => handleDeleteTournament(tournament._id || tournament.id)}
+            >
               <Ionicons name="trash-outline" size={16} color="#F44336" />
               <Text style={styles.deleteButtonText}>Delete</Text>
             </TouchableOpacity>
           </View>
+
+          {tournament.scheduleTime && (
+            <View style={styles.timeInfo}>
+              <Text style={styles.timeText}>
+                Starts: {new Date(tournament.scheduleTime).toLocaleString()}
+              </Text>
+            </View>
+          )}
         </LinearGradient>
       </View>
     );
@@ -217,8 +524,8 @@ const TournamentManagementScreen = ({ navigation }) => {
         </View>
       ) : (
         <FlatList
-          data={tournaments}
-          keyExtractor={(item) => item._id || Math.random().toString()}
+          data={tournaments.filter(t => t.matchType === 'tournament')}
+          keyExtractor={(item) => item._id || item.id || Math.random().toString()}
           renderItem={({ item }) => <TournamentCard tournament={item} />}
           refreshControl={
             <RefreshControl 
@@ -241,6 +548,7 @@ const TournamentManagementScreen = ({ navigation }) => {
         />
       )}
 
+      {/* Create Tournament Modal */}
       <Modal visible={showCreateModal} transparent animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
@@ -268,7 +576,7 @@ const TournamentManagementScreen = ({ navigation }) => {
                       key={gameId}
                       style={[
                         styles.gameOption,
-                        newTournament.game === gameId && styles.gameOptionSelected
+                        newTournament.game === gameId && { backgroundColor: GAMES[gameId].color }
                       ]}
                       onPress={() => setNewTournament(prev => ({ ...prev, game: gameId }))}
                     >
@@ -320,6 +628,58 @@ const TournamentManagementScreen = ({ navigation }) => {
                 placeholder="100"
               />
 
+              <View style={styles.row}>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Type</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newTournament.type}
+                    onChangeText={(text) => setNewTournament(prev => ({ ...prev, type: text }))}
+                    placeholder="Squad"
+                  />
+                </View>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Map</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newTournament.map}
+                    onChangeText={(text) => setNewTournament(prev => ({ ...prev, map: text }))}
+                    placeholder="Bermuda"
+                  />
+                </View>
+              </View>
+
+              {/* Date & Time Selection */}
+              <Text style={styles.sectionTitle}>⏰ Timing Information</Text>
+
+              <View style={styles.row}>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Schedule Time *</Text>
+                  <TouchableOpacity 
+                    style={styles.dateInput}
+                    onPress={() => openDatePicker('scheduleTime')}
+                  >
+                    <Text style={styles.dateInputText}>
+                      {new Date(newTournament.scheduleTime).toLocaleString()}
+                    </Text>
+                    <Ionicons name="calendar" size={20} color="#2962ff" />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>End Time *</Text>
+                  <TouchableOpacity 
+                    style={styles.dateInput}
+                    onPress={() => openDatePicker('endTime')}
+                  >
+                    <Text style={styles.dateInputText}>
+                      {new Date(newTournament.endTime).toLocaleString()}
+                    </Text>
+                    <Ionicons name="time" size={20} color="#2962ff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               <Text style={styles.inputLabel}>Room ID *</Text>
               <View style={styles.inputWithButton}>
                 <TextInput
@@ -347,7 +707,31 @@ const TournamentManagementScreen = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.createButtonModal} onPress={handleCreateTournament}>
+              <Text style={styles.inputLabel}>Description</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={newTournament.description}
+                onChangeText={(text) => setNewTournament(prev => ({ ...prev, description: text }))}
+                placeholder="Tournament description..."
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={styles.inputLabel}>Rules</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={newTournament.rules}
+                onChangeText={(text) => setNewTournament(prev => ({ ...prev, rules: text }))}
+                placeholder="Tournament rules..."
+                multiline
+                numberOfLines={2}
+              />
+
+              <TouchableOpacity 
+                style={[styles.createButtonModal, createLoading && styles.createButtonDisabled]} 
+                onPress={handleCreateTournament}
+                disabled={createLoading}
+              >
                 {createLoading ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
@@ -358,6 +742,14 @@ const TournamentManagementScreen = ({ navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* Custom Date Picker Modal */}
+      <CustomDatePicker 
+        visible={showDatePicker}
+        onConfirm={handleDateConfirm}
+        onCancel={handleDateCancel}
+        value={new Date(newTournament[currentDateField] || newTournament.scheduleTime)}
+      />
     </SafeAreaView>
   );
 };
@@ -371,16 +763,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: 20,
+    paddingTop: 60,
     backgroundColor: '#1a237e',
   },
   backButton: {
     padding: 8,
   },
   headerTitle: {
-    color: 'white',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
+    color: 'white',
   },
   createButton: {
     padding: 8,
@@ -392,7 +785,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     color: 'white',
-    marginTop: 12,
+    marginTop: 16,
     fontSize: 16,
   },
   listContent: {
@@ -401,18 +794,18 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
+    paddingVertical: 60,
   },
   emptyText: {
-    color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+    color: 'white',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtext: {
-    color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -467,6 +860,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
   },
+  matchTypeBadge: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -494,10 +893,30 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
   },
+  progressSection: {
+    marginBottom: 12,
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    textAlign: 'center',
+  },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 8,
+    marginTop: 12,
   },
   editButton: {
     flexDirection: 'row',
@@ -527,6 +946,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  timeInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  timeText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+  },
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -535,7 +964,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: 'white',
-    borderRadius: 16,
+    borderRadius: 15,
     maxHeight: '90%',
   },
   modalHeader: {
@@ -544,7 +973,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#e0e0e0',
   },
   modalTitle: {
     fontSize: 18,
@@ -554,19 +983,51 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 20,
   },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 10,
+    marginBottom: 15,
+  },
   inputLabel: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#333',
     marginBottom: 8,
   },
+  helperText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: -10,
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
   textInput: {
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#e0e0e0',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
-    fontSize: 16,
+    color: '#333',
+  },
+  dateInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dateInputText: {
+    color: '#333',
+    fontSize: 14,
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
   },
   row: {
     flexDirection: 'row',
@@ -576,6 +1037,27 @@ const styles = StyleSheet.create({
   column: {
     flex: 1,
     paddingHorizontal: 8,
+  },
+  gameOptions: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  gameOption: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginRight: 12,
+    minWidth: 80,
+  },
+  gameOptionText: {
+    fontSize: 12,
+    color: '#333',
+    marginTop: 4,
+  },
+  gameOptionTextSelected: {
+    color: 'white',
   },
   inputWithButton: {
     flexDirection: 'row',
@@ -594,40 +1076,133 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  gameOptions: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  gameOption: {
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    marginRight: 8,
-    minWidth: 80,
-  },
-  gameOptionSelected: {
-    backgroundColor: '#2962ff',
-    borderColor: '#2962ff',
-  },
-  gameOptionText: {
-    fontSize: 12,
-    color: '#333',
-    marginTop: 4,
-    fontWeight: '500',
-  },
-  gameOptionTextSelected: {
-    color: 'white',
-  },
   createButtonModal: {
     backgroundColor: '#2962ff',
-    padding: 16,
+    paddingVertical: 15,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 10,
+  },
+  createButtonDisabled: {
+    opacity: 0.6,
   },
   createButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Custom Picker Styles
+  customPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  customPickerContent: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 15,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  customPickerHeader: {
+    marginBottom: 15,
+  },
+  customPickerTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  pickerContainer: {
+    marginBottom: 20,
+  },
+  pickerSection: {
+    marginBottom: 20,
+  },
+  pickerLabel: {
+    color: 'white',
+    fontSize: 16,
+    marginBottom: 10,
+    fontWeight: '600',
+  },
+  pickerSubLabel: {
+    color: '#bbb',
+    fontSize: 12,
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  pickerColumn: {
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  pickerScroll: {
+    maxHeight: 150,
+    backgroundColor: '#2d2d2d',
+    borderRadius: 8,
+  },
+  pickerItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#444',
+    alignItems: 'center',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#2962ff',
+  },
+  pickerItemText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  pickerItemTextSelected: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  selectedDatePreview: {
+    backgroundColor: '#2d2d2d',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  selectedDateText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  customPickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#666',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmButton: {
+    backgroundColor: '#2962ff',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginLeft: 8,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',

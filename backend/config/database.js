@@ -1,33 +1,30 @@
+// config/database.js - COMPLETELY FIXED
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    // Connect to MongoDB
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      // ✅ Recommended options (some are now defaults, but safe to include)
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    // Remove deprecated options - use only connection string
+    const conn = await mongoose.connect(process.env.MONGODB_URI);
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-
-    // Event listeners
-    mongoose.connection.on('connected', () => {
-      console.log('🎯 Mongoose connected to DB');
-    });
-
-    mongoose.connection.on('error', (err) => {
-      console.error('❌ Mongoose connection error:', err);
-    });
-
-    mongoose.connection.on('disconnected', () => {
-      console.log('⚠️ Mongoose disconnected from DB');
-    });
-
+    return conn;
   } catch (error) {
-    console.error('❌ Database connection error:', error);
+    console.error('❌ MongoDB connection error:', error.message);
     process.exit(1);
   }
 };
+
+// MongoDB connection events
+mongoose.connection.on('connected', () => {
+  console.log('🎯 MongoDB connected successfully');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('⚠️ MongoDB disconnected');
+});
 
 module.exports = connectDB;

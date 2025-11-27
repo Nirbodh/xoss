@@ -1,284 +1,248 @@
+// screens/MatchControlScreen.js - COMPLETELY FIXED WITH EDIT MODAL
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, 
   TextInput, Alert, Animated, Dimensions, Modal, 
-  RefreshControl, ActivityIndicator, FlatList, Switch,
-  Platform
+  RefreshControl, ActivityIndicator, FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
-import DateTimePicker from '@react-native-community/datetimepicker';
-
-import { useTournaments } from '../context/TournamentContext';
+import { useMatches } from '../context/MatchContext';
 import { useAuth } from '../context/AuthContext';
+import EditMatchModal from './EditMatchModal'; // ✅ Import Edit Modal
 
 const { width, height } = Dimensions.get('window');
 
-// 🆕 ENHANCED DateTimePicker with Manual Input Option
-const AdvancedDateTimePicker = ({ 
-  value, 
-  onChange, 
-  mode = 'datetime',
-  minimumDate = new Date(),
-  isVisible,
-  onClose,
-  label = "Select Date & Time"
-}) => {
-  const [currentDate, setCurrentDate] = useState(value);
-  const [showManualInput, setShowManualInput] = useState(false);
-  const [manualInput, setManualInput] = useState('');
-  const [manualError, setManualError] = useState('');
-
-  const handleChange = (event, selectedDate) => {
-    if (Platform.OS === 'android') {
-      onClose();
-    }
-    
-    if (selectedDate) {
-      setCurrentDate(selectedDate);
-      onChange(selectedDate);
-    }
-  };
-
-  const handleManualSubmit = () => {
-    if (!manualInput.trim()) {
-      setManualError('Please enter a date and time');
-      return;
-    }
-
-    try {
-      // Try to parse various date formats
-      const parsedDate = new Date(manualInput);
-      if (isNaN(parsedDate.getTime())) {
-        setManualError('Invalid date format. Try: "Dec 25 2023 14:30" or "2023-12-25 14:30"');
-        return;
-      }
-
-      if (parsedDate < new Date()) {
-        setManualError('Date must be in the future');
-        return;
-      }
-
-      setCurrentDate(parsedDate);
-      onChange(parsedDate);
-      setShowManualInput(false);
-      setManualInput('');
-      setManualError('');
-      
-    } catch (error) {
-      setManualError('Invalid date format');
-    }
-  };
-
-  const quickTimeOptions = [
-    { label: '30 mins from now', minutes: 30 },
-    { label: '1 hour from now', minutes: 60 },
-    { label: '2 hours from now', minutes: 120 },
-    { label: '6 hours from now', minutes: 360 },
-    { label: 'Tomorrow same time', days: 1 },
-    { label: 'Next weekend', days: getDaysUntilWeekend() }
+// Custom Date Picker Component (No External Dependencies)
+const CustomDatePicker = ({ visible, onConfirm, onCancel, value }) => {
+  const [selectedDate, setSelectedDate] = useState(value || new Date());
+  
+  // Generate months and years
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
   ];
-
-  function getDaysUntilWeekend() {
-    const today = new Date().getDay();
-    return today === 0 ? 7 : 6 - today; // Next Saturday
-  }
-
-  const applyQuickTime = (option) => {
-    const newDate = new Date();
-    if (option.minutes) {
-      newDate.setMinutes(newDate.getMinutes() + option.minutes);
-    } else if (option.days) {
-      newDate.setDate(newDate.getDate() + option.days);
-    }
-    setCurrentDate(newDate);
-    onChange(newDate);
+  
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({ length: 5 }, (_, i) => currentYear + i);
+  
+  const daysInMonth = (month, year) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+  
+  const getDaysArray = (month, year) => {
+    const daysCount = daysInMonth(month, year);
+    return Array.from({ length: daysCount }, (_, i) => i + 1);
   };
 
-  if (!isVisible) return null;
+  const [days, setDays] = useState(getDaysArray(selectedDate.getMonth(), selectedDate.getFullYear()));
+  const [hours, setHours] = useState(selectedDate.getHours());
+  const [minutes, setMinutes] = useState(selectedDate.getMinutes());
+
+  const updateDays = (month, year) => {
+    setDays(getDaysArray(month, year));
+  };
+
+  const handleMonthChange = (monthIndex) => {
+    const newDate = new Date(selectedDate);
+    newDate.setMonth(monthIndex);
+    setSelectedDate(newDate);
+    updateDays(monthIndex, newDate.getFullYear());
+  };
+
+  const handleYearChange = (year) => {
+    const newDate = new Date(selectedDate);
+    newDate.setFullYear(year);
+    setSelectedDate(newDate);
+    updateDays(newDate.getMonth(), year);
+  };
+
+  const handleDayChange = (day) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(day);
+    setSelectedDate(newDate);
+  };
+
+  const handleTimeChange = (type, value) => {
+    const newDate = new Date(selectedDate);
+    if (type === 'hour') {
+      newDate.setHours(value);
+      setHours(value);
+    } else {
+      newDate.setMinutes(value);
+      setMinutes(value);
+    }
+    setSelectedDate(newDate);
+  };
+
+  const handleConfirm = () => {
+    onConfirm(selectedDate);
+  };
+
+  if (!visible) return null;
 
   return (
-    <Modal
-      visible={isVisible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.dateTimePickerOverlay}>
-        <View style={styles.dateTimePickerContainer}>
-          <View style={styles.dateTimePickerHeader}>
-            <Text style={styles.dateTimePickerTitle}>{label}</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={24} color="#666" />
-            </TouchableOpacity>
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.customPickerOverlay}>
+        <View style={styles.customPickerContent}>
+          <View style={styles.customPickerHeader}>
+            <Text style={styles.customPickerTitle}>Select Date & Time</Text>
           </View>
-
-          {!showManualInput ? (
-            <>
-              {/* Quick Time Options */}
-              <View style={styles.quickTimeSection}>
-                <Text style={styles.quickTimeTitle}>Quick Select</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.quickTimeOptions}>
-                    {quickTimeOptions.map((option, index) => (
+          
+          <View style={styles.pickerContainer}>
+            {/* Date Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Date</Text>
+              <View style={styles.pickerRow}>
+                {/* Month */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Month</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {months.map((month, index) => (
                       <TouchableOpacity
-                        key={index}
-                        style={styles.quickTimeOption}
-                        onPress={() => applyQuickTime(option)}
+                        key={month}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getMonth() === index && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleMonthChange(index)}
                       >
-                        <Text style={styles.quickTimeText}>{option.label}</Text>
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getMonth() === index && styles.pickerItemTextSelected
+                        ]}>
+                          {month}
+                        </Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
-                </ScrollView>
-              </View>
+                  </ScrollView>
+                </View>
 
-              {/* Native DateTimePicker */}
-              <View style={styles.pickerContainer}>
-                <DateTimePicker
-                  value={currentDate}
-                  mode={mode}
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={handleChange}
-                  minimumDate={minimumDate}
-                  style={styles.dateTimePicker}
-                />
-              </View>
+                {/* Day */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Day</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {days.map(day => (
+                      <TouchableOpacity
+                        key={day}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getDate() === day && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleDayChange(day)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getDate() === day && styles.pickerItemTextSelected
+                        ]}>
+                          {day}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
 
-              {/* Manual Input Option */}
-              <TouchableOpacity 
-                style={styles.manualInputButton}
-                onPress={() => setShowManualInput(true)}
-              >
-                <Ionicons name="create-outline" size={18} color="#2962ff" />
-                <Text style={styles.manualInputButtonText}>Enter Manually</Text>
-              </TouchableOpacity>
-
-              {/* Selected Date Display */}
-              <View style={styles.selectedDateContainer}>
-                <Text style={styles.selectedDateLabel}>Selected:</Text>
-                <Text style={styles.selectedDateText}>
-                  {currentDate.toLocaleString()}
-                </Text>
-              </View>
-            </>
-          ) : (
-            /* Manual Input Mode */
-            <View style={styles.manualInputContainer}>
-              <Text style={styles.manualInputTitle}>Enter Date & Time</Text>
-              <Text style={styles.manualInputSubtitle}>
-                Examples: "Dec 25 2023 14:30", "2023-12-25 14:30", "tomorrow 2pm"
-              </Text>
-              
-              <TextInput
-                style={[styles.manualInput, manualError && styles.manualInputError]}
-                value={manualInput}
-                onChangeText={(text) => {
-                  setManualInput(text);
-                  setManualError('');
-                }}
-                placeholder="Enter date and time..."
-                multiline
-                autoFocus
-              />
-              
-              {manualError ? (
-                <Text style={styles.manualErrorText}>{manualError}</Text>
-              ) : null}
-
-              <View style={styles.manualInputActions}>
-                <TouchableOpacity 
-                  style={[styles.manualButton, styles.cancelManualButton]}
-                  onPress={() => {
-                    setShowManualInput(false);
-                    setManualInput('');
-                    setManualError('');
-                  }}
-                >
-                  <Text style={styles.cancelManualText}>Cancel</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={[styles.manualButton, styles.submitManualButton]}
-                  onPress={handleManualSubmit}
-                >
-                  <Text style={styles.submitManualText}>Set Date</Text>
-                </TouchableOpacity>
+                {/* Year */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Year</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {years.map(year => (
+                      <TouchableOpacity
+                        key={year}
+                        style={[
+                          styles.pickerItem,
+                          selectedDate.getFullYear() === year && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleYearChange(year)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          selectedDate.getFullYear() === year && styles.pickerItemTextSelected
+                        ]}>
+                          {year}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
               </View>
             </View>
-          )}
+
+            {/* Time Selection */}
+            <View style={styles.pickerSection}>
+              <Text style={styles.pickerLabel}>Time</Text>
+              <View style={styles.pickerRow}>
+                {/* Hours */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Hour</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 24 }, (_, i) => i).map(hour => (
+                      <TouchableOpacity
+                        key={hour}
+                        style={[
+                          styles.pickerItem,
+                          hours === hour && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('hour', hour)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          hours === hour && styles.pickerItemTextSelected
+                        ]}>
+                          {hour.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Minutes */}
+                <View style={styles.pickerColumn}>
+                  <Text style={styles.pickerSubLabel}>Minute</Text>
+                  <ScrollView style={styles.pickerScroll} showsVerticalScrollIndicator={false}>
+                    {Array.from({ length: 60 }, (_, i) => i).map(minute => (
+                      <TouchableOpacity
+                        key={minute}
+                        style={[
+                          styles.pickerItem,
+                          minutes === minute && styles.pickerItemSelected
+                        ]}
+                        onPress={() => handleTimeChange('minute', minute)}
+                      >
+                        <Text style={[
+                          styles.pickerItemText,
+                          minutes === minute && styles.pickerItemTextSelected
+                        ]}>
+                          {minute.toString().padStart(2, '0')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </View>
+            </View>
+
+            {/* Selected Date Preview */}
+            <View style={styles.selectedDatePreview}>
+              <Text style={styles.selectedDateText}>
+                Selected: {selectedDate.toLocaleString()}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.customPickerActions}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
+              <Text style={styles.confirmButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
-  );
-};
-
-// Simple Button Component
-const SimpleButton = ({ 
-  title, 
-  onPress, 
-  icon, 
-  type = 'primary',
-  size = 'medium',
-  disabled = false,
-  style 
-}) => {
-  const getButtonStyle = () => {
-    switch (type) {
-      case 'primary': return styles.primaryButton;
-      case 'success': return styles.successButton;
-      case 'warning': return styles.warningButton;
-      case 'danger': return styles.dangerButton;
-      case 'secondary': return styles.secondaryButton;
-      default: return styles.primaryButton;
-    }
-  };
-
-  const getTextStyle = () => {
-    switch (type) {
-      case 'primary': return styles.primaryButtonText;
-      case 'success': return styles.successButtonText;
-      case 'warning': return styles.warningButtonText;
-      case 'danger': return styles.dangerButtonText;
-      case 'secondary': return styles.secondaryButtonText;
-      default: return styles.primaryButtonText;
-    }
-  };
-
-  return (
-    <TouchableOpacity
-      style={[
-        getButtonStyle(),
-        size === 'large' && styles.buttonLarge,
-        size === 'small' && styles.buttonSmall,
-        disabled && styles.buttonDisabled,
-        style
-      ]}
-      onPress={onPress}
-      disabled={disabled}
-      activeOpacity={0.7}
-    >
-      <View style={styles.buttonContent}>
-        {icon && (
-          <Ionicons 
-            name={icon} 
-            size={size === 'large' ? 18 : size === 'small' ? 14 : 16} 
-            color="white" 
-            style={styles.buttonIcon}
-          />
-        )}
-        <Text style={[
-          getTextStyle(),
-          size === 'large' && styles.buttonTextLarge,
-          size === 'small' && styles.buttonTextSmall
-        ]}>
-          {title}
-        </Text>
-      </View>
-    </TouchableOpacity>
   );
 };
 
@@ -321,16 +285,67 @@ const GAMES = {
   }
 };
 
-// Create Match Modal with Enhanced Date/Time Picker
+// Simple Button Component
+const SimpleButton = ({ 
+  title, 
+  onPress, 
+  icon, 
+  type = 'primary',
+  disabled = false,
+  style 
+}) => {
+  const getButtonStyle = () => {
+    switch (type) {
+      case 'primary': return styles.primaryButton;
+      case 'danger': return styles.dangerButton;
+      case 'secondary': return styles.secondaryButton;
+      case 'success': return styles.successButton;
+      default: return styles.primaryButton;
+    }
+  };
+
+  return (
+    <TouchableOpacity
+      style={[
+        getButtonStyle(),
+        disabled && styles.buttonDisabled,
+        style
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.7}
+    >
+      <View style={styles.buttonContent}>
+        {icon && (
+          <Ionicons 
+            name={icon} 
+            size={16} 
+            color="white" 
+            style={styles.buttonIcon}
+          />
+        )}
+        <Text style={styles.primaryButtonText}>
+          {title}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
+// Create Match Modal Component
 const CreateMatchModal = ({ visible, onClose, onCreate }) => {
   const slideAnim = useRef(new Animated.Value(height)).current;
   const { user: authUser } = useAuth();
   
+  // Date/Time Picker State
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [currentDateField, setCurrentDateField] = useState('');
+  
   const [newMatch, setNewMatch] = useState({
     title: 'Solo Battle',
-    game: 'pubg',
+    game: 'freefire',
     type: 'Solo',
-    map: 'Erangel',
+    map: 'Bermuda',
     entryFee: '50',
     prizePool: '500',
     maxPlayers: '100',
@@ -338,14 +353,11 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
     matchType: 'match',
     roomId: '',
     password: '',
-    description: 'A 100 player solo tournament',
+    description: 'A 100 player solo match',
     rules: 'No cheating, fair play only',
     scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
     endTime: new Date(Date.now() + 4 * 60 * 60 * 1000)
   });
-  
-  const [showStartTimePicker, setShowStartTimePicker] = useState(false);
-  const [showEndTimePicker, setShowEndTimePicker] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -365,49 +377,52 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
     }
   }, [visible]);
 
-  // ✅ FIXED: Proper data structure for backend with number conversion
+  // ✅ Date/Time Picker Functions
+  const openDatePicker = (field) => {
+    setCurrentDateField(field);
+    setShowDatePicker(true);
+  };
+
+  const handleDateConfirm = (date) => {
+    setNewMatch(prev => ({
+      ...prev,
+      [currentDateField]: date.toISOString()
+    }));
+    setShowDatePicker(false);
+  };
+
+  const handleDateCancel = () => {
+    setShowDatePicker(false);
+  };
+
   const handleCreate = () => {
-    // Validate required fields
     if (!newMatch.title || !newMatch.entryFee || !newMatch.prizePool || !newMatch.maxPlayers || !newMatch.roomId || !newMatch.password) {
       Alert.alert('Error', 'Please fill all required fields (*)');
       return;
     }
 
-    // ✅ FIXED: Use proper data structure matching backend with number conversion
-    const match = {
-      // Basic info
+    const matchData = {
       title: newMatch.title,
       game: newMatch.game,
       description: newMatch.description,
       rules: newMatch.rules,
-      
-      // Financial info - ✅ FIXED: Convert to numbers
       entryFee: Number(newMatch.entryFee) || 0,
       prizePool: Number(newMatch.prizePool) || 0,
       perKill: Number(newMatch.perKill) || 0,
-      
-      // Participants info - ✅ CRITICAL FIX: Convert to number
       maxPlayers: Number(newMatch.maxPlayers) || 25,
-      
-      // Room info
       roomId: newMatch.roomId,
       password: newMatch.password,
-      
-      // Game settings
       map: newMatch.map,
       type: newMatch.type,
-      
-      // Status and timing
-      status: 'upcoming',
-      matchType: newMatch.matchType,
+      status: 'pending', // ✅ Now goes to pending for approval
+      matchType: 'match',
       scheduleTime: new Date(newMatch.scheduleTime).toISOString(),
-      endTime: new Date(newMatch.endTime).toISOString()
+      endTime: new Date(newMatch.endTime).toISOString(),
+      created_by: authUser?.userId || 'admin'
     };
 
-    console.log('🔄 Creating match with data:', match);
-    
-    onCreate(match);
-    onClose();
+    console.log('🔄 Creating match (Pending Approval):', matchData);
+    onCreate(matchData);
   };
 
   const generateRoomId = () => {
@@ -418,23 +433,6 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
   const generatePassword = () => {
     const password = Math.random().toString(36).substring(2, 6).toUpperCase();
     setNewMatch(prev => ({ ...prev, password }));
-  };
-
-  const handleStartTimeChange = (selectedDate) => {
-    setShowStartTimePicker(false);
-    if (selectedDate) {
-      setNewMatch(prev => ({ ...prev, scheduleTime: selectedDate }));
-      // Auto-set end time to 2 hours after start time
-      const endTime = new Date(selectedDate.getTime() + 2 * 60 * 60 * 1000);
-      setNewMatch(prev => ({ ...prev, endTime }));
-    }
-  };
-
-  const handleEndTimeChange = (selectedDate) => {
-    setShowEndTimePicker(false);
-    if (selectedDate) {
-      setNewMatch(prev => ({ ...prev, endTime: selectedDate }));
-    }
   };
 
   return (
@@ -449,8 +447,8 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={true}>
-            <Text style={styles.sectionTitle}>🎮 Basic Match Information</Text>
+          <ScrollView style={styles.modalBody}>
+            <Text style={styles.sectionTitle}>🎮 Match Information</Text>
 
             <Text style={styles.modalLabel}>Match Title *</Text>
             <TextInput
@@ -458,26 +456,6 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
               value={newMatch.title}
               onChangeText={(text) => setNewMatch(prev => ({ ...prev, title: text }))}
               placeholder="Enter match title"
-            />
-
-            <Text style={styles.modalLabel}>Description</Text>
-            <TextInput
-              style={[styles.modalInput, styles.textArea]}
-              value={newMatch.description}
-              onChangeText={(text) => setNewMatch(prev => ({ ...prev, description: text }))}
-              placeholder="Describe your match..."
-              multiline
-              numberOfLines={3}
-            />
-
-            <Text style={styles.modalLabel}>Rules</Text>
-            <TextInput
-              style={[styles.modalInput, styles.textArea]}
-              value={newMatch.rules}
-              onChangeText={(text) => setNewMatch(prev => ({ ...prev, rules: text }))}
-              placeholder="Enter match rules..."
-              multiline
-              numberOfLines={2}
             />
 
             <Text style={styles.modalLabel}>Select Game *</Text>
@@ -511,10 +489,7 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
                 <TextInput
                   style={styles.modalInput}
                   value={newMatch.entryFee}
-                  onChangeText={(text) => setNewMatch(prev => ({ 
-                    ...prev, 
-                    entryFee: text.replace(/[^0-9]/g, '') // ✅ Only numbers allowed
-                  }))}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, entryFee: text.replace(/[^0-9]/g, '') }))}
                   placeholder="50"
                   keyboardType="numeric"
                 />
@@ -524,10 +499,7 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
                 <TextInput
                   style={styles.modalInput}
                   value={newMatch.prizePool}
-                  onChangeText={(text) => setNewMatch(prev => ({ 
-                    ...prev, 
-                    prizePool: text.replace(/[^0-9]/g, '') // ✅ Only numbers allowed
-                  }))}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, prizePool: text.replace(/[^0-9]/g, '') }))}
                   placeholder="500"
                   keyboardType="numeric"
                 />
@@ -540,10 +512,7 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
                 <TextInput
                   style={styles.modalInput}
                   value={newMatch.maxPlayers}
-                  onChangeText={(text) => setNewMatch(prev => ({ 
-                    ...prev, 
-                    maxPlayers: text.replace(/[^0-9]/g, '') // ✅ Only numbers allowed
-                  }))}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, maxPlayers: text.replace(/[^0-9]/g, '') }))}
                   placeholder="100"
                   keyboardType="numeric"
                 />
@@ -553,66 +522,44 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
                 <TextInput
                   style={styles.modalInput}
                   value={newMatch.perKill}
-                  onChangeText={(text) => setNewMatch(prev => ({ 
-                    ...prev, 
-                    perKill: text.replace(/[^0-9]/g, '') // ✅ Only numbers allowed
-                  }))}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, perKill: text.replace(/[^0-9]/g, '') }))}
                   placeholder="10"
                   keyboardType="numeric"
                 />
               </View>
             </View>
 
-            {/* Enhanced Start Time Picker */}
-            <Text style={styles.modalLabel}>Start Time *</Text>
-            <TouchableOpacity 
-              style={styles.datePickerButton}
-              onPress={() => setShowStartTimePicker(true)}
-            >
-              <Ionicons name="calendar" size={20} color="#2962ff" />
-              <View style={styles.datePickerTextContainer}>
-                <Text style={styles.datePickerLabel}>Starts at</Text>
-                <Text style={styles.datePickerText}>
-                  {newMatch.scheduleTime.toLocaleString()}
-                </Text>
+            {/* Date & Time Selection */}
+            <Text style={styles.sectionTitle}>⏰ Timing Information</Text>
+
+            <View style={styles.formRow}>
+              <View style={styles.formColumn}>
+                <Text style={styles.modalLabel}>Schedule Time *</Text>
+                <TouchableOpacity 
+                  style={styles.dateInput}
+                  onPress={() => openDatePicker('scheduleTime')}
+                >
+                  <Text style={styles.dateInputText}>
+                    {new Date(newMatch.scheduleTime).toLocaleString()}
+                  </Text>
+                  <Ionicons name="calendar" size={20} color="#2962ff" />
+                </TouchableOpacity>
               </View>
-              <Ionicons name="chevron-down" size={16} color="#666" />
-            </TouchableOpacity>
-
-            {/* Enhanced End Time Picker */}
-            <Text style={styles.modalLabel}>End Time *</Text>
-            <TouchableOpacity 
-              style={styles.datePickerButton}
-              onPress={() => setShowEndTimePicker(true)}
-            >
-              <Ionicons name="calendar" size={20} color="#2962ff" />
-              <View style={styles.datePickerTextContainer}>
-                <Text style={styles.datePickerLabel}>Ends at</Text>
-                <Text style={styles.datePickerText}>
-                  {newMatch.endTime.toLocaleString()}
-                </Text>
+              
+              <View style={styles.formColumn}>
+                <Text style={styles.modalLabel}>End Time *</Text>
+                <TouchableOpacity 
+                  style={styles.dateInput}
+                  onPress={() => openDatePicker('endTime')}
+                >
+                  <Text style={styles.dateInputText}>
+                    {new Date(newMatch.endTime).toLocaleString()}
+                  </Text>
+                  <Ionicons name="time" size={20} color="#2962ff" />
+                </TouchableOpacity>
               </View>
-              <Ionicons name="chevron-down" size={16} color="#666" />
-            </TouchableOpacity>
+            </View>
 
-            {/* Enhanced Date Pickers */}
-            <AdvancedDateTimePicker
-              value={newMatch.scheduleTime}
-              onChange={handleStartTimeChange}
-              isVisible={showStartTimePicker}
-              onClose={() => setShowStartTimePicker(false)}
-              label="Select Start Time"
-            />
-
-            <AdvancedDateTimePicker
-              value={newMatch.endTime}
-              onChange={handleEndTimeChange}
-              isVisible={showEndTimePicker}
-              onClose={() => setShowEndTimePicker(false)}
-              label="Select End Time"
-            />
-
-            {/* Room ID */}
             <Text style={styles.modalLabel}>Room ID *</Text>
             <View style={styles.inputWithButton}>
               <TextInput
@@ -626,7 +573,6 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Password */}
             <Text style={styles.modalLabel}>Password *</Text>
             <View style={styles.inputWithButton}>
               <TextInput
@@ -640,41 +586,67 @@ const CreateMatchModal = ({ visible, onClose, onCreate }) => {
               </TouchableOpacity>
             </View>
 
+            {/* Approval Notice */}
+            <View style={styles.approvalNotice}>
+              <Ionicons name="information-circle" size={20} color="#2962ff" />
+              <Text style={styles.approvalNoticeText}>
+                This match will be submitted for admin approval and will appear in the Pending tab.
+              </Text>
+            </View>
+
             <View style={styles.modalActions}>
-              <SimpleButton title="CANCEL" onPress={onClose} type="secondary" style={styles.modalButton}/>
-              <SimpleButton title="CREATE MATCH" onPress={handleCreate} type="primary" style={styles.modalButton}/>
+              <TouchableOpacity style={styles.secondaryButton} onPress={onClose}>
+                <Text style={styles.secondaryButtonText}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryButton} onPress={handleCreate}>
+                <Text style={styles.primaryButtonText}>CREATE MATCH</Text>
+              </TouchableOpacity>
             </View>
           </ScrollView>
         </Animated.View>
       </View>
+
+      {/* Custom Date Picker Modal */}
+      <CustomDatePicker 
+        visible={showDatePicker}
+        onConfirm={handleDateConfirm}
+        onCancel={handleDateCancel}
+        value={new Date(newMatch[currentDateField] || newMatch.scheduleTime)}
+      />
     </Modal>
   );
 };
 
 // Main Component
 const MatchControlScreen = ({ navigation }) => {
-  const { tournaments, loading, error, createTournament, updateTournament, deleteTournament, refreshTournaments } = useTournaments();
+  const { matches, loading, error, createMatch, refreshMatches, deleteMatch, approveMatch, rejectMatch, updateMatch } = useMatches();
   const { user: authUser } = useAuth();
 
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedMatches, setSelectedMatches] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false); // ✅ NEW: Edit Modal State
+  const [selectedMatch, setSelectedMatch] = useState(null); // ✅ NEW: Selected Match for Editing
 
   useEffect(() => {
-    refreshTournaments();
+    refreshMatches();
   }, []);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      refreshTournaments();
+      refreshMatches();
     });
     return unsubscribe;
   }, [navigation]);
 
-  const filteredMatches = tournaments.filter(match => {
+  // ✅ FIXED: Filter matches only (not tournaments)
+  const filteredMatches = matches.filter(match => {
     if (!match) return false;
+    
+    // Show only matches (not tournaments)
+    const isMatch = match.matchType === 'match';
+    if (!isMatch) return false;
     
     const matchesSearch = 
       (match.title?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
@@ -682,38 +654,38 @@ const MatchControlScreen = ({ navigation }) => {
     
     if (activeTab === 'all') return matchesSearch;
     if (activeTab === 'pending') return matchesSearch && match.status === 'pending';
+    if (activeTab === 'approved') return matchesSearch && match.approval_status === 'approved';
+    if (activeTab === 'rejected') return matchesSearch && match.approval_status === 'rejected';
     return matchesSearch && match.status === activeTab;
   });
 
   const handleRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    await refreshTournaments();
+    await refreshMatches();
     setRefreshing(false);
   };
 
-  // ✅ FIXED: Updated handleCreateMatch function with proper data structure
+  // ✅ FIXED: Now using createMatch instead of createTournament
   const handleCreateMatch = async (newMatch) => {
     try {
-      console.log('🔄 Creating match with all fields:', newMatch);
+      console.log('🔄 Creating match (Pending Approval):', newMatch);
       
-      const result = await createTournament(newMatch);
+      const result = await createMatch(newMatch);
       
       if (result && result.success) {
-        console.log('✅ Match created successfully with all fields');
-        
-        Alert.alert('Success! 🎉', 'Match created successfully!', [
+        Alert.alert('Success! 🎉', 'Match created successfully! Waiting for admin approval.', [
           { 
             text: 'OK', 
             onPress: () => {
               setShowCreateModal(false);
-              refreshTournaments();
+              refreshMatches();
+              setActiveTab('pending'); // Switch to pending tab
             }
           }
         ]);
         
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        
       } else {
         Alert.alert('Error', result?.error || 'Failed to create match');
       }
@@ -723,7 +695,206 @@ const MatchControlScreen = ({ navigation }) => {
     }
   };
 
-  if (loading && tournaments.length === 0) {
+  // ✅ FIXED: Now using deleteMatch instead of deleteTournament
+  const handleDeleteMatch = async (matchId) => {
+    Alert.alert(
+      'Delete Match',
+      'Are you sure you want to delete this match?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: async () => {
+            const result = await deleteMatch(matchId);
+            if (result.success) {
+              Alert.alert('Success', 'Match deleted successfully!');
+              refreshMatches();
+            } else {
+              Alert.alert('Error', result.error || 'Failed to delete match');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ✅ NEW: Approve Match Function
+  const handleApproveMatch = async (matchId) => {
+    Alert.alert(
+      'Approve Match',
+      'Are you sure you want to approve this match?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Approve', 
+          style: 'default',
+          onPress: async () => {
+            const result = await approveMatch(matchId);
+            if (result.success) {
+              Alert.alert('Success', 'Match approved successfully!');
+              refreshMatches();
+            } else {
+              Alert.alert('Error', result.error || 'Failed to approve match');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ✅ NEW: Reject Match Function
+  const handleRejectMatch = async (matchId) => {
+    Alert.alert(
+      'Reject Match',
+      'Are you sure you want to reject this match?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Reject', 
+          style: 'destructive',
+          onPress: async () => {
+            const result = await rejectMatch(matchId);
+            if (result.success) {
+              Alert.alert('Success', 'Match rejected successfully!');
+              refreshMatches();
+            } else {
+              Alert.alert('Error', result.error || 'Failed to reject match');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ✅ NEW: Edit Match Function
+  const handleEditMatch = (match) => {
+    setSelectedMatch(match);
+    setShowEditModal(true);
+  };
+
+  // ✅ NEW: Update Match Function
+  const handleUpdateMatch = async (matchId, updateData) => {
+    try {
+      const result = await updateMatch(matchId, updateData);
+      if (result.success) {
+        Alert.alert('Success', 'Match updated successfully!');
+        refreshMatches();
+      } else {
+        Alert.alert('Error', result.error || 'Failed to update match');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update match');
+    }
+  };
+
+  // Match Card Component
+  const MatchCard = ({ match, index }) => {
+    const gameInfo = GAMES[match.game] || GAMES.freefire;
+    const isPending = match.status === 'pending';
+    const isApproved = match.approval_status === 'approved';
+    const isRejected = match.approval_status === 'rejected';
+    
+    return (
+      <View style={styles.matchCard}>
+        <LinearGradient colors={['#1a237e', '#283593']} style={styles.cardGradient}>
+          <View style={styles.cardHeader}>
+            <View style={styles.gameInfo}>
+              <View style={[styles.gameIcon, { backgroundColor: gameInfo.color }]}>
+                <Ionicons name={gameInfo.icon} size={20} color="white" />
+              </View>
+              <View style={styles.matchInfo}>
+                <Text style={styles.matchTitle}>{match.title}</Text>
+                <Text style={styles.matchSubtitle}>{gameInfo.name} • {match.type}</Text>
+                <Text style={styles.matchTypeBadge}>
+                  {match.matchType === 'tournament' ? '🏆 TOURNAMENT' : '⚡ MATCH'}
+                </Text>
+              </View>
+            </View>
+            <View style={[
+              styles.statusBadge,
+              { 
+                backgroundColor: isPending ? '#FF9800' : 
+                                isRejected ? '#F44336' : 
+                                match.status === 'live' ? '#4CAF50' : 
+                                match.status === 'completed' ? '#2196F3' : 
+                                '#2962ff'
+              }
+            ]}>
+              <Text style={styles.statusText}>
+                {isPending ? 'PENDING' : 
+                 isRejected ? 'REJECTED' : 
+                 match.status?.toUpperCase() || 'UPCOMING'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.statsContainer}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>৳{match.entryFee || 0}</Text>
+              <Text style={styles.statLabel}>Entry</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>৳{match.prizePool || 0}</Text>
+              <Text style={styles.statLabel}>Prize</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>
+                {match.currentPlayers || 0}/{match.maxPlayers || 50}
+              </Text>
+              <Text style={styles.statLabel}>Players</Text>
+            </View>
+          </View>
+
+          <View style={styles.timeInfo}>
+            <Text style={styles.timeText}>
+              Starts: {new Date(match.scheduleTime).toLocaleString()}
+            </Text>
+          </View>
+
+          <View style={styles.actionButtons}>
+            {isPending && (
+              <>
+                <TouchableOpacity 
+                  style={styles.approveButton}
+                  onPress={() => handleApproveMatch(match._id || match.id)}
+                >
+                  <Ionicons name="checkmark" size={16} color="#4CAF50" />
+                  <Text style={styles.approveButtonText}>Approve</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.rejectButton}
+                  onPress={() => handleRejectMatch(match._id || match.id)}
+                >
+                  <Ionicons name="close" size={16} color="#F44336" />
+                  <Text style={styles.rejectButtonText}>Reject</Text>
+                </TouchableOpacity>
+              </>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={() => handleEditMatch(match)}
+            >
+              <Ionicons name="create-outline" size={16} color="#2962ff" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.deleteButton}
+              onPress={() => handleDeleteMatch(match._id || match.id)}
+            >
+              <Ionicons name="trash-outline" size={16} color="#F44336" />
+              <Text style={styles.deleteButtonText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </View>
+    );
+  };
+
+  if (loading && matches.length === 0) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingContainer}>
@@ -747,8 +918,9 @@ const MatchControlScreen = ({ navigation }) => {
             <View style={styles.headerTitleContainer}>
               <Text style={styles.headerTitle}>Match Control</Text>
               <Text style={styles.headerSubtitle}>Admin Dashboard</Text>
+              {/* ✅ FIXED: Show matches count instead of tournaments */}
               <Text style={styles.syncStatus}>
-                {tournaments.length} matches • {loading ? 'Syncing...' : 'Synced'}
+                {filteredMatches.length} matches • {loading ? 'Syncing...' : 'Synced'}
               </Text>
             </View>
 
@@ -756,7 +928,7 @@ const MatchControlScreen = ({ navigation }) => {
               <TouchableOpacity style={styles.headerActionButton} onPress={() => setShowCreateModal(true)}>
                 <Ionicons name="add" size={20} color="white" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.headerActionButton} onPress={refreshTournaments}>
+              <TouchableOpacity style={styles.headerActionButton} onPress={refreshMatches}>
                 <Ionicons name="refresh" size={20} color="white" />
               </TouchableOpacity>
             </View>
@@ -785,10 +957,11 @@ const MatchControlScreen = ({ navigation }) => {
         <View style={styles.tabContainer}>
           {[
             { key: 'all', label: 'All' },
+            { key: 'pending', label: 'Pending' },
             { key: 'upcoming', label: 'Upcoming' },
             { key: 'live', label: 'Live' },
             { key: 'completed', label: 'Completed' },
-            { key: 'pending', label: 'Pending' }
+            { key: 'rejected', label: 'Rejected' }
           ].map((tab) => (
             <TouchableOpacity
               key={tab.key}
@@ -802,60 +975,11 @@ const MatchControlScreen = ({ navigation }) => {
           ))}
         </View>
 
-        {/* Match List */}
+        {/* Match List - ✅ FIXED: Using filteredMatches */}
         <FlatList
           data={filteredMatches}
-          keyExtractor={(item) => item.id || item._id}
-          renderItem={({ item, index }) => (
-            <View style={styles.matchCard}>
-              <LinearGradient colors={['#1a237e', '#283593']} style={styles.cardGradient}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.gameInfo}>
-                    <View style={[styles.gameIcon, { backgroundColor: GAMES[item.game]?.color || '#2962ff' }]}>
-                      <Ionicons name={GAMES[item.game]?.icon || 'trophy'} size={20} color="white" />
-                    </View>
-                    <View style={styles.matchInfo}>
-                      <Text style={styles.matchTitle}>{item.title}</Text>
-                      <Text style={styles.matchSubtitle}>{GAMES[item.game]?.name}</Text>
-                    </View>
-                  </View>
-                  <View style={[styles.statusBadge, { 
-                    backgroundColor: item.status === 'live' ? '#4CAF50' : 
-                                    item.status === 'completed' ? '#2196F3' : '#FF9800'
-                  }]}>
-                    <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.statsContainer}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>৳{item.entryFee || item.entry_fee}</Text>
-                    <Text style={styles.statLabel}>Entry</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>৳{item.prizePool || item.total_prize}</Text>
-                    <Text style={styles.statLabel}>Prize</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statValue}>
-                      {item.currentPlayers || item.current_participants || 0}/
-                      {item.maxPlayers || item.max_participants || 50}
-                    </Text>
-                    <Text style={styles.statLabel}>Players</Text>
-                  </View>
-                </View>
-
-                <View style={styles.timeInfo}>
-                  <Text style={styles.timeText}>
-                    Starts: {new Date(item.scheduleTime).toLocaleString()}
-                  </Text>
-                  <Text style={styles.timeText}>
-                    Ends: {new Date(item.end_time).toLocaleString()}
-                  </Text>
-                </View>
-              </LinearGradient>
-            </View>
-          )}
+          keyExtractor={(item) => item.id || item._id || Math.random().toString()}
+          renderItem={({ item, index }) => <MatchCard match={item} index={index} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -871,13 +995,12 @@ const MatchControlScreen = ({ navigation }) => {
               <Text style={styles.emptySubtext}>
                 {searchQuery ? 'Try a different search' : 'Create your first match to get started'}
               </Text>
-              <SimpleButton
-                title="CREATE MATCH"
-                onPress={() => setShowCreateModal(true)}
-                type="primary"
-                icon="add"
+              <TouchableOpacity 
                 style={styles.emptyButton}
-              />
+                onPress={() => setShowCreateModal(true)}
+              >
+                <Text style={styles.emptyButtonText}>CREATE MATCH</Text>
+              </TouchableOpacity>
             </View>
           }
           contentContainerStyle={styles.matchList}
@@ -890,6 +1013,17 @@ const MatchControlScreen = ({ navigation }) => {
         visible={showCreateModal} 
         onClose={() => setShowCreateModal(false)} 
         onCreate={handleCreateMatch}
+      />
+
+      {/* ✅ NEW: Edit Match Modal */}
+      <EditMatchModal
+        visible={showEditModal}
+        match={selectedMatch}
+        onClose={() => {
+          setShowEditModal(false);
+          setSelectedMatch(null);
+        }}
+        onUpdate={handleUpdateMatch}
       />
 
       {/* Floating Create Button */}
@@ -908,7 +1042,7 @@ const MatchControlScreen = ({ navigation }) => {
   );
 };
 
-// Enhanced Styles with Date/Time Picker Styles
+// Complete Styles
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1043,7 +1177,15 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   emptyButton: {
-    marginTop: 8,
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  emptyButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   matchCard: {
     marginBottom: 16,
@@ -1085,6 +1227,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
   },
+  matchTypeBadge: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1119,6 +1267,87 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
     marginBottom: 2,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  // ✅ NEW: Approve Button Styles
+  approveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  approveButtonText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  // ✅ NEW: Reject Button Styles
+  rejectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(244, 67, 54, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  rejectButtonText: {
+    color: '#F44336',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(41, 98, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  editButtonText: {
+    color: '#2962ff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(244, 67, 54, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  deleteButtonText: {
+    color: '#F44336',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    borderRadius: 30,
+    overflow: 'hidden',
+  },
+  floatingButtonGradient: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   // Modal Styles
   modalOverlay: {
@@ -1171,10 +1400,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     color: '#333',
   },
-  textArea: {
-    height: 80,
-    textAlignVertical: 'top',
-  },
   formRow: {
     flexDirection: 'row',
     marginHorizontal: -8,
@@ -1183,28 +1408,6 @@ const styles = StyleSheet.create({
   formColumn: {
     flex: 1,
     paddingHorizontal: 8,
-  },
-  datePickerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  datePickerTextContainer: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  datePickerLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
-  },
-  datePickerText: {
-    fontSize: 14,
-    color: '#333',
   },
   inputWithButton: {
     flexDirection: 'row',
@@ -1250,28 +1453,25 @@ const styles = StyleSheet.create({
   gameOptionTextSelected: {
     color: 'white',
   },
+  // ✅ NEW: Approval Notice Styles
+  approvalNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(41, 98, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  approvalNoticeText: {
+    color: '#2962ff',
+    fontSize: 12,
+    marginLeft: 8,
+    flex: 1,
+  },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 16,
-  },
-  modalButton: {
-    flex: 1,
-    marginHorizontal: 8,
-  },
-  floatingButton: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    borderRadius: 30,
-    overflow: 'hidden',
-  },
-  floatingButtonGradient: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   // Button Styles
   primaryButton: {
@@ -1281,34 +1481,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flex: 1,
+    marginHorizontal: 8,
   },
   primaryButtonText: {
     color: 'white',
     fontSize: 14,
     fontWeight: 'bold',
   },
-  successButton: {
-    backgroundColor: '#4CAF50',
+  secondaryButton: {
+    backgroundColor: '#9E9E9E',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flex: 1,
+    marginHorizontal: 8,
   },
-  successButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  warningButton: {
-    backgroundColor: '#FF9800',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  warningButtonText: {
+  secondaryButtonText: {
     color: 'white',
     fontSize: 14,
     fontWeight: 'bold',
@@ -1321,30 +1512,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dangerButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  secondaryButton: {
-    backgroundColor: '#9E9E9E',
+  successButton: {
+    backgroundColor: '#4CAF50',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  buttonLarge: {
-    paddingVertical: 16,
-  },
-  buttonSmall: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
   },
   buttonDisabled: {
     opacity: 0.5,
@@ -1357,155 +1531,136 @@ const styles = StyleSheet.create({
   buttonIcon: {
     marginRight: 8,
   },
-  buttonTextLarge: {
-    fontSize: 16,
-  },
-  buttonTextSmall: {
-    fontSize: 12,
-  },
-  // Enhanced DateTime Picker Styles
-  dateTimePickerOverlay: {
+  // Custom Picker Styles
+  customPickerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     padding: 20,
   },
-  dateTimePickerContainer: {
-    backgroundColor: 'white',
-    borderRadius: 16,
+  customPickerContent: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 15,
+    padding: 20,
     maxHeight: '80%',
   },
-  dateTimePickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+  customPickerHeader: {
+    marginBottom: 15,
   },
-  dateTimePickerTitle: {
+  customPickerTitle: {
+    color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
-  },
-  quickTimeSection: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  quickTimeTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
-  },
-  quickTimeOptions: {
-    flexDirection: 'row',
-  },
-  quickTimeOption: {
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-  },
-  quickTimeText: {
-    fontSize: 12,
-    color: '#333',
+    textAlign: 'center',
   },
   pickerContainer: {
-    padding: 16,
-    alignItems: 'center',
+    marginBottom: 20,
   },
-  dateTimePicker: {
-    width: Platform.OS === 'ios' ? '100%' : 'auto',
+  pickerSection: {
+    marginBottom: 20,
   },
-  manualInputButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+  pickerLabel: {
+    color: 'white',
+    fontSize: 16,
+    marginBottom: 10,
+    fontWeight: '600',
   },
-  manualInputButtonText: {
-    color: '#2962ff',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
-  },
-  selectedDateContainer: {
-    padding: 16,
-    backgroundColor: '#f9f9f9',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-  },
-  selectedDateLabel: {
+  pickerSubLabel: {
+    color: '#bbb',
     fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  pickerColumn: {
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  pickerScroll: {
+    maxHeight: 150,
+    backgroundColor: '#2d2d2d',
+    borderRadius: 8,
+  },
+  pickerItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#444',
+    alignItems: 'center',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#2962ff',
+  },
+  pickerItemText: {
+    color: 'white',
+    fontSize: 14,
+  },
+  pickerItemTextSelected: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  selectedDatePreview: {
+    backgroundColor: '#2d2d2d',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: 'center',
   },
   selectedDateText: {
+    color: '#4CAF50',
     fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
-  manualInputContainer: {
-    padding: 20,
+  customPickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
   },
-  manualInputTitle: {
+  cancelButton: {
+    backgroundColor: '#666',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
   },
-  manualInputSubtitle: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 16,
-    lineHeight: 16,
+  confirmButton: {
+    backgroundColor: '#2962ff',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    flex: 1,
+    marginLeft: 8,
+    alignItems: 'center',
   },
-  manualInput: {
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Date input styles
+  dateInput: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 8,
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  manualInputError: {
-    borderColor: '#F44336',
-  },
-  manualErrorText: {
-    color: '#F44336',
-    fontSize: 12,
-    marginBottom: 12,
-  },
-  manualInputActions: {
+    marginBottom: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  manualButton: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 8,
     alignItems: 'center',
-    marginHorizontal: 4,
   },
-  cancelManualButton: {
-    backgroundColor: '#f5f5f5',
-  },
-  submitManualButton: {
-    backgroundColor: '#2962ff',
-  },
-  cancelManualText: {
+  dateInputText: {
     color: '#333',
-    fontWeight: '500',
-  },
-  submitManualText: {
-    color: 'white',
-    fontWeight: '500',
+    fontSize: 14,
   },
 });
 

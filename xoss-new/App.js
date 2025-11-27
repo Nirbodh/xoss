@@ -1,5 +1,6 @@
+// App.js - COMPLETELY FIXED
 import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, StatusBar } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
 import { AuthProvider } from './context/AuthContext';
 import { WalletProvider } from './context/WalletContext';
@@ -8,9 +9,7 @@ import { NotificationProvider } from './context/NotificationContext';
 import { LeaderboardProvider } from './context/LeaderboardContext';
 import { TournamentProvider } from './context/TournamentContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Error Boundary
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -45,7 +44,6 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// Main App - MatchContext সরিয়ে শুধু TournamentProvider ব্যবহার করুন
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -55,7 +53,6 @@ export default function App() {
             <NotificationProvider>
               <ChatProvider>
                 <LeaderboardProvider>
-                  {/* ✅ MatchContext সরিয়ে শুধু TournamentProvider ব্যবহার করুন */}
                   <TournamentProvider>
                     <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
                     <AppNavigator />
