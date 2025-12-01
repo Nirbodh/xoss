@@ -1,4 +1,4 @@
-// api/tournamentsAPI.js - ORIGINAL WORKING VERSION
+// api/tournamentsAPI.js - COMPLETE FIXED VERSION
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -91,54 +91,111 @@ const mapToFrontend = (backendData) => ({
   registered: backendData.registered || false
 });
 
+// ✅ FIXED: Request interceptor with proper token handling
 axiosInstance.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('auth_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
+  try {
+    const token = await AsyncStorage.getItem('token');
+    
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+      console.log('🔐 Token attached to request:', token.substring(0, 20) + '...');
+    } else {
+      console.log('⚠️ No token found for request');
+    }
+    
+    return config;
+  } catch (error) {
+    console.log('❌ Token interceptor error:', error);
+    return config;
+  }
 });
 
+// ✅ FIXED: Response interceptor to handle token errors
+axiosInstance.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  async (error) => {
+    if (error.response?.status === 401) {
+      console.log('🔐 Token expired or invalid');
+      try {
+        await AsyncStorage.multiRemove(['user', 'token']);
+      } catch (clearError) {
+        console.log('❌ Error clearing auth data:', clearError);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export const tournamentsAPI = {
-  // ✅ GET all events (matches + tournaments)
+  // ✅ GET all events (matches + tournaments) - REAL API CALL
   getAll: async () => {
     try {
+      console.log('🔄 Fetching tournaments from backend...');
       const res = await axiosInstance.get('/combined');
       
+      console.log('📥 Backend response:', res.data);
+      
       if (res.data && res.data.success) {
-        // Map all data to consistent frontend format
         const unifiedData = res.data.data.map(item => mapToFrontend(item));
+        console.log(`✅ Loaded ${unifiedData.length} events from backend`);
         return { 
           success: true, 
           data: unifiedData,
           count: unifiedData.length 
         };
       }
-      return { success: false, message: 'Failed to fetch data' };
+      return { success: false, message: 'Failed to fetch data from backend' };
     } catch (error) {
-      return { success: false, message: 'Failed to fetch tournaments' };
-    }
-  },
-
-  // ✅ CREATE event (match or tournament)
-  create: async (payload, token) => {
-    try {
-      const backendData = mapToBackend(payload);
-      const endpoint = payload.matchType === 'tournament' ? '/tournaments/create' : '/matches';
-      
-      const res = await axiosInstance.post(endpoint, backendData, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      
-      return res.data;
-    } catch (error) {
+      console.log('❌ Fetch tournaments error:', error.response?.data || error.message);
       return { 
         success: false, 
-        message: 'Failed to create event',
+        message: 'Failed to fetch tournaments',
         error: error.response?.data?.message || error.message 
       };
     }
   },
 
-  // Other methods (getById, update, delete, join) with consistent mapping...
+  // ✅ CREATE event (match or tournament) - REAL API CALL
+  create: async (payload) => {
+    try {
+      console.log('🎯 Creating event with payload:', payload);
+      
+      const backendData = mapToBackend(payload);
+      const endpoint = payload.matchType === 'tournament' ? '/tournaments/create' : '/matches';
+      
+      console.log('📤 Sending to backend endpoint:', endpoint);
+      console.log('📦 Backend data:', backendData);
+      
+      const res = await axiosInstance.post(endpoint, backendData);
+      
+      console.log('✅ Backend response:', res.data);
+      console.log('✅ Event created successfully in database');
+      return res.data;
+    } catch (error) {
+      console.log('❌ Create event error:', error.response?.data || error.message);
+      return { 
+        success: false, 
+        message: 'Failed to create event',
+        error: error.response?.data?.message || error.message,
+        status: error.response?.status
+      };
+    }
+  },
+
+  // ✅ GET by ID
+  getById: async (id) => {
+    try {
+      const res = await axiosInstance.get(`/matches/${id}`);
+      return res.data;
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
+    }
+  }
 };
 
 export default tournamentsAPI;

@@ -1,112 +1,148 @@
-// context/TournamentContext.js - ORIGINAL WORKING VERSION
+// context/TournamentContext.js - UPDATED FOR NEW API
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { tournamentsAPI } from '../api/tournamentsAPI';
+import axios from 'axios';
+import { BASE_URL } from '../config';
 import { useAuth } from './AuthContext';
 
 const TournamentContext = createContext();
 
 export function TournamentProvider({ children }) {
-  const { user, token } = useAuth() || {};
-  const [tournaments, setTournaments] = useState([]);
+  const { user, token, isAuthenticated } = useAuth();
+  const [allEvents, setAllEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // ✅ UNIFIED DATA FETCHING
+  // ✅ FIXED: CORRECT API RESPONSE HANDLING WITH NEW ENDPOINTS
   const refreshTournaments = async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const res = await tournamentsAPI.getAll();
+      console.log('🔄 Fetching tournaments and matches...');
       
-      if (res && res.success) {
-        // Data is already mapped to consistent frontend format in API
-        setTournaments(res.data || []);
-      } else {
-        setError(res?.message || 'Failed to load tournaments and matches');
-        setTournaments([]);
+      // Fetch tournaments - NO FILTERS
+      const tournamentsResponse = await axios.get(`${BASE_URL}/tournaments`);
+      console.log('📥 Tournaments response:', tournamentsResponse.data);
+      
+      // Fetch matches - NO FILTERS  
+      const matchesResponse = await axios.get(`${BASE_URL}/matches`);
+      console.log('📥 Matches response:', matchesResponse.data);
+      
+      if (tournamentsResponse.data.success && matchesResponse.data.success) {
+        // ✅ CORRECT: tournaments from 'tournaments' property
+        const tournamentsData = tournamentsResponse.data.tournaments || [];
+        // ✅ CORRECT: matches from 'data' property 
+        const matchesData = matchesResponse.data.data || [];
+        
+        console.log(`✅ Raw data: ${tournamentsData.length} tournaments, ${matchesData.length} matches`);
+        
+        // Transform tournaments
+        const transformedTournaments = tournamentsData.map(item => ({
+          id: item._id,
+          _id: item._id,
+          title: item.title,
+          game: item.game,
+          matchType: 'tournament',
+          type: item.type || 'Squad',
+          entryFee: item.entry_fee || item.entryFee || 0,
+          prizePool: item.total_prize || item.prizePool || 0,
+          maxPlayers: item.max_participants || item.maxPlayers || 50,
+          currentPlayers: item.current_participants || item.currentPlayers || 0,
+          spotsLeft: (item.max_participants || item.maxPlayers || 50) - (item.current_participants || item.currentPlayers || 0),
+          roomId: item.room_id || item.roomId || '',
+          password: item.room_password || item.password || '',
+          scheduleTime: item.schedule_time || item.scheduleTime,
+          status: item.status || 'upcoming',
+          approval_status: item.approval_status || 'pending',
+          created_by: item.created_by
+        }));
+
+        // Transform matches
+        const transformedMatches = matchesData.map(item => ({
+          id: item._id,
+          _id: item._id,
+          title: item.title,
+          game: item.game,
+          matchType: 'match',
+          type: item.type || 'Solo',
+          entryFee: item.entry_fee || item.entryFee || 0,
+          prizePool: item.total_prize || item.prizePool || 0,
+          maxPlayers: item.max_participants || item.maxPlayers || 25,
+          currentPlayers: item.current_participants || item.currentPlayers || 0,
+          spotsLeft: (item.max_participants || item.maxPlayers || 25) - (item.current_participants || item.currentPlayers || 0),
+          roomId: item.room_id || item.roomId || '',
+          password: item.room_password || item.password || '',
+          scheduleTime: item.schedule_time || item.scheduleTime,
+          status: item.status || 'upcoming',
+          approval_status: item.approval_status || 'pending',
+          created_by: item.created_by
+        }));
+
+        // Combine all events
+        const combinedEvents = [...transformedTournaments, ...transformedMatches];
+        
+        console.log('🎯 Final data:', {
+          totalEvents: combinedEvents.length,
+          tournaments: transformedTournaments.length,
+          matches: transformedMatches.length
+        });
+        
+        setAllEvents(combinedEvents);
       }
     } catch (err) {
-      setError(err.message || 'Network error');
-      setTournaments([]);
+      console.error('❌ Fetch error:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ UNIFIED CREATE FUNCTION
-  const createTournament = async (data) => {
+  // Filter functions
+  const getTournaments = () => allEvents.filter(event => event.matchType === 'tournament');
+  const getMatches = () => allEvents.filter(event => event.matchType === 'match');
+
+  // Create tournament function
+  const createTournament = async (tournamentData) => {
     try {
-      setLoading(true);
-      setError(null);
+      const response = await axios.post(`${BASE_URL}/tournaments/create`, tournamentData, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
       
-      // Ensure matchType is set
-      const payload = {
-        ...data,
-        matchType: data.matchType || 'match',
-        created_by: user?.userId || 'admin'
+      if (response.data.success) {
+        await refreshTournaments(); // Refresh the list
+      }
+      
+      return response.data;
+    } catch (err) {
+      console.error('❌ Create tournament error:', err);
+      return {
+        success: false,
+        error: err.response?.data?.message || 'Failed to create tournament'
       };
-
-      const result = await tournamentsAPI.create(payload, token);
-      
-      if (result && result.success) {
-        await refreshTournaments();
-        return { 
-          success: true, 
-          message: 'Event created successfully',
-          data: result.data 
-        };
-      } else {
-        return { 
-          success: false, 
-          error: result?.message || 'Create failed' 
-        };
-      }
-    } catch (err) {
-      setError(err.message);
-      return { success: false, error: err.message };
-    } finally {
-      setLoading(false);
     }
   };
 
-  // ✅ FILTER FUNCTIONS WITH CONSISTENT FIELD NAMES
-  const getTournamentsByGame = (gameId) => {
-    return tournaments.filter(t => 
-      (t.game || '').toLowerCase() === (gameId || '').toLowerCase()
-    );
-  };
-
-  const getMatches = () => {
-    return tournaments.filter(t => t.matchType === 'match');
-  };
-
-  const getTournaments = () => {
-    return tournaments.filter(t => t.matchType === 'tournament');
-  };
-
-  const joinTournament = async (tournamentId) => {
+  // Delete tournament function
+  const deleteTournament = async (tournamentId) => {
     try {
-      setLoading(true);
-      const tournament = tournaments.find(t => 
-        t._id === tournamentId || t.id === tournamentId
-      );
+      const response = await axios.delete(`${BASE_URL}/tournaments/${tournamentId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      if (!tournament) throw new Error('Tournament not found');
+      if (response.data.success) {
+        await refreshTournaments(); // Refresh the list
+      }
       
-      const current = tournament.currentPlayers || 0;
-      const max = tournament.maxPlayers || 50;
-      
-      if (current >= max) throw new Error('No spots left');
-
-      // Implement join API call here
-      await refreshTournaments();
-      return { success: true, message: 'Successfully joined tournament' };
+      return response.data;
     } catch (err) {
-      setError(err.message);
-      return { success: false, error: err.message };
-    } finally {
-      setLoading(false);
+      console.error('❌ Delete tournament error:', err);
+      return {
+        success: false,
+        error: err.response?.data?.message || 'Failed to delete tournament'
+      };
     }
   };
 
@@ -117,18 +153,12 @@ export function TournamentProvider({ children }) {
   return (
     <TournamentContext.Provider
       value={{
-        // Data
-        tournaments,
+        tournaments: allEvents,
         matches: getMatches(),
         tournamentsOnly: getTournaments(),
-        
-        // Actions
         refreshTournaments,
         createTournament,
-        joinTournament,
-        getTournamentsByGame,
-        
-        // State
+        deleteTournament,
         loading,
         error,
         clearError: () => setError(null),

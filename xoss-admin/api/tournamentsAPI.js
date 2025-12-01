@@ -1,178 +1,97 @@
-// api/tournamentsAPI.js - COMPLETELY FIXED VERSION
+// api/tournamentsAPI.js - FIXED URL AND TOKEN
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_BASE_URL = 'https://xoss.onrender.com/api'; // ✅ FIXED URL
+import { BASE_URL } from '../config'; // ✅ Import Config
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: BASE_URL,
   timeout: 15000,
   headers: {
-    'Content-Type': 'application/json',
-  }
+    'Content-Type': 'application/json'
+  },
 });
 
-// ✅ IMPROVED Auth Interceptor
+// ✅ AUTH INTERCEPTOR
 api.interceptors.request.use(
   async (config) => {
     try {
+      // ✅ FIX: Changed 'auth_token' to 'token'
       const token = await AsyncStorage.getItem('token');
-      console.log('🔑 Token from storage:', token ? 'Found' : 'Not found');
-      
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-        console.log('✅ Token attached to request');
-      } else {
-        console.warn('⚠️ No token found for request');
-      }
+      if (token) config.headers.Authorization = `Bearer ${token}`;
     } catch (error) {
-      console.error('❌ Token interceptor error:', error);
+      console.error('Token Error:', error);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// ✅ Response Interceptor for Auth Errors
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      console.log('🔐 401 Unauthorized - Token invalid');
-      AsyncStorage.removeItem('token');
-    }
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 export const tournamentsAPI = {
-  // ✅ Health check
-  health: async () => {
+  // ✅ GET ALL
+  getAll: async () => {
     try {
-      const res = await api.get('/health');
-      return res.data;
-    } catch (err) {
-      return { success: false, message: 'Server not reachable' };
-    }
-  },
-
-  // ✅ GET ALL EVENTS (matches + tournaments) - FIXED
-  getAll: async (params = {}) => {
-    try {
-      console.log('🔍 Fetching ALL events from combined endpoint...');
-      
-      const res = await api.get('/combined', { params });
-      console.log('✅ GET Combined Response:', res.data);
-      
-      return res.data;
-    } catch (err) {
-      console.error('❌ API getAll error:', {
-        message: err.message,
-        status: err.response?.status,
-        data: err.response?.data
-      });
-      
-      // Fallback: Try separate endpoints if combined fails
+      // Trying combined endpoint first
+      const res = await api.get('/combined');
+      if (res.data && res.data.success) {
+        return { success: true, data: res.data.data };
+      }
+      return { success: false, message: 'Failed to fetch data' };
+    } catch (error) {
+      // Fallback
       try {
-        console.log('🔄 Trying separate endpoints...');
-        const [tournamentsRes, matchesRes] = await Promise.all([
-          api.get('/tournaments'),
-          api.get('/matches')
-        ]);
-
-        const combinedData = [
-          ...(tournamentsRes.data.tournaments || []).map(item => ({ ...item, matchType: 'tournament' })),
-          ...(matchesRes.data.data || []).map(item => ({ ...item, matchType: 'match' }))
-        ];
-
-        return {
-          success: true,
-          data: combinedData,
-          count: combinedData.length,
-          message: 'Used fallback method'
-        };
-      } catch (fallbackError) {
-        return { 
-          success: false, 
-          message: 'Failed to fetch events',
-          error: err.message 
-        };
+        console.log("🔄 Fallback to /tournaments endpoint");
+        const res = await api.get('/tournaments');
+        return { success: true, data: res.data.tournaments || [] };
+      } catch (e) {
+        return { success: false, message: 'Network error connecting to ' + BASE_URL };
       }
     }
   },
 
-  // ✅ CREATE TOURNAMENT - FIXED ENDPOINT
-  create: async (data) => {
+  // ✅ CREATE
+  create: async (payload) => {
     try {
-      console.log('📤 Creating tournament...', data);
-      
-      const res = await api.post('/tournaments/create', data);
-      console.log('✅ CREATE Tournament Response:', res.data);
+      // Determine endpoint based on matchType
+      const endpoint = payload.matchType === 'tournament' ? '/tournaments/create' : '/matches';
+      const res = await api.post(endpoint, payload);
       return res.data;
-    } catch (err) {
-      console.error('❌ API create error:', {
-        message: err.message,
-        status: err.response?.status,
-        data: err.response?.data
-      });
+    } catch (error) {
+      console.error("Create API Error:", error.response?.data || error.message);
       return { 
         success: false, 
-        message: err.response?.data?.message || err.message 
+        message: 'Failed to create event', 
+        error: error.response?.data?.message || error.message 
       };
     }
   },
 
-  // ✅ UPDATE TOURNAMENT
-  update: async (id, data) => {
-    try {
-      const res = await api.put(`/tournaments/${id}`, data);
-      return res.data;
-    } catch (err) {
-      return { 
-        success: false, 
-        message: err.response?.data?.message || err.message 
-      };
-    }
-  },
-
-  // ✅ DELETE TOURNAMENT
-  delete: async (id) => {
-    try {
-      const res = await api.delete(`/tournaments/${id}`);
-      return res.data;
-    } catch (err) {
-      return { 
-        success: false, 
-        message: err.response?.data?.message || err.message 
-      };
-    }
-  },
-
-  // ✅ GET SINGLE TOURNAMENT
-  getById: async (id) => {
-    try {
-      const res = await api.get(`/tournaments/${id}`);
-      return res.data;
-    } catch (err) {
-      return { 
-        success: false, 
-        message: err.response?.data?.message || err.message 
-      };
-    }
-  },
-
-  // ✅ JOIN TOURNAMENT
+  // ✅ JOIN
   join: async (id) => {
     try {
       const res = await api.post(`/tournaments/${id}/join`);
       return res.data;
     } catch (err) {
-      return { 
-        success: false, 
-        message: err.response?.data?.message || err.message 
-      };
+      return { success: false, message: err.message };
+    }
+  },
+
+  // ✅ UPDATE
+  update: async (id, data) => {
+    try {
+      const res = await api.put(`/tournaments/${id}`, data);
+      return res.data;
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  },
+
+  // ✅ DELETE
+  delete: async (id) => {
+    try {
+      const res = await api.delete(`/tournaments/${id}`);
+      return res.data;
+    } catch (err) {
+      return { success: false, message: err.message };
     }
   }
 };

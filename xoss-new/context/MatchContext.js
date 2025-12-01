@@ -1,96 +1,104 @@
-// xoss-new/context/MatchContext.js - COMPLETELY FIXED
+// context/MatchContext.js - COMPLETELY FIXED ERROR HANDLING
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
+import { BASE_URL } from '../config';
+import { useAuth } from './AuthContext';
 
-// 🎯 Create Context
 const MatchContext = createContext();
 
-// 🎯 matchesAPI - DIRECTLY INLINE (No external dependency)
-const matchesAPI = {
-  getAll: async () => {
-    try {
-      console.log('🔄 Fetching matches from backend...');
-      
-      // For now, return mock data - Backend fix হলে real API call করুন
-      console.log('🔄 Using inline mock data');
-      return {
-        success: true,
-        data: [
-          {
-            _id: '1',
-            title: 'DAILY ROYALE TOURNAMENT',
-            game: 'freefire',
-            matchType: 'match',
-            type: 'Solo',
-            map: 'Bermuda',
-            entry_fee: 50,
-            total_prize: 5000,
-            perKill: 10,
-            max_participants: 100,
-            current_participants: 48,
-            status: 'upcoming',
-            scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-            start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-            roomId: '123456',
-            room_code: '123456',
-            password: 'xoss123',
-            description: 'Daily tournament for Free Fire players',
-            created_by: 'admin'
-          },
-          {
-            _id: '2', 
-            title: 'WEEKEND SHOWDOWN',
-            game: 'pubg',
-            matchType: 'tournament',
-            type: 'Squad', 
-            map: 'Erangel',
-            entry_fee: 100,
-            total_prize: 10000,
-            perKill: 15,
-            max_participants: 50,
-            current_participants: 35,
-            status: 'upcoming',
-            scheduleTime: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
-            start_time: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
-            roomId: '789012',
-            room_code: '789012', 
-            password: 'pubg123',
-            description: 'Weekend tournament for PUBG Mobile',
-            created_by: 'admin'
-          }
-        ],
-        message: 'Using mock data - Backend connection in progress'
-      };
-    } catch (err) {
-      console.error('❌ Inline matchesAPI error:', err);
-      return {
-        success: true,
-        data: [],
-        message: 'Error fetching matches'
-      };
-    }
-  }
-};
-
-// 🎯 Provider Component
 export const MatchProvider = ({ children }) => {
-  const [matches, setMatches] = useState([]);       // সব ম্যাচ
-  const [loading, setLoading] = useState(false);    // লোডিং স্টেট
-  const [error, setError] = useState(null);         // এরর স্টেট
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const { user, token } = useAuth();
 
-  // ✅ Fetch All Matches (Inline API থেকে)
+  // ✅ REAL API CALLS - FIXED ENDPOINTS
+  const matchesAPI = {
+    // GET all matches
+    getAll: async () => {
+      try {
+        console.log('🔄 Fetching matches from REAL API...');
+        const response = await axios.get(`${BASE_URL}/matches`);
+        console.log('📥 REAL API Response:', response.data);
+        return response.data;
+      } catch (err) {
+        console.error('❌ API Error:', err);
+        return {
+          success: false,
+          data: [],
+          message: err.response?.data?.message || 'Failed to fetch matches'
+        };
+      }
+    },
+
+    // CREATE match - FIXED ENDPOINT
+    create: async (matchData) => {
+      try {
+        console.log('🔄 Creating match via REAL API:', matchData);
+        const response = await axios.post(`${BASE_URL}/matches`, matchData, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        return response.data;
+      } catch (err) {
+        console.error('❌ Create Match Error:', err);
+        return {
+          success: false,
+          error: err.response?.data?.message || 'Failed to create match'
+        };
+      }
+    },
+
+    // UPDATE match
+    update: async (matchId, updateData) => {
+      try {
+        const response = await axios.put(`${BASE_URL}/matches/${matchId}`, updateData, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        return response.data;
+      } catch (err) {
+        return {
+          success: false,
+          error: err.response?.data?.message || 'Failed to update match'
+        };
+      }
+    },
+
+    // DELETE match
+    delete: async (matchId) => {
+      try {
+        const response = await axios.delete(`${BASE_URL}/matches/${matchId}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        return response.data;
+      } catch (err) {
+        return {
+          success: false,
+          error: err.response?.data?.message || 'Failed to delete match'
+        };
+      }
+    }
+  };
+
+  // ✅ Fetch All Matches
   const refreshMatches = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('🔄 Fetching matches...');
+      console.log('🔄 Fetching matches from REAL API...');
 
-      const res = await matchesAPI.getAll(); // 🛰️ Inline API থেকে ডেটা নিচ্ছে
-      console.log('📥 Matches Response:', res);
+      const res = await matchesAPI.getAll();
+      console.log('📥 API Response:', res);
 
       if (res && res.success) {
         setMatches(res.data || []);
       } else {
-        setError('Failed to load matches');
+        setError(res?.message || 'Failed to load matches');
       }
     } catch (err) {
       console.error('❌ Match fetch error:', err);
@@ -100,15 +108,65 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ Debug Function
-  const debugMatchesAPI = async () => {
+  // ✅ Create Match - SIMPLIFIED
+  const createMatch = async (matchData) => {
     try {
-      console.log('🔍 Debugging Matches API...');
-      const response = await matchesAPI.getAll();
-      console.log('📊 Match API Response:', response);
-    } catch (error) {
-      console.error('❌ Debug Matches API error:', error);
+      setLoading(true);
+      
+      // ✅ SIMPLIFIED: Direct mapping without complex conversion
+      const backendMatchData = {
+        title: matchData.title,
+        game: matchData.game,
+        description: matchData.description || '',
+        rules: matchData.rules || '',
+        entryFee: Number(matchData.entryFee) || 0,
+        prizePool: Number(matchData.prizePool) || 0,
+        perKill: Number(matchData.perKill) || 0,
+        maxPlayers: Number(matchData.maxPlayers) || 25,
+        roomId: matchData.roomId || '',
+        password: matchData.password || '',
+        map: matchData.map || 'Bermuda',
+        type: matchData.type || 'Solo',
+        scheduleTime: matchData.scheduleTime,
+        endTime: matchData.endTime,
+        status: 'pending'
+      };
+
+      console.log('🔄 Sending to backend:', backendMatchData);
+      const result = await matchesAPI.create(backendMatchData);
+      
+      if (result.success) {
+        await refreshMatches(); // Refresh the list
+      }
+      
+      return result;
+    } catch (err) {
+      console.error('❌ Create match error:', err);
+      return {
+        success: false,
+        error: err.message || 'Failed to create match'
+      };
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // ✅ Update Match
+  const updateMatch = async (matchId, updateData) => {
+    const result = await matchesAPI.update(matchId, updateData);
+    if (result.success) {
+      await refreshMatches();
+    }
+    return result;
+  };
+
+  // ✅ Delete Match
+  const deleteMatch = async (matchId) => {
+    const result = await matchesAPI.delete(matchId);
+    if (result.success) {
+      await refreshMatches();
+    }
+    return result;
   };
 
   // ✅ Auto Fetch on Mount
@@ -116,7 +174,6 @@ export const MatchProvider = ({ children }) => {
     refreshMatches();
   }, []);
 
-  // 🎯 Provide data to all components
   return (
     <MatchContext.Provider
       value={{
@@ -124,7 +181,9 @@ export const MatchProvider = ({ children }) => {
         loading,
         error,
         refreshMatches,
-        debugMatchesAPI
+        createMatch,
+        updateMatch,
+        deleteMatch
       }}
     >
       {children}
@@ -132,5 +191,10 @@ export const MatchProvider = ({ children }) => {
   );
 };
 
-// 🎯 Custom Hook for easy access
-export const useMatches = () => useContext(MatchContext);
+export const useMatches = () => {
+  const context = useContext(MatchContext);
+  if (!context) {
+    throw new Error('useMatches must be used within a MatchProvider');
+  }
+  return context;
+};

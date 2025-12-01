@@ -1,4 +1,4 @@
-// screens/DepositScreen.js - COMPLETELY FIXED VERSION
+// screens/DepositScreen.js - COMPLETE FIXED VERSION
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -130,7 +130,7 @@ const DepositScreen = ({ navigation, route }) => {
   // ✅ FIXED: Load recent deposits - REAL API CALL
   const loadRecentDeposits = async () => {
     try {
-      console.log('📊 Loading deposits...');
+      console.log('📊 Loading deposits from backend...');
       
       const currentUserId = getUserId();
       
@@ -159,7 +159,7 @@ const DepositScreen = ({ navigation, route }) => {
       
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ Deposits loaded from API:', data.data?.length || 0);
+        console.log('✅ Deposits loaded from backend:', data.data?.length || 0);
         setRecentDeposits(data.data || []);
       } else {
         console.log('❌ Deposits API failed:', response.status);
@@ -278,7 +278,7 @@ const DepositScreen = ({ navigation, route }) => {
   // ✅ FIXED: Create deposit request - REAL API CALL
   const createDepositRequest = async (depositData) => {
     try {
-      console.log('🔐 Preparing deposit request...');
+      console.log('🔐 Preparing deposit request for backend...');
       
       if (!token) {
         throw new Error('User not authenticated. Please login again.');
@@ -488,49 +488,6 @@ const DepositScreen = ({ navigation, route }) => {
     );
   };
 
-  // Status Display Component
-  const StatusIndicator = () => {
-    if (depositStatus === 'pending') {
-      return null;
-    }
-
-    const statusConfig = {
-      processing: {
-        color: '#FFA500',
-        icon: 'time',
-        text: 'এডমিন ভেরিফিকেশন চলছে...',
-        message: adminMessage || 'আপনার ডিপোজিট রিকুয়েস্ট এডমিন ভেরিফিকেশনের জন্য প্রেরণ করা হয়েছে।'
-      },
-      approved: {
-        color: '#4CAF50',
-        icon: 'checkmark-circle',
-        text: 'ডিপোজিট Approved!',
-        message: adminMessage
-      },
-      rejected: {
-        color: '#ff4444',
-        icon: 'close-circle',
-        text: 'ডিপোজিট Rejected',
-        message: adminMessage
-      }
-    };
-
-    const config = statusConfig[depositStatus];
-
-    return (
-      <View style={[styles.statusContainer, { borderLeftColor: config.color }]}>
-        <View style={styles.statusHeader}>
-          <Ionicons name={config.icon} size={20} color={config.color} />
-          <Text style={[styles.statusTitle, { color: config.color }]}>{config.text}</Text>
-        </View>
-        <Text style={styles.statusMessage}>{config.message}</Text>
-        {depositStatus === 'processing' && (
-          <ActivityIndicator size="small" color="#FFA500" style={styles.statusLoader} />
-        )}
-      </View>
-    );
-  };
-
   return (
     <KeyboardAvoidingView 
       style={styles.container}
@@ -567,9 +524,6 @@ const DepositScreen = ({ navigation, route }) => {
           <Text style={styles.balanceLabel}>বর্তমান ব্যালেন্স</Text>
           <Text style={styles.balanceAmount}>৳{balance}</Text>
         </View>
-
-        {/* Status Indicator */}
-        <StatusIndicator />
 
         {/* Payment Method Selection */}
         <View style={styles.section}>
@@ -929,31 +883,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 32,
     fontWeight: 'bold',
-  },
-  statusContainer: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    margin: 15,
-    padding: 15,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-  },
-  statusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  statusTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  statusMessage: {
-    color: '#ccc',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  statusLoader: {
-    marginTop: 10,
   },
   section: {
     backgroundColor: 'rgba(255,255,255,0.05)',

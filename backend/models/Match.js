@@ -50,9 +50,7 @@ const matchSchema = new mongoose.Schema({
   rejection_reason: { type: String, default: '' },
   admin_notes: { type: String, default: '' },
 
-  // ---------------------------------------
-  // ✅ RESULT SYSTEM (NEW - ADD THIS)
-  // ---------------------------------------
+  // Result System
   results: [{
     playerId: { type: String, required: true },
     playerName: { type: String, required: true },
@@ -89,9 +87,7 @@ const matchSchema = new mongoose.Schema({
     default: 'pending' 
   },
 
-  // ---------------------------------------
-  // ✅ PRIZE DISTRIBUTION SYSTEM (Existing)
-  // ---------------------------------------
+  // Prize Distribution System
   winners: [{
     rank: Number,
     playerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -121,7 +117,8 @@ const matchSchema = new mongoose.Schema({
   refundDate: Date,
   distributedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { 
-  timestamps: true 
+  timestamps: true,
+  collection: 'matches'  // ✅ ADD THIS LINE - Use the correct collection
 });
 
 // Virtual Fields (Frontend)

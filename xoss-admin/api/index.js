@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from '../config';
 
-// Get token
+// ✅ FIXED: Changed 'xoss_token' to 'token' to match AuthContext
 export const getToken = async () => {
   try {
-    return await AsyncStorage.getItem('xoss_token');
+    return await AsyncStorage.getItem('token');
   } catch (error) {
     console.log('getToken error:', error);
     return null;

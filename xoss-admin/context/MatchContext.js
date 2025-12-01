@@ -1,35 +1,48 @@
-// context/MatchContext.js - COMPLETELY FIXED WITH APPROVAL SYSTEM
+// context/MatchContext.js - COMPLETELY FIXED VERSION
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { matchesAPI } from '../api/matchesAPI'; // ✅ Use real API
+import { matchesAPI } from '../api/matchesAPI';
 import { useAuth } from './AuthContext';
 
 const MatchContext = createContext();
 
 export const MatchProvider = ({ children }) => {
-  const { user, token } = useAuth() || {};
+  const { user } = useAuth();
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // ✅ REAL API: Fetch All Matches
+  // ✅ FIXED: Proper data fetching with DEBUG
   const refreshMatches = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('🔄 Fetching matches from REAL API...');
+      console.log('🔄 MatchContext: Fetching matches from API...');
 
       const res = await matchesAPI.getAll();
-      console.log('📥 Matches API Response:', res);
-
+      console.log('📥 MatchContext FULL API Response:', res);
+      
+      // ✅ CRITICAL FIX: Handle different response structures
+      let matchData = [];
+      
       if (res && res.success) {
-        setMatches(res.data || []);
-        console.log(`✅ Loaded ${res.data?.length || 0} matches from backend`);
+        // Handle different backend response formats
+        if (Array.isArray(res.data)) {
+          matchData = res.data; // Standard format: {success: true, data: [...]}
+        } else if (Array.isArray(res.matches)) {
+          matchData = res.matches; // Alternative format: {success: true, matches: [...]}
+        } else if (Array.isArray(res)) {
+          matchData = res; // Direct array response
+        }
+        
+        console.log(`✅ MatchContext: Loaded ${matchData.length} matches`);
+        setMatches(matchData);
       } else {
+        console.error('❌ MatchContext: API returned failure:', res);
         setError(res?.message || 'Failed to load matches');
         setMatches([]);
       }
     } catch (err) {
-      console.error('❌ Match fetch error:', err);
+      console.error('❌ MatchContext fetch error:', err);
       setError(err.message || 'Network error');
       setMatches([]);
     } finally {
@@ -37,59 +50,21 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ REAL API: Create Match
+  // ✅ FIXED: Create match function
   const createMatch = async (matchData) => {
     try {
       setLoading(true);
       setError(null);
       console.log('🎯 Creating match with data:', matchData);
 
-      // ✅ Ensure all required fields for backend
-      const backendData = {
-        title: matchData.title,
-        game: matchData.game,
-        description: matchData.description || '',
-        rules: matchData.rules || '',
-        
-        // Financial - BACKEND FIELD NAMES
-        entry_fee: Number(matchData.entryFee) || 0,
-        total_prize: Number(matchData.prizePool) || 0,
-        per_kill: Number(matchData.perKill) || 0,
-        
-        // Participants - BACKEND FIELD NAMES
-        max_participants: Number(matchData.maxPlayers) || 50,
-        current_participants: 0, // Always start with 0
-        
-        // Game settings
-        type: matchData.type || 'Solo',
-        map: matchData.map || 'Bermuda',
-        match_type: 'match', // ✅ IMPORTANT: This is a match
-        
-        // Room info
-        room_id: matchData.roomId || '',
-        room_password: matchData.password || '',
-        
-        // Timing
-        start_time: matchData.startTime || matchData.scheduleTime,
-        end_time: matchData.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-        schedule_time: matchData.scheduleTime,
-        
-        // Status & Approval - ✅ SET TO PENDING FOR APPROVAL
-        status: 'pending',
-        approval_status: 'pending',
-        created_by: matchData.created_by || user?.userId
-      };
-
-      console.log('📤 Sending to backend:', backendData);
-
-      const result = await matchesAPI.create(backendData);
+      const result = await matchesAPI.create(matchData);
       
       if (result && result.success) {
-        console.log('✅ Match created successfully in backend (Pending Approval)');
+        console.log('✅ Match created successfully');
         await refreshMatches(); // Refresh the list
         return { 
           success: true, 
-          message: 'Match created successfully! Waiting for admin approval.',
+          message: 'Match created successfully!',
           data: result.data 
         };
       } else {
@@ -107,7 +82,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ REAL API: Update Match
+  // ✅ FIXED: Update match function
   const updateMatch = async (matchId, updateData) => {
     try {
       setLoading(true);
@@ -126,7 +101,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ REAL API: Delete Match
+  // ✅ FIXED: Delete match function
   const deleteMatch = async (matchId) => {
     try {
       setLoading(true);
@@ -145,7 +120,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ NEW: Approve Match Function
+  // ✅ FIXED: Approve match function
   const approveMatch = async (matchId) => {
     try {
       setLoading(true);
@@ -167,7 +142,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ NEW: Reject Match Function
+  // ✅ FIXED: Reject match function
   const rejectMatch = async (matchId) => {
     try {
       setLoading(true);
@@ -189,18 +164,25 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ Debug Function
-  const debugMatchesAPI = async () => {
+  const joinMatch = async (matchId) => {
     try {
-      console.log('🔍 Debugging Matches API...');
-      const response = await matchesAPI.getAll();
-      console.log('📊 Match API Response:', response);
-    } catch (error) {
-      console.error('❌ Debug Matches API error:', error);
+      setLoading(true);
+      const result = await matchesAPI.join(matchId);
+      
+      if (result && result.success) {
+        await refreshMatches();
+        return { success: true, message: 'Successfully joined match' };
+      } else {
+        return { success: false, error: result?.message || 'Join failed' };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setLoading(false);
     }
   };
 
-  // ✅ Auto Fetch on Mount
+  // Load matches on component mount
   useEffect(() => {
     refreshMatches();
   }, []);
@@ -208,21 +190,16 @@ export const MatchProvider = ({ children }) => {
   return (
     <MatchContext.Provider
       value={{
-        // Data
         matches,
-        
-        // Actions - REAL API
+        loading,
+        error,
         refreshMatches,
         createMatch,
         updateMatch,
         deleteMatch,
-        approveMatch, // ✅ NEW
-        rejectMatch,  // ✅ NEW
-        debugMatchesAPI,
-        
-        // State
-        loading,
-        error,
+        approveMatch,
+        rejectMatch,
+        joinMatch,
         clearError: () => setError(null),
       }}
     >

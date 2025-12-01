@@ -1,26 +1,9 @@
 // context/AuthContext.js - COMPLETELY FIXED
-import React, { createContext, useState, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
 const BASE_URL = 'https://xoss.onrender.com/api';
-const axiosInstance = axios.create({
-  baseURL: BASE_URL,
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-axiosInstance.interceptors.request.use(async (config) => {
-  try {
-    const token = await AsyncStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  } catch (error) {
-    console.log('❌ Token interceptor error:', error);
-  }
-  return config;
-});
 
 const AuthContext = createContext();
 
@@ -30,39 +13,69 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // ✅ Check authentication status on app start
   useEffect(() => {
     checkAuthState();
   }, []);
 
   const checkAuthState = async () => {
     try {
-      console.log('🔄 Loading user from storage...');
+      console.log('🔄 Checking authentication state...');
+      
       const userData = await AsyncStorage.getItem('user');
       const userToken = await AsyncStorage.getItem('token');
       
       if (userData && userToken) {
         const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-        setToken(userToken);
-        setIsAuthenticated(true);
-        console.log('✅ User loaded from storage:', parsedUser.email);
+        
+        // ✅ Verify token is still valid by making a test API call
+        try {
+          const response = await axios.get(`${BASE_URL}/auth/me`, {
+            headers: { Authorization: `Bearer ${userToken}` }
+          });
+          
+          if (response.data.success) {
+            setUser(parsedUser);
+            setToken(userToken);
+            setIsAuthenticated(true);
+            console.log('✅ User authenticated from storage:', parsedUser.email);
+          } else {
+            // Token is invalid, clear storage
+            await clearAuthData();
+          }
+        } catch (error) {
+          console.log('❌ Token validation failed:', error.message);
+          await clearAuthData();
+        }
       } else {
-        console.log('❌ No user data found in storage');
+        console.log('❌ No authentication data found');
         setIsAuthenticated(false);
       }
     } catch (error) {
-      console.log('❌ Error loading auth state:', error);
-      setIsAuthenticated(false);
+      console.log('❌ Error checking auth state:', error);
+      await clearAuthData();
     } finally {
       setIsLoading(false);
     }
   };
 
+  const clearAuthData = async () => {
+    try {
+      await AsyncStorage.multiRemove(['user', 'token']);
+      setUser(null);
+      setToken(null);
+      setIsAuthenticated(false);
+    } catch (error) {
+      console.log('❌ Error clearing auth data:', error);
+    }
+  };
+
+  // ✅ FIXED: Login function with proper error handling
   const login = async (credentials) => {
     try {
       console.log('🔐 Attempting login with:', credentials.email);
       
-      const response = await axiosInstance.post('/auth/login', {
+      const response = await axios.post(`${BASE_URL}/auth/login`, {
         email: credentials.email,
         password: credentials.password
       });
@@ -70,6 +83,7 @@ export const AuthProvider = ({ children }) => {
       if (response.data.success) {
         const { user: userData, token: userToken } = response.data;
         
+        // ✅ Store both user data and token
         await AsyncStorage.setItem('user', JSON.stringify(userData));
         await AsyncStorage.setItem('token', userToken);
 
@@ -83,19 +97,20 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: response.data.message };
       }
     } catch (error) {
-      console.log('❌ Login failed:', error);
+      console.log('❌ Login failed:', error.response?.data || error.message);
       return { 
         success: false, 
-        error: error.response?.data?.message || error.message 
+        error: error.response?.data?.message || 'Login failed. Please try again.' 
       };
     }
   };
 
+  // ✅ FIXED: Registration function
   const register = async (userData) => {
     try {
       console.log('📝 Attempting registration with:', userData.email);
       
-      const response = await axiosInstance.post('/auth/register', {
+      const response = await axios.post(`${BASE_URL}/auth/register`, {
         name: userData.name,
         email: userData.email,
         password: userData.password,
@@ -118,25 +133,19 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: response.data.message };
       }
     } catch (error) {
-      console.log('❌ Registration failed:', error);
+      console.log('❌ Registration failed:', error.response?.data || error.message);
       return { 
         success: false, 
-        error: error.response?.data?.message || error.message 
+        error: error.response?.data?.message || 'Registration failed. Please try again.' 
       };
     }
   };
 
+  // ✅ FIXED: Logout function
   const logout = async () => {
     try {
       console.log('🚪 Logging out...');
-      
-      await AsyncStorage.removeItem('user');
-      await AsyncStorage.removeItem('token');
-
-      setUser(null);
-      setToken(null);
-      setIsAuthenticated(false);
-      
+      await clearAuthData();
       console.log('✅ Logout successful');
       return { success: true };
     } catch (error) {
@@ -145,6 +154,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ Get user ID safely
   const getUserId = () => {
     return user?.id || user?._id || null;
   };
@@ -160,6 +170,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
+        refreshAuth: checkAuthState // Add this to refresh auth state
       }}
     >
       {children}

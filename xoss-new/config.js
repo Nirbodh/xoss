@@ -1,17 +1,16 @@
-// config.js - COMPLETELY FIXED
+// config.js - FIXED
 import { Platform } from 'react-native';
 
-// ✅ Smart URL Detection
+// ✅ Smart URL Detection - FIXED IP
 const getBaseUrl = () => {
-  // Development URLs
-  const LOCAL_URL = "http://192.168.0.200:5000/api";
-  const LOCAL_ALT = "http://192.168.0.100:5000/api";
+  // Development URLs - FIXED: Use 192.168.0.100 (server.js এ যেই IP তে server running)
+  const LOCAL_URL = "http://192.168.0.100:5000/api";
   const PROD_URL = "https://xoss.onrender.com/api";
 
-  // যদি development mode এ থাকি
+  // Development mode
   if (__DEV__) {
     console.log('🔧 Development mode detected');
-    return LOCAL_URL; // বা LOCAL_ALT
+    return LOCAL_URL;
   }
 
   // Production mode

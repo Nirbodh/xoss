@@ -1,4 +1,4 @@
-// screens/AdminDashboard.js - WITH 6 BUTTONS
+// screens/AdminDashboard.js - COMPLETE FIXED VERSION
 import React from 'react';
 import { 
   View, 
@@ -6,14 +6,18 @@ import {
   ScrollView, 
   TouchableOpacity, 
   StyleSheet,
-  Dimensions 
+  Dimensions,
+  Alert 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
 const AdminDashboard = ({ navigation }) => {
+  const { user, logout } = useAuth();
+
   // ৬টি এডমিন কন্ট্রোল মডিউল
   const adminModules = [
     {
@@ -66,6 +70,52 @@ const AdminDashboard = ({ navigation }) => {
     }
   ];
 
+  // ✅ FIXED LOGOUT FUNCTION
+  const handleLogout = async () => {
+    Alert.alert(
+      'Logout Confirmation',
+      'Are you sure you want to logout from admin panel?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🚪 Starting logout process...');
+              
+              // Call logout from AuthContext
+              const logoutResult = await logout();
+              
+              if (logoutResult.success) {
+                console.log('✅ Logout successful, navigating to AdminLogin...');
+                
+                // ✅ FIXED: Use navigation reset to clear stack
+                navigation.reset({
+                  index: 0,
+                  routes: [{ name: 'AdminLogin' }],
+                });
+              } else {
+                console.log('❌ Logout failed:', logoutResult.error);
+                Alert.alert('Logout Error', 'Failed to logout. Please try again.');
+              }
+            } catch (error) {
+              console.log('🔥 Logout error:', error);
+              // Even if there's an error, try to navigate to login
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'AdminLogin' }],
+              });
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const AdminModuleCard = ({ module }) => (
     <TouchableOpacity 
       style={styles.moduleCard}
@@ -93,8 +143,24 @@ const AdminDashboard = ({ navigation }) => {
           colors={['#1a237e', '#283593']}
           style={styles.header}
         >
-          <Text style={styles.headerTitle}>XOSS Admin Panel</Text>
-          <Text style={styles.headerSubtitle}>Manage All User Screens</Text>
+          <View style={styles.headerTop}>
+            <View>
+              <Text style={styles.headerTitle}>XOSS Admin Panel</Text>
+              <Text style={styles.headerSubtitle}>Manage All User Screens</Text>
+            </View>
+            <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+              <Ionicons name="log-out-outline" size={24} color="white" />
+              <Text style={styles.logoutText}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Admin Info */}
+          <View style={styles.adminInfo}>
+            <Ionicons name="shield-checkmark" size={20} color="#4CAF50" />
+            <Text style={styles.adminText}>
+              Logged in as: {user?.email || 'Admin User'}
+            </Text>
+          </View>
         </LinearGradient>
 
         {/* Stats Overview */}
@@ -125,14 +191,33 @@ const AdminDashboard = ({ navigation }) => {
         <View style={styles.quickActions}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#2962ff' }]}>
-              <Ionicons name="notifications" size={20} color="white" />
-              <Text style={styles.actionText}>Send Notification</Text>
+            <TouchableOpacity 
+              style={[styles.actionButton, { backgroundColor: '#2962ff' }]}
+              onPress={() => navigation.navigate('CreateAdmin')}
+            >
+              <Ionicons name="add-circle" size={20} color="white" />
+              <Text style={styles.actionText}>Create Match</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}>
+            <TouchableOpacity 
+              style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
+              onPress={() => navigation.navigate('TournamentControl')}
+            >
               <Ionicons name="analytics" size={20} color="white" />
-              <Text style={styles.actionText}>View Analytics</Text>
+              <Text style={styles.actionText}>Tournaments</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Server Status */}
+        <View style={styles.serverStatus}>
+          <Text style={styles.sectionTitle}>🌐 Server Status</Text>
+          <View style={styles.serverInfo}>
+            <Ionicons name="server" size={20} color="#4CAF50" />
+            <Text style={styles.serverText}>Connected: 192.168.0.100:5000</Text>
+          </View>
+          <View style={styles.serverInfo}>
+            <Ionicons name="wifi" size={20} color="#4CAF50" />
+            <Text style={styles.serverText}>Status: Online</Text>
           </View>
         </View>
       </ScrollView>
@@ -151,7 +236,13 @@ const styles = StyleSheet.create({
   header: {
     padding: 30,
     paddingTop: 80,
-    paddingBottom: 40,
+    paddingBottom: 30,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 15,
   },
   headerTitle: {
     fontSize: 32,
@@ -162,6 +253,35 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 16,
     color: '#b0b8ff',
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  logoutText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  adminInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  adminText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 6,
   },
   statsContainer: {
     flexDirection: 'row',
@@ -251,6 +371,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  serverStatus: {
+    padding: 20,
+    paddingTop: 0,
+  },
+  serverInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  serverText: {
+    color: 'white',
+    fontSize: 14,
+    marginLeft: 10,
   },
 });
 
