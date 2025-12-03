@@ -1,4 +1,4 @@
-// routes/matches.js - COMPLETELY FIXED - ALL ERRORS RESOLVED
+// routes/matches.js - COMPLETELY FIXED (NO FILTERS FOR ADMIN)
 const express = require('express');
 const Match = require('../models/Match');
 const { auth, adminAuth } = require('../middleware/auth');
@@ -45,32 +45,111 @@ const mapMatchData = (reqBody, userId) => {
   };
 };
 
-// ✅ GET all matches - REMOVED FILTERS TO GET ALL MATCHES
+// ✅ FIXED: GET all matches - ADMIN sees ALL, users see only approved
 router.get('/', async (req, res) => {
   try {
-    console.log('🔍 Fetching ALL matches WITHOUT FILTERS...');
+    console.log('🔍 Fetching matches...');
+    
+    // Extract query parameters
+    const { 
+      limit = 100, 
+      page = 1, 
+      status,
+      game,
+      search,
+      approval_status 
+    } = req.query;
 
-    // ✅ REMOVED ALL FILTERS - GET EVERYTHING
-    const filter = {}; // Empty filter to get ALL matches
+    // ✅ FIX: Build filter based on user role
+    let filter = {};
+    
+    // Check if user is admin (via token or query param)
+    const isAdmin = req.user?.role === 'admin' || req.query.admin === 'true';
+    
+    if (isAdmin) {
+      console.log('👑 Admin: No default filters - showing ALL matches');
+      // Admin can see ALL matches regardless of approval_status or status
+    } else {
+      // For non-admin users, show only approved and upcoming/live
+      filter.approval_status = 'approved';
+      filter.status = { $in: ['upcoming', 'live'] };
+      console.log('👤 Non-admin filter applied:', filter);
+    }
 
+    // Apply additional filters if provided
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    if (game && game !== 'all') {
+      filter.game = game;
+    }
+    if (search) {
+      filter.title = { $regex: search, $options: 'i' };
+    }
+    if (approval_status && approval_status !== 'all') {
+      filter.approval_status = approval_status;
+    }
+
+    console.log('📊 Final filter:', filter);
+
+    // Pagination
+    const pageNumber = parseInt(page);
+    const pageSize = parseInt(limit);
+    const skip = (pageNumber - 1) * pageSize;
+
+    // Fetch matches
     const matches = await Match.find(filter)
       .populate('created_by', 'username')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize);
 
-    console.log(`✅ Found ${matches.length} matches TOTAL`);
+    const totalMatches = await Match.countDocuments(filter);
 
-    // ✅ CONSISTENT RESPONSE: Always return { success, data }
+    console.log(`✅ Found ${matches.length} matches out of ${totalMatches} total`);
+
     res.json({
       success: true,
-      data: matches,
       count: matches.length,
-      message: `Found ${matches.length} matches`
+      total: totalMatches,
+      page: pageNumber,
+      pages: Math.ceil(totalMatches / pageSize),
+      data: matches
     });
+
   } catch (err) {
     console.error('❌ GET matches error:', err);
     res.status(500).json({
       success: false,
       message: err.message
+    });
+  }
+});
+
+// ✅ ADD: ADMIN GET ALL MATCHES (NO FILTERS)
+router.get('/admin/all', async (req, res) => {
+  try {
+    console.log('🔍 ADMIN: Fetching ALL matches WITHOUT ANY FILTER...');
+    
+    // NO FILTERS - GET EVERYTHING
+    const allMatches = await Match.find({})
+      .populate('created_by', 'username')
+      .sort({ createdAt: -1 });
+
+    console.log(`✅ ADMIN: Found ${allMatches.length} matches in database`);
+
+    res.json({
+      success: true,
+      total: allMatches.length,
+      data: allMatches,
+      message: 'All matches fetched for admin'
+    });
+  } catch (error) {
+    console.error('❌ ADMIN all matches error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch all matches',
+      error: error.message
     });
   }
 });
