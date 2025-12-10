@@ -1,5 +1,5 @@
-// screens/AdminLogin.js - COMPLETE ADMIN LOGIN
-import React, { useState } from 'react';
+// screens/AdminLogin.js - COMPLETE ADMIN LOGIN SCREEN
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,93 +15,223 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useAuth } from '../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+
+const API_BASE_URL = 'https://xoss.onrender.com/api';
 
 const AdminLogin = ({ navigation }) => {
-  const { login, isLoading } = useAuth();
+  const [loading, setLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(true);
   const [apiResponse, setApiResponse] = useState(null);
+  const [existingToken, setExistingToken] = useState(null);
   
   const [formData, setFormData] = useState({
     email: 'admin@xoss.com',
-    password: 'admin123'
+    password: '123456'
   });
 
   const [errors, setErrors] = useState({});
 
+  // ✅ Load existing token on mount
+  useEffect(() => {
+    checkExistingToken();
+  }, []);
+
+  const checkExistingToken = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const user = await AsyncStorage.getItem('user');
+      
+      if (token) {
+        setExistingToken({
+          token: token.substring(0, 30) + '...',
+          length: token.length,
+          user: user ? JSON.parse(user) : null
+        });
+      }
+    } catch (error) {
+      console.log('❌ Error checking token:', error);
+    }
+  };
+
+  // ✅ VALIDATION FUNCTION
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.email.trim()) newErrors.email = 'Email is required';
+    if (!formData.password) newErrors.password = 'Password is required';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // ✅ ADMIN LOGIN FUNCTION
   const handleAdminLogin = async () => {
     try {
-      // Clear previous errors
-      setErrors({});
-      setApiResponse(null);
-
-      // Basic validation
-      const newErrors = {};
-      if (!formData.email) newErrors.email = 'Admin Email is required';
-      if (!formData.password) newErrors.password = 'Password is required';
-      
-      if (Object.keys(newErrors).length > 0) {
-        setErrors(newErrors);
+      if (!validateForm()) {
+        Alert.alert('Validation Error', 'Please fix the errors in the form');
         return;
       }
 
+      setLoading(true);
+      setApiResponse(null);
+
       console.log('🔐 Admin Login Attempt:', formData.email);
-      
-      const result = await login(formData);
-      
-      setApiResponse(result);
-      
-      if (result.success) {
-        Alert.alert('✅ Admin Access Granted', 'Welcome to Admin Panel!');
-        console.log('🎉 Admin Login successful:', result.user);
+
+      // Prepare login data
+      const loginData = {
+        email: formData.email,
+        password: formData.password
+      };
+
+      console.log('📤 Sending login request...');
+
+      // Make API call
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, loginData, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      console.log('✅ Login response:', response.data);
+
+      if (response.data && response.data.success) {
+        const { user, token } = response.data;
         
-        // Navigate to Admin Dashboard
-        navigation.replace('AdminDashboard');
+        // ✅ Save token and user data
+        await AsyncStorage.setItem('token', token);
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+        
+        setApiResponse({
+          success: true,
+          message: 'Admin login successful!',
+          token: token.substring(0, 20) + '...',
+          user: user
+        });
+
+        // Update existing token state
+        setExistingToken({
+          token: token.substring(0, 30) + '...',
+          length: token.length,
+          user: user
+        });
+
+        Alert.alert(
+          '✅ Login Successful!',
+          `Welcome ${user.name}!\n\nToken has been saved to storage.`,
+          [
+            {
+              text: 'Go to Admin Dashboard',
+              onPress: () => navigation.replace('AdminDashboard')
+            },
+            {
+              text: 'Test Token',
+              onPress: testToken
+            }
+          ]
+        );
+
       } else {
-        Alert.alert('❌ Admin Login Failed', result.error || 'Invalid admin credentials');
-        console.log('💥 Admin Login error:', result);
+        setApiResponse({
+          success: false,
+          message: response.data?.message || 'Login failed'
+        });
+        Alert.alert('❌ Login Failed', response.data?.message || 'Invalid credentials');
       }
+
     } catch (error) {
-      console.log('🔥 Admin Login exception:', error);
-      setApiResponse({ error: error.message });
-      Alert.alert('🚨 Exception', error.message);
+      console.error('🔥 Login error:', error.response?.data || error.message);
+      
+      let errorMessage = 'Login failed';
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      setApiResponse({
+        success: false,
+        error: errorMessage
+      });
+
+      Alert.alert('🚨 Login Error', errorMessage);
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ TEST TOKEN FUNCTION
+  const testToken = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      
+      if (!token) {
+        Alert.alert('❌ No Token', 'Please login first to get a token');
+        return;
+      }
+
+      setLoading(true);
+
+      // Test the token by making an authenticated request
+      const response = await axios.get(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        timeout: 10000
+      });
+
+      if (response.data && response.data.success) {
+        Alert.alert(
+          '✅ Token is Valid!',
+          `Token works perfectly!\n\nUser: ${response.data.user?.email}\nRole: ${response.data.user?.role || 'N/A'}`,
+          [
+            {
+              text: 'Go to Dashboard',
+              onPress: () => navigation.replace('AdminDashboard')
+            }
+          ]
+        );
+      } else {
+        Alert.alert('❌ Token Invalid', 'The saved token is not valid');
+      }
+
+    } catch (error) {
+      console.error('🔥 Token test error:', error.response?.data || error.message);
+      Alert.alert('🚨 Token Error', error.response?.data?.message || 'Token validation failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ CLEAR TOKEN FUNCTION
+  const clearToken = async () => {
+    try {
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('user');
+      setExistingToken(null);
+      Alert.alert('🗑️ Token Cleared', 'All tokens removed from storage');
+    } catch (error) {
+      Alert.alert('Error', error.message);
     }
   };
 
   const updateField = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    // Clear error when user starts typing
+    setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
-      setErrors(prev => ({
-        ...prev,
-        [field]: ''
-      }));
+      setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
 
-  const fillTestCredentials = (type) => {
-    const testAccounts = {
-      admin: { email: 'admin@xoss.com', password: 'admin123' },
-      superadmin: { email: 'super@xoss.com', password: 'super123' },
-      test: { email: 'test@xoss.com', password: 'test123' }
-    };
-    
-    setFormData(testAccounts[type]);
-  };
-
   const generateCurlCommand = () => {
-    const curlData = {
-      email: formData.email,
-      password: formData.password
-    };
-
-    return `curl -X POST http://192.168.0.100:5000/api/auth/login \\
+    return `curl -X POST https://xoss.onrender.com/api/auth/login \\
   -H "Content-Type: application/json" \\
-  -d '${JSON.stringify(curlData, null, 2)}'`;
+  -d '${JSON.stringify({
+    email: formData.email,
+    password: formData.password
+  }, null, 2)}'`;
   };
 
   return (
@@ -130,11 +260,40 @@ const AdminLogin = ({ navigation }) => {
           {/* Debug Info */}
           {debugMode && (
             <View style={styles.debugSection}>
-              <Text style={styles.sectionTitle}>🔧 Admin Debug Panel</Text>
-              <Text style={styles.debugText}>
-                Use this panel to test admin login functionality
-              </Text>
+              <Text style={styles.sectionTitle}>🔧 Token Status</Text>
               
+              {/* Existing Token Info */}
+              {existingToken ? (
+                <View style={styles.tokenInfo}>
+                  <Text style={styles.tokenTitle}>✅ Token Found:</Text>
+                  <Text style={styles.tokenText}>Length: {existingToken.length} characters</Text>
+                  <Text style={styles.tokenText}>Preview: {existingToken.token}</Text>
+                  {existingToken.user && (
+                    <Text style={styles.tokenText}>User: {existingToken.user.email}</Text>
+                  )}
+                  
+                  <View style={styles.tokenButtons}>
+                    <TouchableOpacity 
+                      style={styles.tokenButton}
+                      onPress={testToken}
+                    >
+                      <Text style={styles.tokenButtonText}>🔑 Test Token</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[styles.tokenButton, styles.clearButton]}
+                      onPress={clearToken}
+                    >
+                      <Text style={styles.tokenButtonText}>🗑️ Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.tokenInfo}>
+                  <Text style={styles.tokenTitle}>❌ No Token Found</Text>
+                  <Text style={styles.tokenText}>Login to get a token</Text>
+                </View>
+              )}
+
               {/* API Response */}
               {apiResponse && (
                 <View style={styles.responseSection}>
@@ -149,7 +308,7 @@ const AdminLogin = ({ navigation }) => {
 
               {/* Curl Command */}
               <View style={styles.curlSection}>
-                <Text style={styles.curlTitle}>📡 CURL Command for Testing:</Text>
+                <Text style={styles.curlTitle}>📡 CURL Command:</Text>
                 <TextInput
                   style={styles.curlInput}
                   value={generateCurlCommand()}
@@ -157,55 +316,35 @@ const AdminLogin = ({ navigation }) => {
                   editable={false}
                   numberOfLines={6}
                 />
-                <TouchableOpacity 
-                  style={styles.copyButton}
-                  onPress={() => {
-                    Alert.alert('Copied', 'CURL command copied to clipboard');
-                  }}
-                >
-                  <Text style={styles.copyButtonText}>Copy CURL Command</Text>
-                </TouchableOpacity>
               </View>
             </View>
           )}
 
           {/* Login Form */}
           <View style={styles.formSection}>
-            <Text style={styles.sectionTitle}>👑 Admin Access</Text>
+            <Text style={styles.sectionTitle}>👑 Admin Login</Text>
             
-            {/* Test Account Buttons */}
-            <View style={styles.testAccountSection}>
-              <Text style={styles.testAccountTitle}>Quick Test Accounts:</Text>
-              <View style={styles.testAccountButtons}>
-                <TouchableOpacity 
-                  style={styles.testAccountButton}
-                  onPress={() => fillTestCredentials('admin')}
-                >
-                  <Text style={styles.testAccountButtonText}>👑 Admin</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.testAccountButton}
-                  onPress={() => fillTestCredentials('superadmin')}
-                >
-                  <Text style={styles.testAccountButtonText}>⚡ Super Admin</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.testAccountButton}
-                  onPress={() => fillTestCredentials('test')}
-                >
-                  <Text style={styles.testAccountButtonText}>🧪 Test Admin</Text>
-                </TouchableOpacity>
-              </View>
+            {/* Test Credentials */}
+            <View style={styles.testCredentials}>
+              <Text style={styles.testTitle}>Test Credentials:</Text>
+              <TouchableOpacity 
+                style={styles.testButton}
+                onPress={() => {
+                  setFormData({
+                    email: 'admin@xoss.com',
+                    password: '123456'
+                  });
+                }}
+              >
+                <Text style={styles.testButtonText}>Use: admin@xoss.com / 123456</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Email Field */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Admin Email *</Text>
               <TextInput
-                style={[
-                  styles.input,
-                  errors.email && styles.inputError
-                ]}
+                style={[styles.input, errors.email && styles.inputError]}
                 value={formData.email}
                 onChangeText={(text) => updateField('email', text)}
                 placeholder="admin@xoss.com"
@@ -220,13 +359,10 @@ const AdminLogin = ({ navigation }) => {
             <View style={styles.formGroup}>
               <Text style={styles.label}>Admin Password *</Text>
               <TextInput
-                style={[
-                  styles.input,
-                  errors.password && styles.inputError
-                ]}
+                style={[styles.input, errors.password && styles.inputError]}
                 value={formData.password}
                 onChangeText={(text) => updateField('password', text)}
-                placeholder="Enter admin password"
+                placeholder="Enter password"
                 secureTextEntry
                 placeholderTextColor="rgba(255,255,255,0.5)"
               />
@@ -236,61 +372,48 @@ const AdminLogin = ({ navigation }) => {
             {/* Action Buttons */}
             <View style={styles.actionButtons}>
               <TouchableOpacity 
-                style={[styles.loginButton, isLoading && styles.loginButtonDisabled]}
+                style={[styles.loginButton, loading && styles.buttonDisabled]}
                 onPress={handleAdminLogin}
-                disabled={isLoading}
+                disabled={loading}
               >
-                {isLoading ? (
+                {loading ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
-                  <Text style={styles.loginButtonText}>👑 Admin Login</Text>
+                  <Text style={styles.loginButtonText}>🔐 Admin Login</Text>
                 )}
               </TouchableOpacity>
 
               <TouchableOpacity 
-                style={styles.userLoginButton}
-                onPress={() => navigation.navigate('Login')}
+                style={styles.registerButton}
+                onPress={() => navigation.navigate('CreateAdmin')}
               >
-                <Text style={styles.userLoginButtonText}>👤 User Login</Text>
+                <Text style={styles.registerButtonText}>📝 Register New Admin</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.continueButton}
+                onPress={() => navigation.replace('AdminDashboard')}
+              >
+                <Text style={styles.continueButtonText}>➡️ Continue with Existing Token</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Token Status */}
-            {debugMode && (
-              <View style={styles.tokenSection}>
-                <Text style={styles.tokenTitle}>🔑 Token Status:</Text>
-                <Text style={styles.tokenText}>
-                  {formData.email && formData.password ? 
-                    '✅ Ready to authenticate as Admin' : 
-                    '❌ Fill admin credentials'
-                  }
-                </Text>
-                <Text style={styles.serverInfo}>
-                  🌐 Server: http://192.168.0.100:5000
-                </Text>
-              </View>
-            )}
+            {/* Instructions */}
+            <View style={styles.instructions}>
+              <Text style={styles.instructionsTitle}>📋 How it works:</Text>
+              <Text style={styles.instruction}>1. Login with admin credentials</Text>
+              <Text style={styles.instruction}>2. Token will be saved automatically</Text>
+              <Text style={styles.instruction}>3. Use "Test Token" to verify it works</Text>
+              <Text style={styles.instruction}>4. Go to Dashboard to use the token</Text>
+            </View>
           </View>
 
-          {/* Admin Features Info */}
-          <View style={styles.featuresSection}>
-            <Text style={styles.featuresTitle}>🛠️ Admin Features:</Text>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.featureText}>Full Tournament Management</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.featureText}>User & Wallet Controls</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.featureText}>Match Approval System</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={styles.featureText}>Analytics & Reports</Text>
-            </View>
+          {/* Server Info */}
+          <View style={styles.serverInfo}>
+            <Text style={styles.serverTitle}>🌐 Server Information:</Text>
+            <Text style={styles.serverText}>URL: https://xoss.onrender.com</Text>
+            <Text style={styles.serverText}>API: /api/auth/login</Text>
+            <Text style={styles.serverText}>Method: POST</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -344,10 +467,40 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 12,
   },
-  debugText: {
-    color: 'rgba(255,255,255,0.8)',
+  tokenInfo: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: 12,
+    borderRadius: 8,
     marginBottom: 12,
+  },
+  tokenTitle: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  tokenText: {
+    color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
+    marginBottom: 4,
+  },
+  tokenButtons: {
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  tokenButton: {
+    backgroundColor: '#2962ff',
+    padding: 8,
+    borderRadius: 4,
+    flex: 1,
+    marginRight: 8,
+    alignItems: 'center',
+  },
+  clearButton: {
+    backgroundColor: '#ff4444',
+  },
+  tokenButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   responseSection: {
     backgroundColor: 'rgba(0,0,0,0.3)',
@@ -386,17 +539,6 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
   },
-  copyButton: {
-    backgroundColor: '#ff4444',
-    padding: 8,
-    borderRadius: 4,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  copyButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
   formSection: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     margin: 16,
@@ -405,21 +547,42 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#ff4444',
   },
+  testCredentials: {
+    marginBottom: 16,
+    padding: 12,
+    backgroundColor: 'rgba(255, 68, 68, 0.1)',
+    borderRadius: 8,
+  },
+  testTitle: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  testButton: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    padding: 8,
+    borderRadius: 4,
+    alignItems: 'center',
+  },
+  testButtonText: {
+    color: 'white',
+    fontSize: 12,
+  },
   formGroup: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   label: {
     color: 'white',
     marginBottom: 8,
     fontWeight: '500',
-    fontSize: 16,
+    fontSize: 14,
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderColor: 'rgba(255,255,255,0.3)',
     borderWidth: 1,
     borderRadius: 8,
-    padding: 15,
+    padding: 12,
     color: 'white',
     fontSize: 16,
   },
@@ -429,48 +592,19 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#ff4444',
     marginTop: 5,
-    fontSize: 14,
-  },
-  testAccountSection: {
-    marginBottom: 20,
-    padding: 15,
-    backgroundColor: 'rgba(255, 68, 68, 0.1)',
-    borderRadius: 8,
-  },
-  testAccountTitle: {
-    color: 'white',
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  testAccountButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  testAccountButton: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    flex: 1,
-    marginHorizontal: 4,
-    alignItems: 'center',
-  },
-  testAccountButtonText: {
-    color: 'white',
     fontSize: 12,
-    fontWeight: 'bold',
   },
   actionButtons: {
-    marginTop: 10,
+    marginTop: 20,
   },
   loginButton: {
     backgroundColor: '#ff4444',
-    padding: 18,
+    padding: 16,
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 12,
   },
-  loginButtonDisabled: {
+  buttonDisabled: {
     backgroundColor: '#666',
   },
   loginButtonText: {
@@ -478,59 +612,64 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  userLoginButton: {
-    padding: 12,
+  registerButton: {
+    backgroundColor: '#4CAF50',
+    padding: 16,
     borderRadius: 8,
     alignItems: 'center',
-    borderColor: '#2962ff',
+    marginBottom: 12,
+  },
+  registerButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  continueButton: {
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderColor: '#FF9800',
     borderWidth: 1,
   },
-  userLoginButtonText: {
-    color: '#2962ff',
+  continueButtonText: {
+    color: '#FF9800',
     fontWeight: 'bold',
+    fontSize: 16,
   },
-  tokenSection: {
+  instructions: {
     marginTop: 20,
-    padding: 12,
+    padding: 16,
     backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 8,
   },
-  tokenTitle: {
+  instructionsTitle: {
     color: 'white',
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: 8,
+    fontSize: 16,
   },
-  tokenText: {
+  instruction: {
     color: 'rgba(255,255,255,0.8)',
+    marginBottom: 6,
     fontSize: 14,
-    marginBottom: 5,
   },
   serverInfo: {
-    color: '#4CAF50',
-    fontSize: 12,
-    fontFamily: 'monospace',
-  },
-  featuresSection: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(0,0,0,0.3)',
     margin: 16,
-    padding: 20,
+    padding: 16,
     borderRadius: 12,
   },
-  featuresTitle: {
+  serverTitle: {
     color: 'white',
-    fontSize: 18,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: 8,
+    fontSize: 16,
   },
-  featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  featureText: {
+  serverText: {
     color: 'rgba(255,255,255,0.8)',
-    marginLeft: 10,
     fontSize: 14,
+    marginBottom: 4,
+    fontFamily: 'monospace',
   },
 });
 

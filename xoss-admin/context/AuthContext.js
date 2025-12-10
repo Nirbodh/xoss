@@ -1,7 +1,9 @@
-// context/AuthContext.js - ENHANCED VERSION
+// context/AuthContext.js - COMPLETE AUTH SYSTEM
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { setAuthToken, clearAuthToken } from '../api/matchesAPI';
+import { setTournamentToken, clearTournamentToken } from '../api/tournamentsAPI';
 
 const BASE_URL = 'https://xoss.onrender.com/api';
 const axiosInstance = axios.create({
@@ -10,11 +12,13 @@ const axiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// ✅ FIXED: Token interceptor
 axiosInstance.interceptors.request.use(async (config) => {
   try {
     const token = await AsyncStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      console.log('✅ AuthContext: Token attached to request');
     }
   } catch (error) {
     console.log('❌ Token interceptor error:', error);
@@ -45,10 +49,17 @@ export const AuthProvider = ({ children }) => {
         setUser(parsedUser);
         setToken(userToken);
         setIsAuthenticated(true);
+        
+        // ✅ CRITICAL: Set token in all API modules
+        setAuthToken(userToken);
+        setTournamentToken(userToken);
+        
         console.log('✅ User loaded from storage:', parsedUser.email);
       } else {
         console.log('❌ No user data found in storage');
         setIsAuthenticated(false);
+        clearAuthToken();
+        clearTournamentToken();
       }
     } catch (error) {
       console.log('❌ Error loading auth state:', error);
@@ -58,59 +69,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ✅ ADDED: Token refresh function
-  const refreshToken = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      const userData = await AsyncStorage.getItem('user');
-      
-      if (token && userData) {
-        setToken(token);
-        setUser(JSON.parse(userData));
-        setIsAuthenticated(true);
-        console.log('✅ Token refreshed from storage');
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.log('❌ Error refreshing token:', error);
-      return false;
-    }
-  };
-
-  const login = async (credentials) => {
-    try {
-      console.log('🔐 Attempting login with:', credentials.email);
-      
-      const response = await axiosInstance.post('/auth/login', {
-        email: credentials.email,
-        password: credentials.password
-      });
-
-      if (response.data.success) {
-        const { user: userData, token: userToken } = response.data;
-        
-        await AsyncStorage.setItem('user', JSON.stringify(userData));
-        await AsyncStorage.setItem('token', userToken);
-
-        setUser(userData);
-        setToken(userToken);
-        setIsAuthenticated(true);
-        
-        console.log('✅ Login successful');
-        return { success: true, user: userData, token: userToken };
-      } else {
-        return { success: false, error: response.data.message };
-      }
-    } catch (error) {
-      console.log('❌ Login failed:', error);
-      return { 
-        success: false, 
-        error: error.response?.data?.message || error.message 
-      };
-    }
-  };
-
+  // ✅ REGISTER FUNCTION
   const register = async (userData) => {
     try {
       console.log('📝 Attempting registration with:', userData.email);
@@ -122,23 +81,39 @@ export const AuthProvider = ({ children }) => {
         phone: userData.phone
       });
 
-      if (response.data.success) {
+      console.log('📥 Registration response:', response.data);
+
+      if (response.data && response.data.success) {
         const { user: newUser, token: userToken } = response.data;
         
+        // Save to storage
         await AsyncStorage.setItem('user', JSON.stringify(newUser));
         await AsyncStorage.setItem('token', userToken);
 
+        // Update state
         setUser(newUser);
         setToken(userToken);
         setIsAuthenticated(true);
         
+        // Set token in all API modules
+        setAuthToken(userToken);
+        setTournamentToken(userToken);
+        
         console.log('✅ Registration successful');
-        return { success: true, user: newUser, token: userToken };
+        return { 
+          success: true, 
+          message: 'Registration successful!',
+          user: newUser, 
+          token: userToken 
+        };
       } else {
-        return { success: false, error: response.data.message };
+        return { 
+          success: false, 
+          error: response.data?.message || 'Registration failed' 
+        };
       }
     } catch (error) {
-      console.log('❌ Registration failed:', error);
+      console.log('❌ Registration failed:', error.response?.data || error.message);
       return { 
         success: false, 
         error: error.response?.data?.message || error.message 
@@ -146,6 +121,57 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ LOGIN FUNCTION
+  const login = async (credentials) => {
+    try {
+      console.log('🔐 Attempting login with:', credentials.email);
+      
+      const response = await axiosInstance.post('/auth/login', {
+        email: credentials.email,
+        password: credentials.password
+      });
+
+      console.log('📥 Login response:', response.data);
+
+      if (response.data && response.data.success) {
+        const { user: userData, token: userToken } = response.data;
+        
+        // Save to storage
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        await AsyncStorage.setItem('token', userToken);
+
+        // Update state
+        setUser(userData);
+        setToken(userToken);
+        setIsAuthenticated(true);
+        
+        // ✅ CRITICAL: Set token in all API modules
+        setAuthToken(userToken);
+        setTournamentToken(userToken);
+        
+        console.log('✅ Login successful, token synced');
+        return { 
+          success: true, 
+          message: 'Login successful!',
+          user: userData, 
+          token: userToken 
+        };
+      } else {
+        return { 
+          success: false, 
+          error: response.data?.message || 'Login failed' 
+        };
+      }
+    } catch (error) {
+      console.log('❌ Login failed:', error.response?.data || error.message);
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
+    }
+  };
+
+  // ✅ LOGOUT FUNCTION
   const logout = async () => {
     try {
       console.log('🚪 Logging out...');
@@ -157,16 +183,110 @@ export const AuthProvider = ({ children }) => {
       setToken(null);
       setIsAuthenticated(false);
       
-      console.log('✅ Logout successful');
-      return { success: true };
+      // Clear token from all API modules
+      clearAuthToken();
+      clearTournamentToken();
+      
+      console.log('✅ Logout successful, tokens cleared');
+      return { success: true, message: 'Logged out successfully' };
     } catch (error) {
       console.log('❌ Logout failed:', error);
       return { success: false, error: error.message };
     }
   };
 
-  const getUserId = () => {
-    return user?.id || user?._id || null;
+  // ✅ GET USER INFO
+  const getUserInfo = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        return { success: false, error: 'No token found' };
+      }
+
+      const response = await axiosInstance.get('/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data && response.data.success) {
+        const userData = response.data.user;
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+        return { success: true, user: userData };
+      } else {
+        return { success: false, error: response.data?.message };
+      }
+    } catch (error) {
+      console.log('❌ Get user info failed:', error);
+      return { 
+        success: false, 
+        error: error.response?.data?.message || error.message 
+      };
+    }
+  };
+
+  // ✅ REFRESH TOKEN
+  const refreshToken = async () => {
+    try {
+      const userToken = await AsyncStorage.getItem('token');
+      const userData = await AsyncStorage.getItem('user');
+      
+      console.log('🔄 Token refresh check:', {
+        hasToken: !!userToken,
+        hasUserData: !!userData
+      });
+      
+      if (userToken && userData) {
+        setToken(userToken);
+        setUser(JSON.parse(userData));
+        setIsAuthenticated(true);
+        
+        // Update token in all API modules
+        setAuthToken(userToken);
+        setTournamentToken(userToken);
+        
+        console.log('✅ Token refreshed and synced');
+        return true;
+      }
+      
+      clearAuthToken();
+      clearTournamentToken();
+      return false;
+    } catch (error) {
+      console.log('❌ Error refreshing token:', error);
+      return false;
+    }
+  };
+
+  // ✅ GET CURRENT TOKEN
+  const getCurrentToken = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      return token;
+    } catch (error) {
+      console.log('❌ Error getting current token:', error);
+      return null;
+    }
+  };
+
+  // ✅ CHECK TOKEN VALIDITY
+  const checkTokenValidity = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        return { valid: false, message: 'No token found' };
+      }
+
+      const response = await axiosInstance.get('/auth/verify-token', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      return { 
+        valid: response.data?.success || false, 
+        message: response.data?.message 
+      };
+    } catch (error) {
+      return { valid: false, message: error.message };
+    }
   };
 
   return (
@@ -176,11 +296,14 @@ export const AuthProvider = ({ children }) => {
         token,
         isAuthenticated,
         isLoading,
-        getUserId,
-        login,
         register,
+        login,
         logout,
-        refreshToken, // ✅ ADDED
+        getUserInfo,
+        refreshToken,
+        getCurrentToken,
+        checkTokenValidity,
+        checkAuthState,
       }}
     >
       {children}

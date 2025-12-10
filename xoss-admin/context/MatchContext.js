@@ -6,39 +6,41 @@ import { useAuth } from './AuthContext';
 const MatchContext = createContext();
 
 export const MatchProvider = ({ children }) => {
-  const { user } = useAuth();
+  const { user, refreshToken } = useAuth();
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // ✅ FIXED: Proper data fetching with DEBUG
+  // ✅ FIXED: Proper data fetching
   const refreshMatches = async () => {
     try {
       setLoading(true);
       setError(null);
       console.log('🔄 MatchContext: Fetching matches from API...');
 
+      // ✅ Fix: সরাসরি API কল করুন, refreshToken সমস্যা করতে পারে
       const res = await matchesAPI.getAll();
-      console.log('📥 MatchContext FULL API Response:', res);
       
-      // ✅ CRITICAL FIX: Handle different response structures
-      let matchData = [];
+      console.log('📥 MatchContext API Response:', {
+        success: res.success,
+        count: res.data?.length || 0
+      });
       
       if (res && res.success) {
-        // Handle different backend response formats
+        let matchData = [];
+        
         if (Array.isArray(res.data)) {
-          matchData = res.data; // Standard format: {success: true, data: [...]}
+          matchData = res.data;
         } else if (Array.isArray(res.matches)) {
-          matchData = res.matches; // Alternative format: {success: true, matches: [...]}
+          matchData = res.matches;
         } else if (Array.isArray(res)) {
-          matchData = res; // Direct array response
+          matchData = res;
         }
         
         console.log(`✅ MatchContext: Loaded ${matchData.length} matches`);
         setMatches(matchData);
       } else {
-        console.error('❌ MatchContext: API returned failure:', res);
-        setError(res?.message || 'Failed to load matches');
+        console.log('ℹ️ MatchContext: No matches found or API issue');
         setMatches([]);
       }
     } catch (err) {
@@ -50,12 +52,20 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ FIXED: Create match function
+  // ✅ FIXED: Create match function WITHOUT useAuth() inside
   const createMatch = async (matchData) => {
     try {
       setLoading(true);
       setError(null);
       console.log('🎯 Creating match with data:', matchData);
+
+      // ✅ FIXED: সরাসরি user চেক করুন (useAuth() নয়)
+      if (!user) {
+        return { 
+          success: false, 
+          error: 'Please login first to create a match' 
+        };
+      }
 
       const result = await matchesAPI.create(matchData);
       
@@ -70,19 +80,18 @@ export const MatchProvider = ({ children }) => {
       } else {
         return { 
           success: false, 
-          error: result?.message || 'Create failed' 
+          error: result?.message || result?.error || 'Create failed' 
         };
       }
     } catch (err) {
       console.error('❌ Create match error:', err);
-      setError(err.message);
       return { success: false, error: err.message };
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ FIXED: Update match function
+  // ✅ Update match
   const updateMatch = async (matchId, updateData) => {
     try {
       setLoading(true);
@@ -101,7 +110,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ FIXED: Delete match function
+  // ✅ Delete match
   const deleteMatch = async (matchId) => {
     try {
       setLoading(true);
@@ -120,14 +129,11 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ FIXED: Approve match function
+  // ✅ Approve match
   const approveMatch = async (matchId) => {
     try {
       setLoading(true);
-      const result = await matchesAPI.update(matchId, { 
-        status: 'upcoming',
-        approval_status: 'approved'
-      });
+      const result = await matchesAPI.approve(matchId);
       
       if (result && result.success) {
         await refreshMatches();
@@ -142,14 +148,11 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
-  // ✅ FIXED: Reject match function
+  // ✅ Reject match
   const rejectMatch = async (matchId) => {
     try {
       setLoading(true);
-      const result = await matchesAPI.update(matchId, { 
-        status: 'rejected',
-        approval_status: 'rejected'
-      });
+      const result = await matchesAPI.reject(matchId);
       
       if (result && result.success) {
         await refreshMatches();
@@ -164,6 +167,7 @@ export const MatchProvider = ({ children }) => {
     }
   };
 
+  // ✅ Join match
   const joinMatch = async (matchId) => {
     try {
       setLoading(true);

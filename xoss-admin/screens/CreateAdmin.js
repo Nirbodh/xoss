@@ -1,4 +1,4 @@
-// screens/CreateAdmin.js
+// screens/CreateAdmin.js - ADMIN REGISTRATION SCREEN
 import React, { useState } from 'react';
 import {
   View,
@@ -9,117 +9,242 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  Switch
+  Switch,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useTournaments } from '../context/TournamentContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+
+const API_BASE_URL = 'https://xoss.onrender.com/api';
 
 const CreateAdmin = ({ navigation }) => {
-  const { createTournament, loading } = useTournaments();
+  const [loading, setLoading] = useState(false);
   const [debugMode, setDebugMode] = useState(true);
   const [apiResponse, setApiResponse] = useState(null);
+  
   const [formData, setFormData] = useState({
-    title: 'Test Match - ' + new Date().toLocaleTimeString(),
-    game: 'freefire',
-    entry_fee: '50',
-    total_prize: '500',
-    max_participants: '100',
-    start_time: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-    end_time: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-    scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-    roomId: 'TEST' + Math.random().toString(36).substring(2, 6).toUpperCase(),
-    password: '1234',
-    description: 'Test match created via admin panel',
-    rules: 'Standard rules apply',
-    map: 'Bermuda',
-    type: 'Squad',
-    status: 'upcoming',
-    matchType: 'match',
-    created_by: 'admin'
+    name: 'System Admin',
+    email: 'admin@xoss.com',
+    password: '123456',
+    confirmPassword: '123456',
+    phone: '017XXXXXXXX',
+    role: 'admin'
   });
 
-  const GAMES = {
-    freefire: { name: 'Free Fire', icon: 'flame', color: '#FF6B00' },
-    pubg: { name: 'PUBG Mobile', icon: 'game-controller', color: '#4CAF50' },
-    cod: { name: 'Call of Duty', icon: 'shield', color: '#2196F3' },
-    ludo: { name: 'Ludo King', icon: 'dice', color: '#9C27B0' }
+  const [errors, setErrors] = useState({});
+
+  // ✅ VALIDATION FUNCTION
+  const validateForm = () => {
+    const newErrors = {};
+    
+    if (!formData.name.trim()) newErrors.name = 'Name is required';
+    if (!formData.email.trim()) newErrors.email = 'Email is required';
+    if (!formData.password) newErrors.password = 'Password is required';
+    if (formData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
+    if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
+    if (!formData.phone.trim()) newErrors.phone = 'Phone number is required';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
-  const handleCreateMatch = async () => {
+  // ✅ ADMIN REGISTRATION FUNCTION
+  const handleAdminRegister = async () => {
     try {
+      if (!validateForm()) {
+        Alert.alert('Validation Error', 'Please fix the errors in the form');
+        return;
+      }
+
+      setLoading(true);
       setApiResponse(null);
-      
-      // Convert numbers
-      const submitData = {
-        ...formData,
-        entry_fee: Number(formData.entry_fee),
-        total_prize: Number(formData.total_prize),
-        max_participants: Number(formData.max_participants),
-        current_participants: 0
+
+      console.log('📝 Registering new admin...', formData.email);
+
+      // Prepare data for API
+      const registerData = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        phone: formData.phone,
+        role: 'admin' // Set role as admin
       };
 
-      console.log('🔄 Sending data to API:', JSON.stringify(submitData, null, 2));
+      console.log('📤 Sending registration request:', registerData);
 
-      const result = await createTournament(submitData);
-      
-      setApiResponse(result);
-      
-      if (result.success) {
-        Alert.alert('✅ Success', 'Match created successfully!');
-        console.log('🎉 Match created:', result.tournament);
+      // Make API call
+      const response = await axios.post(`${API_BASE_URL}/auth/register`, registerData, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      console.log('✅ Registration response:', response.data);
+
+      if (response.data && response.data.success) {
+        const { user, token } = response.data;
+        
+        // ✅ Save token and user data
+        await AsyncStorage.setItem('token', token);
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+        
+        setApiResponse({
+          success: true,
+          message: 'Admin registered successfully!',
+          token: token.substring(0, 20) + '...', // Show partial token
+          user: user
+        });
+
+        Alert.alert(
+          '🎉 Admin Registered!',
+          `Admin account created successfully!\n\nEmail: ${user.email}\nToken saved to storage.`,
+          [
+            {
+              text: 'Go to Admin Panel',
+              onPress: () => navigation.replace('AdminDashboard')
+            },
+            {
+              text: 'Test Login',
+              onPress: () => navigation.navigate('AdminLogin')
+            }
+          ]
+        );
+
       } else {
-        Alert.alert('❌ Error', result.error || 'Failed to create match');
-        console.log('💥 Error:', result);
+        setApiResponse({
+          success: false,
+          message: response.data?.message || 'Registration failed'
+        });
+        Alert.alert('❌ Registration Failed', response.data?.message || 'Unknown error');
       }
+
     } catch (error) {
-      console.log('🔥 Exception:', error);
-      setApiResponse({ error: error.message });
-      Alert.alert('🚨 Exception', error.message);
+      console.error('🔥 Registration error:', error.response?.data || error.message);
+      
+      let errorMessage = 'Registration failed';
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      setApiResponse({
+        success: false,
+        error: errorMessage
+      });
+
+      Alert.alert('🚨 Registration Error', errorMessage);
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ TEST LOGIN AFTER REGISTRATION
+  const testAdminLogin = async () => {
+    try {
+      setLoading(true);
+      
+      const loginData = {
+        email: formData.email,
+        password: formData.password
+      };
+
+      console.log('🔐 Testing login with:', loginData.email);
+
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, loginData, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      if (response.data && response.data.success) {
+        const { token } = response.data;
+        
+        // Save the token
+        await AsyncStorage.setItem('token', token);
+        
+        Alert.alert(
+          '✅ Login Test Successful!',
+          `Token received and saved!\n\nToken: ${token.substring(0, 30)}...`,
+          [
+            {
+              text: 'Use This Token',
+              onPress: () => {
+                // Navigate with token
+                navigation.replace('AdminDashboard');
+              }
+            }
+          ]
+        );
+
+        setApiResponse(prev => ({
+          ...prev,
+          loginTest: 'SUCCESS',
+          token: token
+        }));
+
+      } else {
+        Alert.alert('❌ Login Test Failed', response.data?.message || 'Login failed');
+      }
+
+    } catch (error) {
+      console.error('🔥 Login test error:', error.response?.data || error.message);
+      Alert.alert('🚨 Login Test Error', error.response?.data?.message || error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ✅ CHECK EXISTING TOKEN
+  const checkExistingToken = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const user = await AsyncStorage.getItem('user');
+      
+      Alert.alert(
+        '🔍 Current Token Status',
+        `Token: ${token ? '✅ Found' : '❌ Not found'}\nLength: ${token?.length || 0} chars\n\nUser: ${user ? '✅ Found' : '❌ Not found'}`,
+        [
+          {
+            text: 'Clear Token',
+            onPress: async () => {
+              await AsyncStorage.removeItem('token');
+              await AsyncStorage.removeItem('user');
+              Alert.alert('🗑️ Token Cleared', 'Token removed from storage');
+            }
+          },
+          { text: 'OK' }
+        ]
+      );
+
+    } catch (error) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
+  const updateField = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }));
     }
   };
 
   const generateCurlCommand = () => {
-    const curlData = {
-      title: formData.title,
-      game: formData.game,
-      entry_fee: Number(formData.entry_fee),
-      total_prize: Number(formData.total_prize),
-      max_participants: Number(formData.max_participants),
-      start_time: formData.start_time,
-      end_time: formData.end_time,
-      scheduleTime: formData.scheduleTime,
-      roomId: formData.roomId,
-      password: formData.password,
-      description: formData.description,
-      rules: formData.rules,
-      map: formData.map,
-      type: formData.type,
-      status: formData.status,
-      matchType: formData.matchType,
-      created_by: formData.created_by
-    };
-
-    return `curl -X POST http://localhost:5000/api/tournaments/create \\
+    return `curl -X POST https://xoss.onrender.com/api/auth/register \\
   -H "Content-Type: application/json" \\
-  -d '${JSON.stringify(curlData, null, 2)}'`;
-  };
-
-  const updateField = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const generateRandomData = () => {
-    setFormData(prev => ({
-      ...prev,
-      title: 'Test Match - ' + new Date().toLocaleTimeString(),
-      roomId: 'TEST' + Math.random().toString(36).substring(2, 6).toUpperCase(),
-      password: Math.random().toString(36).substring(2, 6).toUpperCase()
-    }));
+  -d '${JSON.stringify({
+    name: formData.name,
+    email: formData.email,
+    password: formData.password,
+    phone: formData.phone,
+    role: 'admin'
+  }, null, 2)}'`;
   };
 
   return (
@@ -129,182 +254,176 @@ const CreateAdmin = ({ navigation }) => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Admin Debug Panel</Text>
+        <Text style={styles.headerTitle}>Admin Registration</Text>
         <View style={styles.debugToggle}>
           <Text style={styles.debugText}>Debug</Text>
           <Switch
             value={debugMode}
             onValueChange={setDebugMode}
-            trackColor={{ false: '#767577', true: '#2962ff' }}
+            trackColor={{ false: '#767577', true: '#4CAF50' }}
           />
         </View>
       </View>
 
-      <ScrollView style={styles.content}>
-        {/* Debug Info */}
-        {debugMode && (
-          <View style={styles.debugSection}>
-            <Text style={styles.sectionTitle}>🔧 Debug Information</Text>
-            <Text style={styles.debugText}>
-              Use this panel to test match creation and debug API issues
-            </Text>
-            
-            {/* API Response */}
-            {apiResponse && (
-              <View style={styles.responseSection}>
-                <Text style={styles.responseTitle}>
-                  {apiResponse.success ? '✅ API Response' : '❌ API Error'}
-                </Text>
-                <Text style={styles.responseText}>
-                  {JSON.stringify(apiResponse, null, 2)}
-                </Text>
-              </View>
-            )}
-
-            {/* Curl Command */}
-            <View style={styles.curlSection}>
-              <Text style={styles.curlTitle}>📡 CURL Command for Testing:</Text>
-              <TextInput
-                style={styles.curlInput}
-                value={generateCurlCommand()}
-                multiline
-                editable={false}
-                numberOfLines={10}
-              />
+      <KeyboardAvoidingView 
+        style={styles.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView>
+          {/* Debug Info */}
+          {debugMode && (
+            <View style={styles.debugSection}>
+              <Text style={styles.sectionTitle}>🔧 Admin Registration Panel</Text>
+              
+              {/* Token Check Button */}
               <TouchableOpacity 
-                style={styles.copyButton}
-                onPress={() => {
-                  // Here you would copy to clipboard
-                  Alert.alert('Copied', 'CURL command copied to clipboard');
-                }}
+                style={styles.tokenCheckButton}
+                onPress={checkExistingToken}
               >
-                <Text style={styles.copyButtonText}>Copy CURL Command</Text>
+                <Text style={styles.tokenCheckText}>🔍 Check Existing Token</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        )}
 
-        {/* Quick Test Form */}
-        <View style={styles.formSection}>
-          <Text style={styles.sectionTitle}>🚀 Quick Test Match</Text>
-          
-          <View style={styles.formRow}>
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Title *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.title}
-                onChangeText={(text) => updateField('title', text)}
-                placeholder="Match title"
-              />
-            </View>
-          </View>
+              {/* API Response */}
+              {apiResponse && (
+                <View style={styles.responseSection}>
+                  <Text style={styles.responseTitle}>
+                    {apiResponse.success ? '✅ API Response' : '❌ API Error'}
+                  </Text>
+                  <Text style={styles.responseText}>
+                    {JSON.stringify(apiResponse, null, 2)}
+                  </Text>
+                </View>
+              )}
 
-          <View style={styles.formRow}>
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Game *</Text>
-              <View style={styles.gameButtons}>
-                {Object.keys(GAMES).map(game => (
-                  <TouchableOpacity
-                    key={game}
-                    style={[
-                      styles.gameButton,
-                      formData.game === game && styles.gameButtonSelected
-                    ]}
-                    onPress={() => updateField('game', game)}
-                  >
-                    <Text style={[
-                      styles.gameButtonText,
-                      formData.game === game && styles.gameButtonTextSelected
-                    ]}>
-                      {GAMES[game].name}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              {/* Curl Command */}
+              <View style={styles.curlSection}>
+                <Text style={styles.curlTitle}>📡 CURL Command:</Text>
+                <TextInput
+                  style={styles.curlInput}
+                  value={generateCurlCommand()}
+                  multiline
+                  editable={false}
+                  numberOfLines={8}
+                />
               </View>
             </View>
-          </View>
+          )}
 
-          <View style={styles.formRow}>
+          {/* Registration Form */}
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>👑 Create Admin Account</Text>
+            
+            {/* Name Field */}
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Entry Fee (৳) *</Text>
+              <Text style={styles.label}>Full Name *</Text>
               <TextInput
-                style={styles.input}
-                value={formData.entry_fee}
-                onChangeText={(text) => updateField('entry_fee', text.replace(/[^0-9]/g, ''))}
-                keyboardType="numeric"
-                placeholder="50"
+                style={[styles.input, errors.name && styles.inputError]}
+                value={formData.name}
+                onChangeText={(text) => updateField('name', text)}
+                placeholder="Enter full name"
+                placeholderTextColor="rgba(255,255,255,0.5)"
               />
+              {errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
             </View>
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Prize Pool (৳) *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.total_prize}
-                onChangeText={(text) => updateField('total_prize', text.replace(/[^0-9]/g, ''))}
-                keyboardType="numeric"
-                placeholder="500"
-              />
-            </View>
-          </View>
 
-          <View style={styles.formRow}>
+            {/* Email Field */}
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Max Players *</Text>
+              <Text style={styles.label}>Email *</Text>
               <TextInput
-                style={styles.input}
-                value={formData.max_participants}
-                onChangeText={(text) => updateField('max_participants', text.replace(/[^0-9]/g, ''))}
-                keyboardType="numeric"
-                placeholder="100"
+                style={[styles.input, errors.email && styles.inputError]}
+                value={formData.email}
+                onChangeText={(text) => updateField('email', text)}
+                placeholder="admin@xoss.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                placeholderTextColor="rgba(255,255,255,0.5)"
               />
+              {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
             </View>
-          </View>
 
-          <View style={styles.formRow}>
+            {/* Password Field */}
             <View style={styles.formGroup}>
-              <Text style={styles.label}>Room ID</Text>
+              <Text style={styles.label}>Password * (min 6 characters)</Text>
               <TextInput
-                style={styles.input}
-                value={formData.roomId}
-                onChangeText={(text) => updateField('roomId', text)}
-                placeholder="Room ID"
-              />
-            </View>
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={styles.input}
+                style={[styles.input, errors.password && styles.inputError]}
                 value={formData.password}
                 onChangeText={(text) => updateField('password', text)}
-                placeholder="Password"
+                placeholder="Enter password"
+                secureTextEntry
+                placeholderTextColor="rgba(255,255,255,0.5)"
               />
+              {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+            </View>
+
+            {/* Confirm Password */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Confirm Password *</Text>
+              <TextInput
+                style={[styles.input, errors.confirmPassword && styles.inputError]}
+                value={formData.confirmPassword}
+                onChangeText={(text) => updateField('confirmPassword', text)}
+                placeholder="Confirm password"
+                secureTextEntry
+                placeholderTextColor="rgba(255,255,255,0.5)"
+              />
+              {errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
+            </View>
+
+            {/* Phone Field */}
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Phone Number *</Text>
+              <TextInput
+                style={[styles.input, errors.phone && styles.inputError]}
+                value={formData.phone}
+                onChangeText={(text) => updateField('phone', text)}
+                placeholder="017XXXXXXXX"
+                keyboardType="phone-pad"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+              />
+              {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.actionButtons}>
+              <TouchableOpacity 
+                style={[styles.registerButton, loading && styles.buttonDisabled]}
+                onPress={handleAdminRegister}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.registerButtonText}>📝 Register Admin</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.testButton}
+                onPress={testAdminLogin}
+                disabled={loading}
+              >
+                <Text style={styles.testButtonText}>🔐 Test Login</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.loginButton}
+                onPress={() => navigation.navigate('AdminLogin')}
+              >
+                <Text style={styles.loginButtonText}>➡️ Go to Login</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Instructions */}
+            <View style={styles.instructions}>
+              <Text style={styles.instructionsTitle}>📋 Instructions:</Text>
+              <Text style={styles.instruction}>1. Fill the form and click "Register Admin"</Text>
+              <Text style={styles.instruction}>2. After registration, token will be saved automatically</Text>
+              <Text style={styles.instruction}>3. Click "Test Login" to verify the credentials</Text>
+              <Text style={styles.instruction}>4. Use "Go to Login" to login with the new account</Text>
             </View>
           </View>
-
-          {/* Action Buttons */}
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.testButton}
-              onPress={generateRandomData}
-            >
-              <Text style={styles.testButtonText}>🎲 Generate Test Data</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.createButton, loading && styles.createButtonDisabled]}
-              onPress={handleCreateMatch}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator size="small" color="white" />
-              ) : (
-                <Text style={styles.createButtonText}>🚀 Create Test Match</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -336,16 +455,18 @@ const styles = StyleSheet.create({
   debugText: {
     color: 'white',
     marginRight: 8,
+    fontSize: 12,
   },
   content: {
     flex: 1,
-    padding: 16,
   },
   debugSection: {
-    backgroundColor: 'rgba(41, 98, 255, 0.1)',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
     padding: 16,
+    margin: 16,
     borderRadius: 12,
-    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
   },
   sectionTitle: {
     color: 'white',
@@ -353,9 +474,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 12,
   },
-  debugText: {
-    color: 'rgba(255,255,255,0.8)',
+  tokenCheckButton: {
+    backgroundColor: '#2962ff',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
     marginBottom: 12,
+  },
+  tokenCheckText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
   responseSection: {
     backgroundColor: 'rgba(0,0,0,0.3)',
@@ -382,6 +510,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     marginBottom: 8,
+    fontSize: 14,
   },
   curlInput: {
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -393,34 +522,22 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
   },
-  copyButton: {
-    backgroundColor: '#2962ff',
-    padding: 8,
-    borderRadius: 4,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  copyButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
   formSection: {
     backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 16,
+    margin: 16,
+    padding: 20,
     borderRadius: 12,
-  },
-  formRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
   },
   formGroup: {
-    flex: 1,
-    marginHorizontal: 4,
+    marginBottom: 16,
   },
   label: {
     color: 'white',
     marginBottom: 8,
     fontWeight: '500',
+    fontSize: 14,
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.1)',
@@ -429,57 +546,74 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     color: 'white',
+    fontSize: 16,
   },
-  gameButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  inputError: {
+    borderColor: '#ff4444',
   },
-  gameButton: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
-  },
-  gameButtonSelected: {
-    backgroundColor: '#2962ff',
-  },
-  gameButtonText: {
-    color: 'rgba(255,255,255,0.7)',
+  errorText: {
+    color: '#ff4444',
+    marginTop: 5,
     fontSize: 12,
   },
-  gameButtonTextSelected: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
   actionButtons: {
-    marginTop: 16,
+    marginTop: 20,
   },
-  testButton: {
-    backgroundColor: '#9C27B0',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  testButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  createButton: {
+  registerButton: {
     backgroundColor: '#4CAF50',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
+    marginBottom: 12,
   },
-  createButtonDisabled: {
+  buttonDisabled: {
     backgroundColor: '#666',
   },
-  createButtonText: {
+  registerButtonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  testButton: {
+    backgroundColor: '#2962ff',
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  testButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  loginButton: {
+    padding: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderColor: '#FF9800',
+    borderWidth: 1,
+  },
+  loginButtonText: {
+    color: '#FF9800',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  instructions: {
+    marginTop: 20,
+    padding: 16,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 8,
+  },
+  instructionsTitle: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginBottom: 8,
+    fontSize: 16,
+  },
+  instruction: {
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: 6,
+    fontSize: 14,
   },
 });
 
