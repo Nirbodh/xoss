@@ -23,10 +23,12 @@ const startServer = async () => {
 
     console.log('🛠️ Setting up server middleware...');
 
-    // ✅ Professional Middleware Stack
+    // ✅ FIXED: Professional Middleware Stack with CORS FIXED
     app.use(cors({
-      origin: ['http://localhost:3000', 'http://192.168.0.100:3000', 'exp://192.168.0.100:8081'],
-      credentials: true
+      origin: '*', // ✅ ALLOW ALL ORIGINS
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     }));
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
