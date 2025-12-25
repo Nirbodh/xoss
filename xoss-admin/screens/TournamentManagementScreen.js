@@ -1,4 +1,4 @@
-// screens/TournamentManagementScreen.js - COMPLETELY FIXED WITH CUSTOM DATE PICKER
+// screens/TournamentManagementScreen.js - WITH APPROVE & REJECT BUTTONS
 import React, { useState, useEffect } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, 
@@ -242,7 +242,18 @@ const CustomDatePicker = ({ visible, onConfirm, onCancel, value }) => {
 };
 
 const TournamentManagementScreen = ({ navigation }) => {
-  const { tournaments, loading, error, refreshTournaments, createTournament, deleteTournament } = useTournaments();
+  // ✅ FIXED: Add approveTournament and rejectTournament from context
+  const { 
+    tournaments, 
+    loading, 
+    error, 
+    refreshTournaments, 
+    createTournament, 
+    deleteTournament,
+    approveTournament,  // ✅ Add this
+    rejectTournament    // ✅ Add this
+  } = useTournaments();
+  
   const [refreshing, setRefreshing] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
@@ -280,6 +291,68 @@ const TournamentManagementScreen = ({ navigation }) => {
   useEffect(() => {
     refreshTournaments();
   }, []);
+
+  // ✅ FIXED: Approve Tournament Function - Now uses TournamentContext
+  const handleApproveTournament = async (tournamentId) => {
+    Alert.alert(
+      'Approve Tournament',
+      'Are you sure you want to approve this tournament?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Approve', 
+          style: 'default',
+          onPress: async () => {
+            try {
+              console.log('✅ Approving tournament:', tournamentId);
+              // ✅ Use TournamentContext's approveTournament function
+              const result = await approveTournament(tournamentId);
+              if (result.success) {
+                Alert.alert('Success', result.message || 'Tournament approved successfully!');
+                refreshTournaments();
+              } else {
+                Alert.alert('Error', result.error || 'Failed to approve tournament');
+              }
+            } catch (err) {
+              console.error('❌ Approve tournament error:', err);
+              Alert.alert('Error', err.message || 'Failed to approve tournament');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // ✅ FIXED: Reject Tournament Function - Now uses TournamentContext
+  const handleRejectTournament = async (tournamentId) => {
+    Alert.alert(
+      'Reject Tournament',
+      'Are you sure you want to reject this tournament?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Reject', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('❌ Rejecting tournament:', tournamentId);
+              // ✅ Use TournamentContext's rejectTournament function
+              const result = await rejectTournament(tournamentId);
+              if (result.success) {
+                Alert.alert('Success', result.message || 'Tournament rejected successfully!');
+                refreshTournaments();
+              } else {
+                Alert.alert('Error', result.error || 'Failed to reject tournament');
+              }
+            } catch (err) {
+              console.error('❌ Reject tournament error:', err);
+              Alert.alert('Error', err.message || 'Failed to reject tournament');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // ✅ Date/Time Picker Functions
   const openDatePicker = (field) => {
@@ -341,7 +414,7 @@ const TournamentManagementScreen = ({ navigation }) => {
     setCreateLoading(false);
     
     if (result.success) {
-      Alert.alert('Success! 🎉', 'Tournament created successfully!', [
+      Alert.alert('Success! 🎉', result.message || 'Tournament created successfully and auto-approved!', [
         { 
           text: 'OK', 
           onPress: () => {
@@ -415,6 +488,9 @@ const TournamentManagementScreen = ({ navigation }) => {
     const prizePool = tournament.prizePool || tournament.total_prize || 0;
     const entryFee = tournament.entryFee || tournament.entry_fee || 0;
     
+    // ✅ FIXED: Check if tournament is pending for approval
+    const isPending = tournament.approval_status === 'pending';
+    
     return (
       <View style={styles.tournamentCard}>
         <LinearGradient colors={['#1a237e', '#283593']} style={styles.cardGradient}>
@@ -435,14 +511,39 @@ const TournamentManagementScreen = ({ navigation }) => {
               styles.statusBadge,
               { 
                 backgroundColor: tournament.status === 'live' ? '#4CAF50' : 
-                                tournament.status === 'completed' ? '#2196F3' : '#FF9800'
+                                tournament.status === 'completed' ? '#2196F3' : 
+                                isPending ? '#FF9800' : '#4CAF50' // ✅ Approved হলে সবুজ
               }
             ]}>
               <Text style={styles.statusText}>
-                {tournament.status ? tournament.status.toUpperCase() : 'UPCOMING'}
+                {isPending ? 'PENDING' : 
+                 tournament.status ? tournament.status.toUpperCase() : 'UPCOMING'}
               </Text>
             </View>
           </View>
+
+          {/* ✅ Approval Status Indicator */}
+          {tournament.approval_status && (
+            <View style={styles.approvalStatusContainer}>
+              <View style={[
+                styles.approvalBadge,
+                { 
+                  backgroundColor: tournament.approval_status === 'approved' ? '#4CAF50' :
+                                  tournament.approval_status === 'rejected' ? '#F44336' :
+                                  '#FF9800'
+                }
+              ]}>
+                <Text style={styles.approvalText}>
+                  {tournament.approval_status.toUpperCase()}
+                </Text>
+              </View>
+              {tournament.approved_by && tournament.approved_by.username && (
+                <Text style={styles.approvedByText}>
+                  Approved by: {tournament.approved_by.username}
+                </Text>
+              )}
+            </View>
+          )}
 
           <View style={styles.statsContainer}>
             <View style={styles.statItem}>
@@ -477,6 +578,27 @@ const TournamentManagementScreen = ({ navigation }) => {
               {participants.current}/{participants.max} registered • {Math.round((participants.current / participants.max) * 100)}% full
             </Text>
           </View>
+
+          {/* ✅ Approve & Reject Buttons (Only for pending tournaments) */}
+          {isPending && (
+            <View style={styles.adminActions}>
+              <TouchableOpacity 
+                style={styles.approveButton} 
+                onPress={() => handleApproveTournament(tournament._id || tournament.id)}
+              >
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.approveButtonText}>Approve</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.rejectButton} 
+                onPress={() => handleRejectTournament(tournament._id || tournament.id)}
+              >
+                <Ionicons name="close-circle" size={16} color="#F44336" />
+                <Text style={styles.rejectButtonText}>Reject</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <View style={styles.actionButtons}>
             <TouchableOpacity style={styles.editButton}>
@@ -524,7 +646,7 @@ const TournamentManagementScreen = ({ navigation }) => {
         </View>
       ) : (
         <FlatList
-          data={tournaments.filter(t => t.matchType === 'tournament')}
+          data={tournaments.filter(t => t.matchType === 'tournament' || t.match_type === 'tournament')}
           keyExtractor={(item) => item._id || item.id || Math.random().toString()}
           renderItem={({ item }) => <TournamentCard tournament={item} />}
           refreshControl={
@@ -553,7 +675,7 @@ const TournamentManagementScreen = ({ navigation }) => {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Create Tournament</Text>
+              <Text style={styles.modalTitle}>Create Tournament (Auto-Approved)</Text>
               <TouchableOpacity onPress={() => setShowCreateModal(false)}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
@@ -727,6 +849,10 @@ const TournamentManagementScreen = ({ navigation }) => {
                 numberOfLines={2}
               />
 
+              <Text style={styles.helperText}>
+                ℹ️ Note: Tournaments are auto-approved and will be immediately visible.
+              </Text>
+
               <TouchableOpacity 
                 style={[styles.createButtonModal, createLoading && styles.createButtonDisabled]} 
                 onPress={handleCreateTournament}
@@ -735,7 +861,7 @@ const TournamentManagementScreen = ({ navigation }) => {
                 {createLoading ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
-                  <Text style={styles.createButtonText}>Create Tournament</Text>
+                  <Text style={styles.createButtonText}>Create Tournament (Auto-Approved)</Text>
                 )}
               </TouchableOpacity>
             </ScrollView>
@@ -912,6 +1038,70 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
+  
+  // ✅ NEW: Approve & Reject Button Styles
+  adminActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  approveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  approveButtonText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  rejectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(244, 67, 54, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  rejectButtonText: {
+    color: '#F44336',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  
+  // ✅ NEW: Approval Status Styles
+  approvalStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+  },
+  approvalBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  approvalText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  approvedByText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+  },
+  
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

@@ -1,3 +1,4 @@
+// routes/withdrawal.js - COMPLETE FIXED VERSION
 const express = require('express');
 const router = express.Router();
 
@@ -9,7 +10,6 @@ const { auth, adminAuth } = require('../middleware/auth');
 
 // Wallet Models
 const { Wallet, Transaction } = require('../models/Wallet');
-
 
 // =============================
 // 🔹 WITHDRAWAL ROUTES
@@ -25,8 +25,6 @@ router.get('/admin/pending', adminAuth, withdrawalController.getPendingWithdrawa
 router.get('/admin/analytics', adminAuth, withdrawalController.getWithdrawalAnalytics);
 router.post('/admin/approve/:id', adminAuth, withdrawalController.approveWithdrawal);
 router.post('/admin/reject/:id', adminAuth, withdrawalController.rejectWithdrawal);
-
-
 
 // =============================
 // 🔹 WALLET ROUTES
@@ -58,7 +56,6 @@ router.get('/balance', auth, async (req, res) => {
   }
 });
 
-
 // Get transactions
 router.get('/transactions', auth, async (req, res) => {
   try {
@@ -87,7 +84,6 @@ router.get('/transactions', auth, async (req, res) => {
     });
   }
 });
-
 
 // Wallet credit (admin or payment gateway)
 router.post('/credit', auth, async (req, res) => {
@@ -124,7 +120,6 @@ router.post('/credit', auth, async (req, res) => {
   }
 });
 
-
 // Entry fee (debit from wallet)
 router.post('/pay-entry-fee', auth, async (req, res) => {
   try {
@@ -156,8 +151,6 @@ router.post('/pay-entry-fee', auth, async (req, res) => {
     });
   }
 });
-
-
 
 // Export router
 module.exports = router;

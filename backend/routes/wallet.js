@@ -1,35 +1,15 @@
-// routes/wallet.js - COMPLETELY FIXED
+// routes/wallet.js - COMPLETELY FIXED WITH JWT AUTH
 const express = require('express');
 const router = express.Router();
+const { auth } = require('../middleware/auth'); // ✅ JWT auth ব্যবহার করুন
 const { Wallet } = require('../models/Wallet');
 
-// ✅ SIMPLE AUTH MIDDLEWARE
-const simpleAuth = async (req, res, next) => {
-  try {
-    const userId = req.headers['user-id'] || req.query.userId;
-    if (!userId) {
-      return res.status(401).json({ 
-        success: false,
-        message: 'User ID required' 
-      });
-    }
-
-    req.user = { userId };
-    next();
-  } catch (error) {
-    res.status(401).json({ 
-      success: false,
-      message: 'Authentication failed' 
-    });
-  }
-};
-
-// ✅ GET WALLET BALANCE
-router.get('/', simpleAuth, async (req, res) => {
+// ✅ GET WALLET BALANCE (USING JWT AUTH)
+router.get('/', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    console.log(`💰 Fetching wallet for user: ${userId}`);
+    console.log(`💰 Fetching wallet for user ID: ${userId}`);
     
     const wallet = await Wallet.findOrCreate(userId);
     
@@ -54,7 +34,7 @@ router.get('/', simpleAuth, async (req, res) => {
 });
 
 // ✅ GET WALLET TRANSACTIONS
-router.get('/transactions', simpleAuth, async (req, res) => {
+router.get('/transactions', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { page = 1, limit = 20 } = req.query;
@@ -78,7 +58,7 @@ router.get('/transactions', simpleAuth, async (req, res) => {
 });
 
 // ✅ CREDIT WALLET
-router.post('/credit', simpleAuth, async (req, res) => {
+router.post('/credit', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { amount, description, metadata = {} } = req.body;
@@ -108,6 +88,77 @@ router.post('/credit', simpleAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to credit wallet',
+      error: error.message
+    });
+  }
+});
+
+// ✅ TRANSFER MONEY TO ANOTHER USER
+router.post('/transfer', auth, async (req, res) => {
+  try {
+    const senderId = req.user.userId;
+    const { recipientId, amount, description = '' } = req.body;
+    
+    if (!recipientId || !amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Recipient ID and valid amount required'
+      });
+    }
+    
+    console.log(`💸 Transfer request: ${senderId} -> ${recipientId}, Amount: ${amount}`);
+    
+    // Get sender's wallet
+    const senderWallet = await Wallet.findOrCreate(senderId);
+    
+    // Check if sender has sufficient balance
+    if (!senderWallet.hasSufficientBalance(amount)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient balance'
+      });
+    }
+    
+    // Get recipient's wallet
+    const recipientWallet = await Wallet.findOrCreate(recipientId);
+    
+    // Perform transfer
+    const debitResult = await senderWallet.debit(
+      amount, 
+      `Transfer to user ${recipientId}${description ? ': ' + description : ''}`,
+      { 
+        type: 'transfer', 
+        recipientId, 
+        transactionType: 'outgoing' 
+      }
+    );
+    
+    const creditResult = await recipientWallet.credit(
+      amount,
+      `Transfer from user ${senderId}${description ? ': ' + description : ''}`,
+      { 
+        type: 'transfer', 
+        senderId, 
+        transactionType: 'incoming' 
+      }
+    );
+    
+    res.json({
+      success: true,
+      message: 'Transfer successful',
+      data: {
+        sender_new_balance: debitResult.wallet.balance,
+        recipient_new_balance: creditResult.wallet.balance,
+        sender_transaction: debitResult.transaction,
+        recipient_transaction: creditResult.transaction
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Transfer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Transfer failed',
       error: error.message
     });
   }

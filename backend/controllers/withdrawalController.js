@@ -1,3 +1,4 @@
+// controllers/withdrawalController.js - COMPLETE FIXED VERSION
 const mongoose = require('mongoose');
 const { Withdrawal, Wallet, Transaction } = require('../models/Wallet');
 const User = require('../models/User');
@@ -109,7 +110,7 @@ exports.requestWithdrawal = async (req, res) => {
     const tx = await createTransaction({
       session,
       user_id: userId,
-      type: 'withdrawal_request',
+      type: 'withdrawal',
       amount: parsedAmount,
       description: `Withdrawal request - ${(payment_method || 'bkash').toUpperCase()}`,
       metadata: {
@@ -264,7 +265,7 @@ exports.getPendingWithdrawals = async (req, res) => {
     const total = await Withdrawal.countDocuments({ status: 'pending' });
 
     return res.json({
-      success: true,
+      success: false,
       data: withdrawals,
       pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / limit) }
     });
@@ -300,6 +301,7 @@ exports.approveWithdrawal = async (req, res) => {
       return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}` });
     }
 
+    // Update withdrawal status
     withdrawal.status = 'approved';
     withdrawal.transaction_id = transaction_id || withdrawal.transaction_id;
     withdrawal.approved_by = adminId;
@@ -309,6 +311,7 @@ exports.approveWithdrawal = async (req, res) => {
 
     await withdrawal.save({ session });
 
+    // Update transaction status
     await Transaction.findOneAndUpdate(
       { 'metadata.withdrawalId': toObjectIdString(withdrawal._id) },
       {
@@ -325,12 +328,21 @@ exports.approveWithdrawal = async (req, res) => {
 
     await withdrawal.populate('user_id', 'username email phone');
 
-    return res.json({ success: true, message: 'Withdrawal approved successfully', data: withdrawal });
+    return res.json({ 
+      success: true, 
+      message: 'Withdrawal approved successfully', 
+      data: withdrawal 
+    });
+    
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     console.error('❌ Approve withdrawal error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to approve withdrawal', error: error.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to approve withdrawal', 
+      error: error.message 
+    });
   }
 };
 
@@ -360,7 +372,7 @@ exports.rejectWithdrawal = async (req, res) => {
       return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}` });
     }
 
-    // Refund wallet
+    // Refund wallet (return money to user)
     const wallet = await Wallet.findOneAndUpdate(
       { user_id: withdrawal.user_id },
       { $inc: { balance: withdrawal.amount, total_spent: -withdrawal.amount } },
@@ -368,13 +380,14 @@ exports.rejectWithdrawal = async (req, res) => {
     );
 
     if (!wallet) {
-      console.warn(`⚠️ Wallet not found for user ${withdrawal.user_id} while refunding withdrawal ${withdrawal._id}`);
+      console.warn(`⚠️ Wallet not found for user ${withdrawal.user_id}`);
     }
 
+    // Create refund transaction
     await createTransaction({
       session,
       user_id: withdrawal.user_id,
-      type: 'withdrawal_refund',
+      type: 'refund',
       amount: withdrawal.amount,
       description: `Withdrawal refund - ${withdrawal.payment_method?.toUpperCase() || 'BKASH'}`,
       metadata: {
@@ -385,6 +398,7 @@ exports.rejectWithdrawal = async (req, res) => {
       }
     });
 
+    // Update withdrawal status
     withdrawal.status = 'rejected';
     withdrawal.approved_by = adminId;
     withdrawal.approved_at = new Date();
@@ -410,10 +424,15 @@ exports.rejectWithdrawal = async (req, res) => {
         }
       }
     });
+    
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     console.error('❌ Reject withdrawal error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to reject withdrawal', error: error.message });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to reject withdrawal', 
+      error: error.message 
+    });
   }
 };

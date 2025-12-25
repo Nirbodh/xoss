@@ -1,5 +1,5 @@
-// screens/WalletControlScreen.js - COMPLETELY FIXED WITH AUTH
-import React, { useState, useRef, useEffect } from 'react';
+// screens/WalletControlScreen.js - FINAL FIXED VERSION
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,60 +8,82 @@ import {
   StyleSheet,
   TextInput,
   Alert,
-  Animated,
-  Dimensions,
   Modal,
   RefreshControl,
   ActivityIndicator,
   FlatList,
-  Image
+  Image,
+  Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons, MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext'; // ✅ AuthContext থেকে টোকেন নিবে
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
-// ✅ CORRECT Server URL
+// ✅ আপনার সার্ভার URL
 const API_URL = 'https://xoss.onrender.com/api';
 
 const WalletControlScreen = ({ navigation }) => {
-  const { getToken } = useAuth(); // ✅ ADD AUTH HOOK
+  const { user, token, logout } = useAuth(); // ✅ useAuth থেকে টোকেন নিন
   const [activeTab, setActiveTab] = useState('deposits');
   const [depositRequests, setDepositRequests] = useState([]);
+  const [withdrawalRequests, setWithdrawalRequests] = useState([]);
   const [depositHistory, setDepositHistory] = useState([]);
+  const [withdrawalHistory, setWithdrawalHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState({
     totalBalance: 0,
     todayRevenue: 0,
     pendingDeposits: 0,
-    totalDeposits: 0
+    pendingWithdrawals: 0,
+    totalTransactions: 0
   });
 
   // Modal states
   const [showDepositDetailModal, setShowDepositDetailModal] = useState(false);
+  const [showWithdrawalDetailModal, setShowWithdrawalDetailModal] = useState(false);
   const [selectedDeposit, setSelectedDeposit] = useState(null);
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState(null);
   const [adminNote, setAdminNote] = useState('');
   const [showScreenshotModal, setShowScreenshotModal] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, [activeTab]);
+    // ✅ চেক করুন ইউজার এডমিন কিনা
+    if (user && user.role !== 'admin') {
+      Alert.alert(
+        'Access Denied',
+        'Only admin can access this screen.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+      return;
+    }
+    
+    if (token) {
+      loadData();
+    } else {
+      Alert.alert(
+        'Login Required',
+        'Please login first.',
+        [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+      );
+    }
+  }, [activeTab, token, user]);
 
   const loadData = async () => {
     try {
       setLoading(true);
+      
       if (activeTab === 'deposits') {
-        await Promise.all([
-          loadDepositRequests(),
-          loadStats()
-        ]);
-      } else {
-        await loadDepositHistory();
+        await loadDepositRequests();
+      } else if (activeTab === 'withdrawals') {
+        await loadWithdrawalRequests();
       }
+      
+      await loadStats();
     } catch (error) {
       console.error('Error loading data:', error);
       Alert.alert('Error', 'Failed to load data');
@@ -71,43 +93,45 @@ const WalletControlScreen = ({ navigation }) => {
     }
   };
 
-  // ✅ FIXED: Load pending deposits - WITH AUTH HEADER
+  // ✅ Load pending deposits (REAL API CALL)
   const loadDepositRequests = async () => {
     try {
-      console.log('📥 Loading REAL deposit requests...');
-      const token = await getToken(); // ✅ GET TOKEN
+      console.log('📥 Loading pending deposits with user token...');
       
       if (!token) {
-        Alert.alert('Error', 'Admin authentication required');
+        Alert.alert('Error', 'Please login first');
         return;
       }
 
-      // ✅ CORRECT ENDPOINT for pending deposits WITH AUTH HEADER
       const response = await fetch(`${API_URL}/deposits/admin/pending`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`, // ✅ ইউজারের টোকেন ব্যবহার
           'Content-Type': 'application/json'
         }
       });
       
+      console.log('Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ REAL deposit requests loaded:', data.data?.length || 0);
+        console.log('✅ Pending deposits loaded:', data.data?.length || 0);
         
         if (data.success && data.data) {
-          // ✅ FIX: Ensure unique keys by adding timestamp
-          const depositsWithUniqueKeys = data.data.map((deposit, index) => ({
-            ...deposit,
-            uniqueKey: deposit._id || `deposit-${Date.now()}-${index}`
-          }));
-          
-          setDepositRequests(depositsWithUniqueKeys);
+          setDepositRequests(data.data);
         } else {
           setDepositRequests([]);
         }
+      } else if (response.status === 401) {
+        // Token expired
+        Alert.alert(
+          'Session Expired',
+          'Please login again.',
+          [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+        );
+        setDepositRequests([]);
       } else {
-        console.log('❌ Failed to load deposit requests:', response.status);
+        console.log('❌ Failed to load pending deposits:', response.status);
         setDepositRequests([]);
       }
     } catch (error) {
@@ -117,18 +141,13 @@ const WalletControlScreen = ({ navigation }) => {
     }
   };
 
-  // ✅ FIXED: Load deposit history - WITH AUTH HEADER
+  // ✅ Load deposit history (REAL API CALL)
   const loadDepositHistory = async () => {
     try {
-      console.log('📥 Loading REAL deposit history...');
-      const token = await getToken(); // ✅ GET TOKEN
-      
       if (!token) {
-        Alert.alert('Error', 'Admin authentication required');
         return;
       }
 
-      // ✅ Get all deposits for admin WITH AUTH HEADER
       const response = await fetch(`${API_URL}/deposits`, {
         method: 'GET',
         headers: {
@@ -139,68 +158,120 @@ const WalletControlScreen = ({ navigation }) => {
       
       if (response.ok) {
         const data = await response.json();
-        console.log('✅ REAL deposit history loaded:', data.data?.length || 0);
-        
         if (data.success && data.data) {
-          // Filter out pending and get only approved/rejected
           const historyData = data.data.filter(deposit => 
             deposit.status !== 'pending'
           );
-          
-          // ✅ FIX: Ensure unique keys
-          const historyWithUniqueKeys = historyData.map((deposit, index) => ({
-            ...deposit,
-            uniqueKey: deposit._id || `history-${Date.now()}-${index}`
-          }));
-          
-          setDepositHistory(historyWithUniqueKeys);
+          setDepositHistory(historyData);
         } else {
           setDepositHistory([]);
         }
       } else {
-        console.log('❌ Failed to load deposit history:', response.status);
         setDepositHistory([]);
       }
     } catch (error) {
       console.error('Error loading deposit history:', error);
-      Alert.alert('Error', 'Failed to load deposit history');
       setDepositHistory([]);
     }
   };
 
-  // ✅ FIXED: Load stats from REAL data
+  // ✅ Load pending withdrawals (REAL API CALL)
+  const loadWithdrawalRequests = async () => {
+    try {
+      if (!token) {
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/withdrawals/admin/pending`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          setWithdrawalRequests(data.data);
+        } else {
+          setWithdrawalRequests([]);
+        }
+      } else {
+        setWithdrawalRequests([]);
+      }
+    } catch (error) {
+      console.error('Error loading withdrawal requests:', error);
+      setWithdrawalRequests([]);
+    }
+  };
+
+  // ✅ Load withdrawal history (REAL API CALL)
+  const loadWithdrawalHistory = async () => {
+    try {
+      if (!token) {
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/withdrawals/history?limit=50`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data) {
+          const historyData = data.data.filter(withdrawal => 
+            withdrawal.status !== 'pending'
+          );
+          setWithdrawalHistory(historyData);
+        } else {
+          setWithdrawalHistory([]);
+        }
+      } else {
+        setWithdrawalHistory([]);
+      }
+    } catch (error) {
+      console.error('Error loading withdrawal history:', error);
+      setWithdrawalHistory([]);
+    }
+  };
+
+  // ✅ Calculate stats from real data
   const loadStats = async () => {
     try {
-      // Calculate from real data
-      const totalDeposits = depositRequests.length + depositHistory.length;
-      const pendingDeposits = depositRequests.length;
-      
-      // Calculate today's revenue from approved deposits
-      const today = new Date().toISOString().split('T')[0];
-      const todayRevenue = depositHistory
-        .filter(d => d.status === 'approved' && d.createdAt && new Date(d.createdAt).toISOString().split('T')[0] === today)
-        .reduce((sum, d) => sum + (d.amount || 0), 0);
-      
-      // Calculate total balance from approved deposits
+      // First load history data if not loaded
+      if (activeTab === 'deposits') {
+        await loadDepositHistory();
+      } else {
+        await loadWithdrawalHistory();
+      }
+
+      // Calculate stats
       const totalBalance = depositHistory
         .filter(d => d.status === 'approved')
+        .reduce((sum, d) => sum + (d.amount || 0), 0);
+
+      const today = new Date().toISOString().split('T')[0];
+      const todayRevenue = depositHistory
+        .filter(d => d.status === 'approved' && 
+          d.createdAt && 
+          new Date(d.createdAt).toISOString().split('T')[0] === today
+        )
         .reduce((sum, d) => sum + (d.amount || 0), 0);
 
       setStats({
         totalBalance,
         todayRevenue,
-        pendingDeposits,
-        totalDeposits
+        pendingDeposits: depositRequests.length,
+        pendingWithdrawals: withdrawalRequests.length,
+        totalTransactions: depositHistory.length + withdrawalHistory.length
       });
     } catch (error) {
       console.error('Error loading stats:', error);
-      // Set default stats based on real data
-      setStats({
-        totalBalance: depositHistory.filter(d => d.status === 'approved').reduce((sum, d) => sum + (d.amount || 0), 0),
-        todayRevenue: 0,
-        pendingDeposits: depositRequests.length,
-        totalDeposits: depositRequests.length + depositHistory.length
-      });
     }
   };
 
@@ -211,182 +282,358 @@ const WalletControlScreen = ({ navigation }) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  // ✅ FIXED: Approve deposit function - WITH AUTH HEADER
+  // ✅ Approve deposit (REAL API CALL)
   const handleApproveDeposit = async (depositId) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    Alert.alert(
-      'Approve Deposit',
-      'Are you sure you want to approve this deposit and add money to user wallet?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Approve', 
-          style: 'default',
-          onPress: async () => {
-            try {
-              console.log(`✅ Approving deposit: ${depositId}`);
-              const token = await getToken(); // ✅ GET TOKEN
-              
-              if (!token) {
-                Alert.alert('Error', 'Admin authentication required');
-                return;
-              }
+    try {
+      if (!token) {
+        Alert.alert('Error', 'Please login first');
+        return;
+      }
 
-              // ✅ REAL API CALL to approve deposit WITH AUTH HEADER
-              const response = await fetch(`${API_URL}/deposits/admin/approve/${depositId}`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  adminNote: adminNote || 'Deposit approved by admin'
-                })
-              });
-
-              if (response.ok) {
-                const result = await response.json();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      Alert.alert(
+        'Approve Deposit',
+        'Approve this deposit and add money to user wallet?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Approve', 
+            onPress: async () => {
+              try {
+                console.log(`✅ Approving deposit: ${depositId}`);
                 
-                if (result.success) {
-                  // Update local state
-                  setDepositRequests(prev => 
-                    prev.filter(deposit => deposit._id !== depositId)
-                  );
-                  
-                  // Add to history
-                  const approvedDeposit = depositRequests.find(d => d._id === depositId);
-                  if (approvedDeposit) {
-                    setDepositHistory(prev => [{
-                      ...approvedDeposit,
-                      status: 'approved',
-                      adminNote: adminNote || 'Deposit approved by admin'
-                    }, ...prev]);
-                  }
+                const response = await fetch(`${API_URL}/deposits/admin/approve/${depositId}`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    adminNote: adminNote || 'Approved by admin'
+                  })
+                });
 
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  Alert.alert('Success', 'Deposit approved successfully!');
-                  setShowDepositDetailModal(false);
-                  loadStats(); // Refresh stats
+                console.log('Approve response status:', response.status);
+
+                if (response.ok) {
+                  const result = await response.json();
+                  
+                  if (result.success) {
+                    // Remove from pending list
+                    setDepositRequests(prev => 
+                      prev.filter(deposit => deposit._id !== depositId)
+                    );
+                    
+                    // Add to history
+                    const approvedDeposit = depositRequests.find(d => d._id === depositId);
+                    if (approvedDeposit) {
+                      setDepositHistory(prev => [{
+                        ...approvedDeposit,
+                        status: 'approved',
+                        adminNote: adminNote || 'Approved by admin',
+                        approvedAt: new Date()
+                      }, ...prev]);
+                    }
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    Alert.alert('Success', 'Deposit approved successfully!');
+                    setShowDepositDetailModal(false);
+                    loadStats();
+                  } else {
+                    throw new Error(result.message);
+                  }
+                } else if (response.status === 401) {
+                  Alert.alert(
+                    'Session Expired',
+                    'Please login again.',
+                    [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+                  );
                 } else {
-                  throw new Error(result.message);
+                  const errorData = await response.json();
+                  throw new Error(errorData.message || 'Approval failed');
                 }
-              } else {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Approval failed');
+              } catch (error) {
+                console.error('Approve deposit error:', error);
+                Alert.alert('Error', error.message || 'Failed to approve deposit');
               }
-            } catch (error) {
-              console.error('Approve deposit error:', error);
-              Alert.alert('Error', error.message || 'Failed to approve deposit');
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    } catch (error) {
+      console.error('Approve deposit error:', error);
+      Alert.alert('Error', error.message || 'Failed to approve deposit');
+    }
   };
 
-  // ✅ FIXED: Reject deposit function - WITH AUTH HEADER
+  // ✅ Reject deposit (REAL API CALL)
   const handleRejectDeposit = async (depositId) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    
-    Alert.prompt(
-      'Reject Deposit',
-      'Please provide reason for rejection:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Reject', 
-          style: 'destructive',
-          onPress: async (reason) => {
-            try {
-              console.log(`❌ Rejecting deposit: ${depositId}, Reason: ${reason}`);
-              const token = await getToken(); // ✅ GET TOKEN
-              
-              if (!token) {
-                Alert.alert('Error', 'Admin authentication required');
-                return;
-              }
+    try {
+      if (!token) {
+        Alert.alert('Error', 'Please login first');
+        return;
+      }
 
-              // ✅ REAL API CALL to reject deposit WITH AUTH HEADER
-              const response = await fetch(`${API_URL}/deposits/admin/reject/${depositId}`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  adminNote: reason || 'Deposit rejected by admin'
-                })
-              });
-
-              if (response.ok) {
-                const result = await response.json();
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      Alert.alert(
+        'Reject Deposit',
+        'Are you sure you want to reject this deposit?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Reject', 
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                console.log(`❌ Rejecting deposit: ${depositId}`);
                 
-                if (result.success) {
-                  // Update local state
-                  setDepositRequests(prev => 
-                    prev.filter(deposit => deposit._id !== depositId)
-                  );
-                  
-                  // Add to history as rejected
-                  const rejectedDeposit = depositRequests.find(d => d._id === depositId);
-                  if (rejectedDeposit) {
-                    setDepositHistory(prev => [{
-                      ...rejectedDeposit,
-                      status: 'rejected',
-                      adminNote: reason || 'Deposit rejected by admin'
-                    }, ...prev]);
-                  }
+                const response = await fetch(`${API_URL}/deposits/admin/reject/${depositId}`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    adminNote: adminNote || 'Rejected by admin'
+                  })
+                });
 
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                  Alert.alert('Deposit Rejected', 'User has been notified.');
-                  setShowDepositDetailModal(false);
-                  loadStats(); // Refresh stats
+                if (response.ok) {
+                  const result = await response.json();
+                  
+                  if (result.success) {
+                    setDepositRequests(prev => 
+                      prev.filter(deposit => deposit._id !== depositId)
+                    );
+                    
+                    const rejectedDeposit = depositRequests.find(d => d._id === depositId);
+                    if (rejectedDeposit) {
+                      setDepositHistory(prev => [{
+                        ...rejectedDeposit,
+                        status: 'rejected',
+                        adminNote: adminNote || 'Rejected by admin',
+                        rejectedAt: new Date()
+                      }, ...prev]);
+                    }
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    Alert.alert('Deposit Rejected', 'Deposit has been rejected.');
+                    setShowDepositDetailModal(false);
+                    loadStats();
+                  } else {
+                    throw new Error(result.message);
+                  }
+                } else if (response.status === 401) {
+                  Alert.alert(
+                    'Session Expired',
+                    'Please login again.',
+                    [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+                  );
                 } else {
-                  throw new Error(result.message);
+                  const errorData = await response.json();
+                  throw new Error(errorData.message || 'Rejection failed');
                 }
-              } else {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Rejection failed');
+              } catch (error) {
+                console.error('Reject deposit error:', error);
+                Alert.alert('Error', error.message || 'Failed to reject deposit');
               }
-            } catch (error) {
-              console.error('Reject deposit error:', error);
-              Alert.alert('Error', error.message || 'Failed to reject deposit');
             }
           }
-        }
-      ],
-      'plain-text'
-    );
+        ]
+      );
+    } catch (error) {
+      console.error('Reject deposit error:', error);
+      Alert.alert('Error', error.message || 'Failed to reject deposit');
+    }
   };
 
-  // ✅ FIXED: Screenshot display function
-  const viewScreenshot = (deposit) => {
-    if (!deposit.screenshot) {
-      Alert.alert('No Screenshot', 'No payment proof available for this deposit.');
+  // ✅ Approve withdrawal (REAL API CALL)
+  const handleApproveWithdrawal = async (withdrawalId) => {
+    try {
+      if (!token) {
+        Alert.alert('Error', 'Please login first');
+        return;
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      Alert.alert(
+        'Approve Withdrawal',
+        'Approve this withdrawal request?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Approve', 
+            onPress: async () => {
+              try {
+                const response = await fetch(`${API_URL}/withdrawals/admin/approve/${withdrawalId}`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    admin_notes: adminNote || 'Approved by admin'
+                  })
+                });
+
+                if (response.ok) {
+                  const result = await response.json();
+                  
+                  if (result.success) {
+                    setWithdrawalRequests(prev => 
+                      prev.filter(withdrawal => withdrawal._id !== withdrawalId)
+                    );
+                    
+                    const approvedWithdrawal = withdrawalRequests.find(w => w._id === withdrawalId);
+                    if (approvedWithdrawal) {
+                      setWithdrawalHistory(prev => [{
+                        ...approvedWithdrawal,
+                        status: 'approved',
+                        admin_notes: adminNote || 'Approved by admin'
+                      }, ...prev]);
+                    }
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    Alert.alert('Success', 'Withdrawal approved!');
+                    setShowWithdrawalDetailModal(false);
+                    loadStats();
+                  } else {
+                    throw new Error(result.message);
+                  }
+                } else if (response.status === 401) {
+                  Alert.alert(
+                    'Session Expired',
+                    'Please login again.',
+                    [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+                  );
+                } else {
+                  const errorData = await response.json();
+                  throw new Error(errorData.message || 'Approval failed');
+                }
+              } catch (error) {
+                console.error('Approve withdrawal error:', error);
+                Alert.alert('Error', error.message || 'Failed to approve withdrawal');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Approve withdrawal error:', error);
+      Alert.alert('Error', error.message || 'Failed to approve withdrawal');
+    }
+  };
+
+  // ✅ Reject withdrawal (REAL API CALL)
+  const handleRejectWithdrawal = async (withdrawalId) => {
+    try {
+      if (!token) {
+        Alert.alert('Error', 'Please login first');
+        return;
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      Alert.alert(
+        'Reject Withdrawal',
+        'Reject this withdrawal request and refund money?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Reject', 
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const response = await fetch(`${API_URL}/withdrawals/admin/reject/${withdrawalId}`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    admin_notes: adminNote || 'Rejected by admin'
+                  })
+                });
+
+                if (response.ok) {
+                  const result = await response.json();
+                  
+                  if (result.success) {
+                    setWithdrawalRequests(prev => 
+                      prev.filter(withdrawal => withdrawal._id !== withdrawalId)
+                    );
+                    
+                    const rejectedWithdrawal = withdrawalRequests.find(w => w._id === withdrawalId);
+                    if (rejectedWithdrawal) {
+                      setWithdrawalHistory(prev => [{
+                        ...rejectedWithdrawal,
+                        status: 'rejected',
+                        admin_notes: adminNote || 'Rejected by admin'
+                      }, ...prev]);
+                    }
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                    Alert.alert('Withdrawal Rejected', 'Withdrawal has been rejected.');
+                    setShowWithdrawalDetailModal(false);
+                    loadStats();
+                  } else {
+                    throw new Error(result.message);
+                  }
+                } else if (response.status === 401) {
+                  Alert.alert(
+                    'Session Expired',
+                    'Please login again.',
+                    [{ text: 'Login', onPress: () => navigation.navigate('Login') }]
+                  );
+                } else {
+                  const errorData = await response.json();
+                  throw new Error(errorData.message || 'Rejection failed');
+                }
+              } catch (error) {
+                console.error('Reject withdrawal error:', error);
+                Alert.alert('Error', error.message || 'Failed to reject withdrawal');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Reject withdrawal error:', error);
+      Alert.alert('Error', error.message || 'Failed to reject withdrawal');
+    }
+  };
+
+  // ✅ View screenshot
+  const viewScreenshot = (item) => {
+    if (!item.screenshot) {
+      Alert.alert('No Screenshot', 'No payment proof available.');
       return;
     }
     
-    setSelectedDeposit(deposit);
+    if (activeTab === 'deposits') {
+      setSelectedDeposit(item);
+    } else {
+      setSelectedWithdrawal(item);
+    }
     setShowScreenshotModal(true);
   };
 
-  // ✅ FIXED: Format base64 image for display
+  // ✅ Format base64 image
   const getScreenshotUri = (screenshotData) => {
     if (!screenshotData) return null;
     
-    // If it's already a URL
     if (screenshotData.startsWith('http')) {
       return screenshotData;
     }
     
-    // If it's base64 data
     if (screenshotData.startsWith('data:image')) {
       return screenshotData;
     }
     
-    // If it's raw base64 without prefix
-    if (screenshotData.length > 100) { // Likely base64
+    if (screenshotData.length > 100) {
       return `data:image/jpeg;base64,${screenshotData}`;
     }
     
@@ -408,72 +655,56 @@ const WalletControlScreen = ({ navigation }) => {
     }
   };
 
-  // Render stats cards
+  // ✅ Render stats cards
   const renderStats = () => (
     <View style={styles.statsContainer}>
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        style={styles.statCard}
-      >
-        <Text style={styles.statValue}>৳{stats.totalBalance}</Text>
+      <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
+        <Text style={styles.statValue}>৳{stats.totalBalance.toLocaleString()}</Text>
         <Text style={styles.statLabel}>Total Balance</Text>
         <FontAwesome5 name="wallet" size={20} color="#fff" style={styles.statIcon} />
       </LinearGradient>
 
-      <LinearGradient
-        colors={['#f093fb', '#f5576c']}
-        style={styles.statCard}
-      >
-        <Text style={styles.statValue}>৳{stats.todayRevenue}</Text>
+      <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
+        <Text style={styles.statValue}>৳{stats.todayRevenue.toLocaleString()}</Text>
         <Text style={styles.statLabel}>Today Revenue</Text>
         <FontAwesome5 name="chart-line" size={20} color="#fff" style={styles.statIcon} />
       </LinearGradient>
 
-      <LinearGradient
-        colors={['#4facfe', '#00f2fe']}
-        style={styles.statCard}
-      >
+      <LinearGradient colors={['#4facfe', '#00f2fe']} style={styles.statCard}>
         <Text style={styles.statValue}>{stats.pendingDeposits}</Text>
         <Text style={styles.statLabel}>Pending Deposits</Text>
         <FontAwesome5 name="clock" size={20} color="#fff" style={styles.statIcon} />
       </LinearGradient>
 
-      <LinearGradient
-        colors={['#43e97b', '#38f9d7']}
-        style={styles.statCard}
-      >
-        <Text style={styles.statValue}>{stats.totalDeposits}</Text>
-        <Text style={styles.statLabel}>Total Deposits</Text>
-        <FontAwesome5 name="money-check" size={20} color="#fff" style={styles.statIcon} />
+      <LinearGradient colors={['#43e97b', '#38f9d7']} style={styles.statCard}>
+        <Text style={styles.statValue}>{stats.pendingWithdrawals}</Text>
+        <Text style={styles.statLabel}>Pending Withdrawals</Text>
+        <FontAwesome5 name="money-bill-wave" size={20} color="#fff" style={styles.statIcon} />
       </LinearGradient>
     </View>
   );
 
-  // ✅ FIXED: Render deposit item with UNIQUE KEYS
-  const renderDepositItem = ({ item, index }) => {
-    const uniqueKey = item.uniqueKey || item._id || `deposit-${index}-${Date.now()}`;
+  // ✅ Render deposit item
+  const renderDepositItem = ({ item }) => {
     const screenshotUri = getScreenshotUri(item.screenshot);
     
     return (
       <TouchableOpacity
-        key={uniqueKey}
-        style={styles.depositItem}
+        style={styles.item}
         onPress={() => {
           setSelectedDeposit(item);
           setAdminNote(item.adminNote || '');
           setShowDepositDetailModal(true);
         }}
       >
-        <View style={styles.depositHeader}>
+        <View style={styles.itemHeader}>
           <Text style={styles.userName}>{item.userName || 'Unknown User'}</Text>
           <Text style={styles.amount}>৳{item.amount}</Text>
         </View>
         
-        <View style={styles.depositDetails}>
+        <View style={styles.itemDetails}>
           <Text style={styles.method}>{item.method?.toUpperCase()}</Text>
-          <Text style={styles.date}>
-            {formatDateTime(item.createdAt)}
-          </Text>
+          <Text style={styles.date}>{formatDateTime(item.createdAt)}</Text>
         </View>
         
         <View style={styles.statusContainer}>
@@ -504,47 +735,82 @@ const WalletControlScreen = ({ navigation }) => {
     );
   };
 
-  // Render tabs
+  // ✅ Render withdrawal item
+  const renderWithdrawalItem = ({ item }) => {
+    return (
+      <TouchableOpacity
+        style={styles.item}
+        onPress={() => {
+          setSelectedWithdrawal(item);
+          setAdminNote(item.admin_notes || '');
+          setShowWithdrawalDetailModal(true);
+        }}
+      >
+        <View style={styles.itemHeader}>
+          <Text style={styles.userName}>
+            {item.user_id?.username || 'Unknown User'}
+          </Text>
+          <Text style={styles.amount}>৳{item.amount}</Text>
+        </View>
+        
+        <View style={styles.itemDetails}>
+          <Text style={styles.method}>{item.payment_method?.toUpperCase()}</Text>
+          <Text style={styles.date}>{formatDateTime(item.createdAt)}</Text>
+        </View>
+        
+        <View style={styles.statusContainer}>
+          <View style={[
+            styles.statusBadge,
+            { 
+              backgroundColor: item.status === 'pending' ? '#FFA500' : 
+                             item.status === 'approved' ? '#4CAF50' : '#ff4444'
+            }
+          ]}>
+            <Text style={styles.statusText}>
+              {item.status === 'pending' ? 'Pending' : 
+               item.status === 'approved' ? 'Approved' : 'Rejected'}
+            </Text>
+          </View>
+          
+          <Text style={styles.accountText}>
+            {item.account_details?.phone || 'N/A'}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // ✅ Render tabs
   const renderTabs = () => (
     <View style={styles.tabContainer}>
       <TouchableOpacity
-        style={[
-          styles.tab,
-          activeTab === 'deposits' && styles.activeTab
-        ]}
+        style={[styles.tab, activeTab === 'deposits' && styles.activeTab]}
         onPress={() => setActiveTab('deposits')}
       >
-        <Text style={[
-          styles.tabText,
-          activeTab === 'deposits' && styles.activeTabText
-        ]}>
-          Pending Deposits ({depositRequests.length})
+        <Text style={[styles.tabText, activeTab === 'deposits' && styles.activeTabText]}>
+          Deposits ({depositRequests.length})
         </Text>
       </TouchableOpacity>
       
       <TouchableOpacity
-        style={[
-          styles.tab,
-          activeTab === 'history' && styles.activeTab
-        ]}
-        onPress={() => setActiveTab('history')}
+        style={[styles.tab, activeTab === 'withdrawals' && styles.activeTab]}
+        onPress={() => setActiveTab('withdrawals')}
       >
-        <Text style={[
-          styles.tabText,
-          activeTab === 'history' && styles.activeTabText
-        ]}>
-          History ({depositHistory.length})
+        <Text style={[styles.tabText, activeTab === 'withdrawals' && styles.activeTabText]}>
+          Withdrawals ({withdrawalRequests.length})
         </Text>
       </TouchableOpacity>
     </View>
   );
 
+  // ✅ Render content based on active tab
   const renderContent = () => {
     if (activeTab === 'deposits') {
+      const dataToShow = depositRequests.length > 0 ? depositRequests : depositHistory;
       return (
         <FlatList
-          data={depositRequests}
-          keyExtractor={(item) => item.uniqueKey || item._id || `deposit-${Date.now()}`}
+          data={dataToShow}
+          keyExtractor={(item) => item._id || item.id}
           renderItem={renderDepositItem}
           refreshControl={
             <RefreshControl
@@ -556,21 +822,20 @@ const WalletControlScreen = ({ navigation }) => {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="wallet-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>No Pending Deposits</Text>
-              <Text style={styles.emptySubText}>
-                All deposit requests have been processed
-              </Text>
+              <Text style={styles.emptyText}>No Deposits Found</Text>
+              <Text style={styles.emptySubText}>Pull down to refresh</Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
         />
       );
     } else {
+      const dataToShow = withdrawalRequests.length > 0 ? withdrawalRequests : withdrawalHistory;
       return (
         <FlatList
-          data={depositHistory}
-          keyExtractor={(item) => item.uniqueKey || item._id || `history-${Date.now()}`}
-          renderItem={renderDepositItem}
+          data={dataToShow}
+          keyExtractor={(item) => item._id || item.id}
+          renderItem={renderWithdrawalItem}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -580,11 +845,9 @@ const WalletControlScreen = ({ navigation }) => {
           }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="time-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>No Deposit History</Text>
-              <Text style={styles.emptySubText}>
-                No deposit history available
-              </Text>
+              <Ionicons name="cash-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No Withdrawals Found</Text>
+              <Text style={styles.emptySubText}>Pull down to refresh</Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
@@ -593,11 +856,28 @@ const WalletControlScreen = ({ navigation }) => {
     }
   };
 
-  if (loading && depositRequests.length === 0 && depositHistory.length === 0) {
+  // ✅ Check if user is admin
+  if (user && user.role !== 'admin') {
+    return (
+      <View style={styles.deniedContainer}>
+        <Ionicons name="shield-offline" size={64} color="#ff4444" />
+        <Text style={styles.deniedTitle}>Access Denied</Text>
+        <Text style={styles.deniedText}>Only admin users can access this screen.</Text>
+        <TouchableOpacity 
+          style={styles.backButtonDenied}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#667eea" />
-        <Text style={styles.loadingText}>Loading Wallet Data...</Text>
+        <Text style={styles.loadingText}>Loading Payment Data...</Text>
       </View>
     );
   }
@@ -613,17 +893,20 @@ const WalletControlScreen = ({ navigation }) => {
           >
             <Ionicons name="arrow-back" size={24} color="#333" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Wallet Control</Text>
-          <TouchableOpacity 
-            style={styles.refreshButton}
-            onPress={handleRefresh}
-          >
-            <Ionicons name="refresh" size={24} color="#667eea" />
-          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Payment Control Panel</Text>
+          <View style={styles.headerRight}>
+            <Text style={styles.userRole}>{user?.role || 'Admin'}</Text>
+            <TouchableOpacity 
+              style={styles.refreshButton}
+              onPress={handleRefresh}
+            >
+              <Ionicons name="refresh" size={24} color="#667eea" />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Stats Section */}
-        {activeTab === 'deposits' && renderStats()}
+        {/* Stats */}
+        {renderStats()}
 
         {/* Tabs */}
         {renderTabs()}
@@ -635,133 +918,209 @@ const WalletControlScreen = ({ navigation }) => {
       </View>
 
       {/* Deposit Detail Modal */}
-      <Modal
-        visible={showDepositDetailModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowDepositDetailModal(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            {selectedDeposit && (
-              <>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Deposit Details</Text>
-                  <TouchableOpacity
-                    onPress={() => setShowDepositDetailModal(false)}
-                  >
-                    <Ionicons name="close" size={24} color="#333" />
-                  </TouchableOpacity>
+      {selectedDeposit && (
+        <Modal
+          visible={showDepositDetailModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowDepositDetailModal(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Deposit Details</Text>
+                <TouchableOpacity onPress={() => setShowDepositDetailModal(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>User:</Text>
+                  <Text style={styles.detailValue}>{selectedDeposit.userName || 'Unknown'}</Text>
                 </View>
 
-                <ScrollView style={styles.modalBody}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>User:</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedDeposit.userName || 'Unknown'}
-                    </Text>
-                  </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={styles.detailValue}>৳{selectedDeposit.amount}</Text>
+                </View>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Amount:</Text>
-                    <Text style={styles.detailValue}>
-                      ৳{selectedDeposit.amount}
-                    </Text>
-                  </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Method:</Text>
+                  <Text style={styles.detailValue}>{selectedDeposit.method?.toUpperCase()}</Text>
+                </View>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Method:</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedDeposit.method?.toUpperCase()}
-                    </Text>
-                  </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Date:</Text>
+                  <Text style={styles.detailValue}>{formatDateTime(selectedDeposit.createdAt)}</Text>
+                </View>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Date:</Text>
-                    <Text style={styles.detailValue}>
-                      {formatDateTime(selectedDeposit.createdAt)}
-                    </Text>
-                  </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Transaction ID:</Text>
+                  <Text style={styles.detailValue}>{selectedDeposit.transactionId || 'N/A'}</Text>
+                </View>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Transaction ID:</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedDeposit.transactionId || 'N/A'}
-                    </Text>
-                  </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Status:</Text>
+                  <Text style={[
+                    styles.detailValue,
+                    { 
+                      color: selectedDeposit.status === 'approved' ? '#4CAF50' : 
+                            selectedDeposit.status === 'rejected' ? '#ff4444' : '#FFA500'
+                    }
+                  ]}>
+                    {selectedDeposit.status?.toUpperCase()}
+                  </Text>
+                </View>
 
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Status:</Text>
-                    <Text style={[
-                      styles.detailValue,
-                      { 
-                        color: selectedDeposit.status === 'approved' ? '#4CAF50' : 
-                              selectedDeposit.status === 'rejected' ? '#ff4444' : '#FFA500'
-                      }
-                    ]}>
-                      {selectedDeposit.status?.toUpperCase()}
-                    </Text>
-                  </View>
-
-                  {/* ✅ FIXED: SCREENSHOT SECTION */}
+                {selectedDeposit.screenshot && (
                   <View style={styles.screenshotSection}>
                     <Text style={styles.screenshotLabel}>Payment Proof:</Text>
-                    {selectedDeposit.screenshot ? (
-                      <TouchableOpacity 
-                        style={styles.screenshotThumbnail}
-                        onPress={() => viewScreenshot(selectedDeposit)}
-                      >
-                        <Image 
-                          source={{ uri: getScreenshotUri(selectedDeposit.screenshot) }} 
-                          style={styles.thumbnailImage}
-                          onError={(e) => console.log('Image load error:', e.nativeEvent.error)}
-                        />
-                        <View style={styles.screenshotOverlay}>
-                          <Ionicons name="expand" size={24} color="white" />
-                          <Text style={styles.viewProofText}>View Proof</Text>
-                        </View>
-                      </TouchableOpacity>
-                    ) : (
-                      <Text style={styles.noScreenshotText}>No screenshot provided</Text>
-                    )}
-                  </View>
-
-                  <View style={styles.noteContainer}>
-                    <Text style={styles.noteLabel}>Admin Note:</Text>
-                    <TextInput
-                      style={styles.noteInput}
-                      value={adminNote}
-                      onChangeText={setAdminNote}
-                      placeholder="Add a note for this transaction..."
-                      multiline
-                    />
-                  </View>
-                </ScrollView>
-
-                {selectedDeposit.status === 'pending' && (
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.rejectButton]}
-                      onPress={() => handleRejectDeposit(selectedDeposit._id)}
+                    <TouchableOpacity 
+                      style={styles.screenshotThumbnail}
+                      onPress={() => viewScreenshot(selectedDeposit)}
                     >
-                      <Text style={styles.rejectButtonText}>Reject</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.approveButton]}
-                      onPress={() => handleApproveDeposit(selectedDeposit._id)}
-                    >
-                      <Text style={styles.approveButtonText}>Approve</Text>
+                      <Image 
+                        source={{ uri: getScreenshotUri(selectedDeposit.screenshot) }} 
+                        style={styles.thumbnailImage}
+                      />
+                      <View style={styles.screenshotOverlay}>
+                        <Ionicons name="expand" size={24} color="white" />
+                        <Text style={styles.viewProofText}>View Proof</Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
                 )}
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
 
-      {/* ✅ FIXED: Screenshot Preview Modal */}
+                <View style={styles.noteContainer}>
+                  <Text style={styles.noteLabel}>Admin Note:</Text>
+                  <TextInput
+                    style={styles.noteInput}
+                    value={adminNote}
+                    onChangeText={setAdminNote}
+                    placeholder="Add note here..."
+                    multiline
+                  />
+                </View>
+              </ScrollView>
+
+              {selectedDeposit.status === 'pending' && (
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.rejectButton]}
+                    onPress={() => handleRejectDeposit(selectedDeposit._id)}
+                  >
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.approveButton]}
+                    onPress={() => handleApproveDeposit(selectedDeposit._id)}
+                  >
+                    <Text style={styles.approveButtonText}>Approve</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Withdrawal Detail Modal */}
+      {selectedWithdrawal && (
+        <Modal
+          visible={showWithdrawalDetailModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowWithdrawalDetailModal(false)}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Withdrawal Details</Text>
+                <TouchableOpacity onPress={() => setShowWithdrawalDetailModal(false)}>
+                  <Ionicons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalBody}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>User:</Text>
+                  <Text style={styles.detailValue}>
+                    {selectedWithdrawal.user_id?.username || 'Unknown'}
+                  </Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={styles.detailValue}>৳{selectedWithdrawal.amount}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Method:</Text>
+                  <Text style={styles.detailValue}>{selectedWithdrawal.payment_method?.toUpperCase()}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Account:</Text>
+                  <Text style={styles.detailValue}>
+                    {selectedWithdrawal.account_details?.phone || 'N/A'}
+                  </Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Date:</Text>
+                  <Text style={styles.detailValue}>{formatDateTime(selectedWithdrawal.createdAt)}</Text>
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Status:</Text>
+                  <Text style={[
+                    styles.detailValue,
+                    { 
+                      color: selectedWithdrawal.status === 'approved' ? '#4CAF50' : 
+                            selectedWithdrawal.status === 'rejected' ? '#ff4444' : '#FFA500'
+                    }
+                  ]}>
+                    {selectedWithdrawal.status?.toUpperCase()}
+                  </Text>
+                </View>
+
+                <View style={styles.noteContainer}>
+                  <Text style={styles.noteLabel}>Admin Note:</Text>
+                  <TextInput
+                    style={styles.noteInput}
+                    value={adminNote}
+                    onChangeText={setAdminNote}
+                    placeholder="Add note here..."
+                    multiline
+                  />
+                </View>
+              </ScrollView>
+
+              {selectedWithdrawal.status === 'pending' && (
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.rejectButton]}
+                    onPress={() => handleRejectWithdrawal(selectedWithdrawal._id)}
+                  >
+                    <Text style={styles.rejectButtonText}>Reject</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.approveButton]}
+                    onPress={() => handleApproveWithdrawal(selectedWithdrawal._id)}
+                  >
+                    <Text style={styles.approveButtonText}>Approve</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Screenshot Modal */}
       <Modal
         visible={showScreenshotModal}
         transparent={true}
@@ -776,16 +1135,11 @@ const WalletControlScreen = ({ navigation }) => {
             <Ionicons name="close" size={30} color="white" />
           </TouchableOpacity>
           
-          {selectedDeposit?.screenshot && (
+          {(selectedDeposit?.screenshot || selectedWithdrawal?.screenshot) && (
             <Image 
-              source={{ uri: getScreenshotUri(selectedDeposit.screenshot) }} 
+              source={{ uri: getScreenshotUri(selectedDeposit?.screenshot || selectedWithdrawal?.screenshot) }} 
               style={styles.fullScreenScreenshot}
               resizeMode="contain"
-              onError={(e) => {
-                console.log('Full screen image error:', e.nativeEvent.error);
-                Alert.alert('Error', 'Failed to load screenshot');
-                setShowScreenshotModal(false);
-              }}
             />
           )}
         </View>
@@ -794,7 +1148,6 @@ const WalletControlScreen = ({ navigation }) => {
   );
 };
 
-// ✅ KEEP YOUR EXISTING STYLES - NO CHANGES NEEDED
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -821,8 +1174,53 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userRole: {
+    fontSize: 12,
+    color: '#667eea',
+    fontWeight: 'bold',
+    marginRight: 10,
+    backgroundColor: '#eef2ff',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
   refreshButton: {
     padding: 5,
+  },
+  deniedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    padding: 20,
+  },
+  deniedTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+  },
+  deniedText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  backButtonDenied: {
+    backgroundColor: '#667eea',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  backButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   loadingContainer: {
     flex: 1,
@@ -849,10 +1247,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
@@ -903,21 +1298,18 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
   },
-  depositItem: {
+  item: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 10,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
   },
-  depositHeader: {
+  itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -933,7 +1325,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
-  depositDetails: {
+  itemDetails: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -950,7 +1342,6 @@ const styles = StyleSheet.create({
   },
   statusContainer: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
     alignItems: 'center',
   },
   statusBadge: {
@@ -978,6 +1369,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 4,
   },
+  accountText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 8,
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -994,7 +1390,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginTop: 8,
-    textAlign: 'center',
   },
   modalContainer: {
     flex: 1,
@@ -1005,7 +1400,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: height * 0.8,
+    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1075,10 +1470,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     marginTop: 5,
-  },
-  noScreenshotText: {
-    color: '#999',
-    fontStyle: 'italic',
   },
   noteContainer: {
     marginTop: 10,

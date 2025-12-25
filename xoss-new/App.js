@@ -1,4 +1,4 @@
-// App.js - COMPLETELY FIXED
+// App.js - COMPLETELY FIXED (WITH MatchProvider)
 import React from 'react';
 import { View, Text, TouchableOpacity, StatusBar } from 'react-native';
 import AppNavigator from './navigation/AppNavigator';
@@ -8,6 +8,7 @@ import { ChatProvider } from './context/ChatContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { LeaderboardProvider } from './context/LeaderboardContext';
 import { TournamentProvider } from './context/TournamentContext';
+import { MatchProvider } from './context/MatchContext'; // ✅ এই লাইন যোগ করুন
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 class ErrorBoundary extends React.Component {
@@ -54,8 +55,11 @@ export default function App() {
               <ChatProvider>
                 <LeaderboardProvider>
                   <TournamentProvider>
-                    <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-                    <AppNavigator />
+                    {/* ✅ MatchProvider যোগ করুন TournamentProvider এর ভিতরে */}
+                    <MatchProvider>
+                      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+                      <AppNavigator />
+                    </MatchProvider>
                   </TournamentProvider>
                 </LeaderboardProvider>
               </ChatProvider>

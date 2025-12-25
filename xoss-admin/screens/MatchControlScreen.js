@@ -640,23 +640,27 @@ const MatchControlScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
-  // ✅ FIXED: Filter matches only (not tournaments)
+  // ✅ FIXED: Proper filtering with approval_status
   const filteredMatches = matches.filter(match => {
     if (!match) return false;
-    
-    // Show only matches (not tournaments)
-    const isMatch = match.matchType === 'match';
-    if (!isMatch) return false;
     
     const matchesSearch = 
       (match.title?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
       (match.game?.toLowerCase() || '').includes(searchQuery.toLowerCase());
     
     if (activeTab === 'all') return matchesSearch;
-    if (activeTab === 'pending') return matchesSearch && match.status === 'pending';
-    if (activeTab === 'approved') return matchesSearch && match.approval_status === 'approved';
-    if (activeTab === 'rejected') return matchesSearch && match.approval_status === 'rejected';
-    return matchesSearch && match.status === activeTab;
+    if (activeTab === 'pending') return matchesSearch && 
+      (match.approval_status === 'pending' || match.approvalStatus === 'pending');
+    if (activeTab === 'approved') return matchesSearch && 
+      (match.approval_status === 'approved' || match.approvalStatus === 'approved');
+    if (activeTab === 'rejected') return matchesSearch && 
+      (match.approval_status === 'rejected' || match.approvalStatus === 'rejected');
+    if (activeTab === 'upcoming') return matchesSearch && 
+      (match.status === 'upcoming' || match.status === 'pending');
+    if (activeTab === 'live') return matchesSearch && match.status === 'live';
+    if (activeTab === 'completed') return matchesSearch && match.status === 'completed';
+    
+    return matchesSearch;
   });
 
   const handleRefresh = async () => {
@@ -791,9 +795,9 @@ const MatchControlScreen = ({ navigation }) => {
   // Match Card Component
   const MatchCard = ({ match, index }) => {
     const gameInfo = GAMES[match.game] || GAMES.freefire;
-    const isPending = match.status === 'pending';
-    const isApproved = match.approval_status === 'approved';
-    const isRejected = match.approval_status === 'rejected';
+    const isPending = match.approval_status === 'pending' || match.approvalStatus === 'pending';
+    const isApproved = match.approval_status === 'approved' || match.approvalStatus === 'approved';
+    const isRejected = match.approval_status === 'rejected' || match.approvalStatus === 'rejected';
     
     return (
       <View style={styles.matchCard}>

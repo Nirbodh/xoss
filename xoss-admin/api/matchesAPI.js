@@ -1,4 +1,4 @@
-// api/matchesAPI.js - COMPLETELY FIXED FOR ADMIN APP
+// api/matchesAPI.js - COMPLETELY FIXED FOR ADMIN
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -12,32 +12,26 @@ const api = axios.create({
   }
 });
 
-// ✅ FIXED: ENHANCED AUTH INTERCEPTOR
+// ✅ FIXED: Auth token management
 let storedToken = null;
 
-// ✅ Function to manually set token from AuthContext
 export const setAuthToken = (token) => {
   storedToken = token;
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    console.log('✅ matchesAPI: Token set manually');
   }
 };
 
-// ✅ Function to clear token
 export const clearAuthToken = () => {
   storedToken = null;
   delete api.defaults.headers.common['Authorization'];
-  console.log('✅ matchesAPI: Token cleared');
 };
 
-// ✅ INTERCEPTOR: Check both stored token and AsyncStorage
 api.interceptors.request.use(
   async (config) => {
     try {
       let token = storedToken;
       
-      // If no stored token, check AsyncStorage
       if (!token) {
         token = await AsyncStorage.getItem('token');
         if (token) {
@@ -45,73 +39,28 @@ api.interceptors.request.use(
         }
       }
       
-      console.log('🔑 matchesAPI Token Status:', {
-        hasStoredToken: !!storedToken,
-        hasAsyncStorageToken: !!token,
-        tokenLength: token?.length || 0
-      });
-      
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
-        console.log('✅ Token attached to request');
-      } else {
-        console.warn('⚠️ No token found for request to:', config.url);
-        // Don't remove this warning - it helps debug
       }
     } catch (error) {
-      console.error('❌ matchesAPI Token Error:', error);
+      console.error('❌ Token Error:', error);
     }
     return config;
   },
-  (error) => {
-    console.error('❌ matchesAPI Request Error:', error);
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// ✅ FIXED RESPONSE INTERCEPTOR
-api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  async (error) => {
-    console.error('❌ matchesAPI Response Error:', {
-      url: error.config?.url,
-      status: error.response?.status,
-      message: error.response?.data?.message || error.message
-    });
-    
-    if (error.response?.status === 401) {
-      console.log('🔐 401 Unauthorized - You need to login');
-      // Don't auto-clear tokens, let user handle login
-    } else if (error.response?.status === 404) {
-      console.log('🔍 404 Not Found - Endpoint does not exist:', error.config?.url);
-    }
-    
-    return Promise.reject(error);
-  }
-);
-
-// ✅ FIXED: MAIN API FUNCTIONS
 export const matchesAPI = {
-  // ====================
-  // 🔍 GET OPERATIONS
-  // ====================
-  
-  // ✅ GET ALL MATCHES - USE REGULAR ENDPOINT
+  // ✅ GET ALL MATCHES - FOR ADMIN (INCLUDING PENDING)
   getAll: async (params = {}) => {
     try {
-      console.log('🔍 matchesAPI.getAll: Fetching matches...');
+      console.log('🔍 matchesAPI.getAll: Fetching ALL matches...');
       
-      // ✅ FIX: Use regular /matches endpoint with admin flag
-      const res = await api.get('/matches', { 
-        params: { ...params, admin: 'true' } // Add admin flag
-      });
+      const res = await api.get('/matches/admin/all', { params });
       
       console.log('📥 matchesAPI.getAll Response:', {
         success: res.data?.success,
-        count: res.data?.data?.length || 0,
-        message: res.data?.message
+        count: res.data?.data?.length || 0
       });
       
       if (res.data && res.data.success) {
@@ -122,43 +71,20 @@ export const matchesAPI = {
           message: res.data.message || 'Matches fetched successfully'
         };
       } else {
-        // Fallback: Try to get any data even if success is false
-        const matchData = res.data?.data || res.data?.matches || [];
-        console.log(`ℹ️ matchesAPI: Found ${matchData.length} matches (fallback)`);
-        
         return { 
           success: true, 
-          data: matchData,
-          count: matchData.length,
-          message: 'Matches fetched (fallback mode)'
+          message: 'No matches found or API issue',
+          data: [],
+          count: 0
         };
       }
     } catch (error) {
       console.error('❌ matchesAPI.getAll Error:', error.message);
-      
-      // Don't return failure - return empty array to prevent app crash
       return { 
         success: true, 
         message: 'No matches found or server error',
         data: [],
-        count: 0,
-        error: error.message
-      };
-    }
-  },
-
-  // ✅ GET MATCH BY ID
-  getById: async (id) => {
-    try {
-      console.log('🔍 matchesAPI.getById: Fetching match:', id);
-      const res = await api.get(`/matches/${id}`);
-      return res.data;
-    } catch (error) {
-      console.error('❌ matchesAPI.getById Error:', error.message);
-      return { 
-        success: false, 
-        message: error.response?.data?.message || error.message,
-        data: null
+        count: 0
       };
     }
   },
@@ -192,16 +118,11 @@ export const matchesAPI = {
     }
   },
 
-  // ====================
-  // ✏️ CREATE OPERATIONS
-  // ====================
-
-  // ✅ CREATE MATCH - WITH TOKEN CHECK
+  // ✅ CREATE MATCH
   create: async (matchData) => {
     try {
       console.log('📤 matchesAPI.create: Creating match...');
       
-      // Check token before proceeding
       const token = await AsyncStorage.getItem('token');
       if (!token) {
         return { 
@@ -210,7 +131,6 @@ export const matchesAPI = {
         };
       }
       
-      // Set token for this request
       const config = {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -218,19 +138,12 @@ export const matchesAPI = {
         }
       };
       
-      const endpoint = '/matches';
-      console.log('🎯 Using endpoint:', endpoint);
-      
-      const res = await api.post(endpoint, matchData, config);
+      const res = await api.post('/matches', matchData, config);
       console.log('✅ matchesAPI.create Response:', res.data);
       
       return res.data;
     } catch (error) {
-      console.error('❌ matchesAPI.create Error:', {
-        message: error.message,
-        status: error.response?.status
-      });
-      
+      console.error('❌ matchesAPI.create Error:', error.message);
       return { 
         success: false, 
         message: error.response?.data?.message || 'Failed to create match',
@@ -239,10 +152,7 @@ export const matchesAPI = {
     }
   },
 
-  // ====================
-  // 🔄 UPDATE OPERATIONS
-  // ====================
-
+  // ✅ UPDATE MATCH
   update: async (id, updateData) => {
     try {
       console.log('🔄 matchesAPI.update: Updating match:', id);
@@ -252,12 +162,12 @@ export const matchesAPI = {
       console.error('❌ matchesAPI.update Error:', error.message);
       return { 
         success: false, 
-        message: `Update failed: ${error.message}`,
-        error: error.response?.data
+        message: `Update failed: ${error.message}`
       };
     }
   },
 
+  // ✅ APPROVE MATCH
   approve: async (id, adminNotes = '') => {
     try {
       console.log('✅ matchesAPI.approve: Approving match:', id);
@@ -272,6 +182,7 @@ export const matchesAPI = {
     }
   },
 
+  // ✅ REJECT MATCH
   reject: async (id, rejectionReason = 'No reason provided', adminNotes = '') => {
     try {
       console.log('❌ matchesAPI.reject: Rejecting match:', id);
@@ -289,10 +200,7 @@ export const matchesAPI = {
     }
   },
 
-  // ====================
-  // 🗑️ DELETE OPERATIONS
-  // ====================
-
+  // ✅ DELETE MATCH
   delete: async (id) => {
     try {
       console.log('🗑️ matchesAPI.delete: Deleting match:', id);
@@ -304,73 +212,6 @@ export const matchesAPI = {
         success: false, 
         message: error.response?.data?.message || error.message
       };
-    }
-  },
-
-  // ====================
-  // 🎮 MATCH ACTIONS
-  // ====================
-
-  join: async (id) => {
-    try {
-      console.log('🎮 matchesAPI.join: Joining match:', id);
-      const res = await api.post(`/matches/${id}/join`);
-      return res.data;
-    } catch (error) {
-      console.error('❌ matchesAPI.join Error:', error.message);
-      return { 
-        success: false, 
-        message: error.response?.data?.message || error.message
-      };
-    }
-  },
-
-  updateStatus: async (id, status) => {
-    try {
-      console.log('🔄 matchesAPI.updateStatus: Updating match status:', id, status);
-      const res = await api.put(`/matches/${id}/status`, { status });
-      return res.data;
-    } catch (error) {
-      console.error('❌ matchesAPI.updateStatus Error:', error.message);
-      return { 
-        success: false, 
-        message: error.response?.data?.message || error.message
-      };
-    }
-  },
-
-  // ====================
-  // 🔧 DEBUG & UTILITY
-  // ====================
-
-  testConnection: async () => {
-    try {
-      console.log('🏥 matchesAPI.testConnection: Testing server connection...');
-      const res = await api.get('/health');
-      return { 
-        success: true, 
-        message: 'Server is connected and healthy',
-        data: res.data 
-      };
-    } catch (error) {
-      console.error('❌ matchesAPI.testConnection Error:', error.message);
-      return { 
-        success: false, 
-        message: 'Server connection failed: ' + error.message
-      };
-    }
-  },
-
-  // ✅ NEW: Check auth status
-  checkAuth: async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      return {
-        hasToken: !!token,
-        tokenLength: token?.length || 0
-      };
-    } catch (error) {
-      return { hasToken: false, error: error.message };
     }
   }
 };

@@ -1,14 +1,12 @@
-// routes/deposits.js - FULL MERGED + FIXED VERSION
+// routes/deposits.js - COMPLETE FIXED VERSION
 const express = require('express');
 const router = express.Router();
 const { auth } = require('../middleware/auth');
 const Deposit = require('../models/Deposit');
 const User = require('../models/User');
+const { Wallet, Transaction } = require('../models/Wallet');
 
-
-// =====================================================================================
-// ✅ ADMIN: GET ALL DEPOSITS (you provided) ✔ Merged at correct position
-// =====================================================================================
+// ✅ GET ALL DEPOSITS (Admin)
 router.get('/', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
@@ -37,10 +35,7 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
-
-// =====================================================================================
 // ✅ GET USER DEPOSITS
-// =====================================================================================
 router.get('/user/:userId', auth, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -72,10 +67,7 @@ router.get('/user/:userId', auth, async (req, res) => {
   }
 });
 
-
-// =====================================================================================
 // ✅ CREATE USER DEPOSIT
-// =====================================================================================
 router.post('/', auth, async (req, res) => {
   try {
     const { amount, method, transactionId, screenshot } = req.body;
@@ -139,10 +131,7 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-
-// =====================================================================================
 // ✅ ADMIN: GET PENDING DEPOSITS
-// =====================================================================================
 router.get('/admin/pending', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
@@ -171,10 +160,7 @@ router.get('/admin/pending', auth, async (req, res) => {
   }
 });
 
-
-// =====================================================================================
-// ✅ ADMIN: APPROVE DEPOSIT
-// =====================================================================================
+// ✅ ADMIN: APPROVE DEPOSIT (COMPLETELY FIXED WITH WALLET CREDIT METHOD)
 router.post('/admin/approve/:depositId', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
@@ -186,6 +172,7 @@ router.post('/admin/approve/:depositId', auth, async (req, res) => {
 
     const { depositId } = req.params;
     const { adminNote = '' } = req.body;
+    const adminId = req.user.userId;
 
     const deposit = await Deposit.findById(depositId);
     if (!deposit) {
@@ -202,18 +189,66 @@ router.post('/admin/approve/:depositId', auth, async (req, res) => {
       });
     }
 
+    console.log(`🔄 Approving deposit ${depositId} for user ${deposit.userId}, amount: ${deposit.amount}`);
+
+    // Step 1: Update deposit status
     deposit.status = 'approved';
     deposit.adminNote = adminNote;
     deposit.approvedAt = new Date();
-    deposit.approvedBy = req.user.userId;
-
+    deposit.approvedBy = adminId;
     await deposit.save();
+
+    // Step 2: Find or create user's wallet
+    let wallet = await Wallet.findOne({ user_id: deposit.userId });
+    if (!wallet) {
+      wallet = new Wallet({
+        user_id: deposit.userId,
+        balance: 0,
+        total_earned: 0,
+        total_spent: 0,
+        last_activity: new Date()
+      });
+      await wallet.save();
+      console.log(`🆕 New wallet created for user: ${deposit.userId}`);
+    }
+
+    console.log(`💰 Current wallet balance before credit: ${wallet.balance}`);
+
+    // ✅ **FIXED: Step 3: Use wallet.credit() method instead of direct update**
+    const creditResult = await wallet.credit(
+      deposit.amount, 
+      `Deposit via ${deposit.method}`, 
+      {
+        method: deposit.method,
+        reference_id: deposit.transactionId,
+        depositId: deposit._id,
+        approvedBy: adminId
+      }
+    );
+
+    console.log(`💰 Wallet credited. New balance: ${creditResult.wallet.balance}`);
+
+    // Step 4: Update user's wallet_balance (for backward compatibility)
+    await User.findByIdAndUpdate(deposit.userId, {
+      $inc: { 
+        wallet_balance: deposit.amount, 
+        balance: deposit.amount,
+        total_earnings: deposit.amount
+      }
+    });
+
+    console.log(`✅ Deposit ${depositId} approved. Wallet credited for user ${deposit.userId}. New balance: ${creditResult.wallet.balance}`);
 
     res.json({
       success: true,
-      message: 'Deposit approved successfully',
-      data: deposit
+      message: 'Deposit approved and wallet credited successfully',
+      data: {
+        deposit,
+        new_balance: creditResult.wallet.balance,
+        transaction: creditResult.transaction
+      }
     });
+    
   } catch (error) {
     console.error('Approve deposit error:', error);
     res.status(500).json({
@@ -224,10 +259,7 @@ router.post('/admin/approve/:depositId', auth, async (req, res) => {
   }
 });
 
-
-// =====================================================================================
 // ✅ ADMIN: REJECT DEPOSIT
-// =====================================================================================
 router.post('/admin/reject/:depositId', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin' && req.user.role !== 'moderator') {
@@ -275,6 +307,5 @@ router.post('/admin/reject/:depositId', auth, async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;

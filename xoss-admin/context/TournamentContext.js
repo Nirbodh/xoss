@@ -79,16 +79,17 @@ export const TournamentProvider = ({ children }) => {
     }
   };
 
-  // ✅ FIXED: Simple tournament creation
+  // ✅ FIXED: Simple tournament creation - AUTO-APPROVED
   const createTournament = async (tournamentData) => {
     try {
       setLoading(true);
       setError(null);
-      console.log('🎯 TournamentContext: Creating tournament...', tournamentData);
+      console.log('🎯 TournamentContext: Creating tournament (AUTO-APPROVED)...', tournamentData);
 
       const api = await createApiClient();
       
-      // ✅ Simple data structure for backend
+      // ✅ Simple data structure for backend - NO status or approval_status fields
+      // Backend will auto-approve them
       const payload = {
         title: tournamentData.title,
         game: tournamentData.game,
@@ -106,22 +107,22 @@ export const TournamentProvider = ({ children }) => {
         schedule_time: tournamentData.scheduleTime,
         start_time: tournamentData.startTime || tournamentData.scheduleTime,
         end_time: tournamentData.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
-        status: 'pending',
-        approval_status: 'pending'
+        // ❌ NO status or approval_status fields - backend will auto-approve
       };
 
-      console.log('📤 Sending tournament payload:', payload);
+      console.log('📤 Sending tournament payload (AUTO-APPROVED):', payload);
       
+      // ✅ Use /tournaments/create endpoint for auto-approval
       const response = await api.post('/tournaments/create', payload);
       
       console.log('📥 Create tournament response:', response.data);
       
       if (response.data && response.data.success) {
-        console.log('✅ Tournament created successfully');
+        console.log('✅ Tournament created and auto-approved successfully');
         await refreshTournaments(); // Refresh list
         return { 
           success: true, 
-          message: 'Tournament created successfully!',
+          message: response.data.message || 'Tournament created successfully and is now live! (Auto-approved)',
           data: response.data.tournament || response.data.data
         };
       } else {
@@ -189,7 +190,7 @@ export const TournamentProvider = ({ children }) => {
     }
   };
 
-  // ✅ Approve tournament
+  // ✅ Approve tournament (for manual approval if needed)
   const approveTournament = async (tournamentId) => {
     try {
       setLoading(true);
@@ -199,7 +200,7 @@ export const TournamentProvider = ({ children }) => {
       
       if (response.data && response.data.success) {
         await refreshTournaments();
-        return { success: true, message: 'Tournament approved successfully!' };
+        return { success: true, message: response.data.message || 'Tournament approved successfully!' };
       } else {
         return { success: false, error: response.data?.message || 'Approval failed' };
       }
@@ -225,7 +226,7 @@ export const TournamentProvider = ({ children }) => {
       
       if (response.data && response.data.success) {
         await refreshTournaments();
-        return { success: true, message: 'Tournament rejected successfully!' };
+        return { success: true, message: response.data.message || 'Tournament rejected successfully!' };
       } else {
         return { success: false, error: response.data?.message || 'Rejection failed' };
       }
@@ -239,7 +240,7 @@ export const TournamentProvider = ({ children }) => {
     }
   };
 
-  // ✅ Get pending tournaments
+  // ✅ Get pending tournaments (for admin)
   const getPendingTournaments = async () => {
     try {
       setLoading(true);

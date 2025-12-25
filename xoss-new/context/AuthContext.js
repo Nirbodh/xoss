@@ -170,7 +170,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
-        refreshAuth: checkAuthState // Add this to refresh auth state
+        refreshAuth: checkAuthState
       }}
     >
       {children}

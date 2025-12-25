@@ -1,4 +1,4 @@
-// screens/TournamentsScreen.js - COMPLETELY FIXED VERSION
+// screens/TournamentsScreen.js - COMPLETE VERSION WITH CREATE MATCH MODAL
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, 
@@ -13,6 +13,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useAuth } from '../context/AuthContext';
 import { useWallet } from '../context/WalletContext';
 import { useTournaments } from '../context/TournamentContext';
+import { useMatches } from '../context/MatchContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -350,12 +351,15 @@ const QuickJoinModal = ({ visible, matches, onClose, onJoin }) => {
 // Main TournamentsScreen Component
 const TournamentsScreen = ({ navigation }) => {
   const { tournaments, matches, tournamentsOnly, loading, error, refreshTournaments } = useTournaments();
+  const { createMatch } = useMatches();
   const [refreshing, setRefreshing] = useState(false);
   const [currentMainTab, setCurrentMainTab] = useState('all');
   const [currentGame, setCurrentGame] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [showQuickJoin, setShowQuickJoin] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
   const { user: authUser } = useAuth();
   const { balance } = useWallet();
 
@@ -375,22 +379,31 @@ const TournamentsScreen = ({ navigation }) => {
     { id: 'tournaments', name: 'Tournaments', icon: 'trophy' }
   ];
 
-  // ✅ FIXED: Use proper data from context
+  // Create match data state
+  const [newMatch, setNewMatch] = useState({
+    title: 'Quick Solo Match',
+    game: 'freefire',
+    entryFee: '50',
+    prizePool: '500',
+    maxPlayers: '25',
+    perKill: '10',
+    roomId: '',
+    password: '',
+    description: 'Join this exciting solo battle match!',
+    rules: 'No cheating, fair play only. Respect other players.',
+    type: 'Solo',
+    map: 'Bermuda',
+    scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+    endTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+  });
+
   const userMatches = matches || [];
   const userTournaments = tournamentsOnly || [];
 
-  // Debug data
   useEffect(() => {
-    console.log('🎯 TOURNAMENTS SCREEN DATA:', {
-      allTournaments: tournaments.length,
-      matchesCount: userMatches.length,
-      tournamentsCount: userTournaments.length,
-      currentMainTab,
-      currentGame
-    });
-  }, [tournaments, userMatches, userTournaments, currentMainTab, currentGame]);
+    refreshTournaments();
+  }, []);
 
-  // Refresh function
   const onRefresh = async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -399,13 +412,81 @@ const TournamentsScreen = ({ navigation }) => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  // Auto-refresh when screen focuses
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       refreshTournaments();
     });
     return unsubscribe;
   }, [navigation]);
+
+  // Create match function
+  const handleCreateMatch = async () => {
+    // Validate all required fields
+    if (!newMatch.title || !newMatch.entryFee || !newMatch.prizePool || 
+        !newMatch.maxPlayers || !newMatch.scheduleTime) {
+      Alert.alert('Error', 'Please fill all required fields (*)');
+      return;
+    }
+
+    setCreateLoading(true);
+
+    const matchData = {
+      title: newMatch.title,
+      game: newMatch.game,
+      entryFee: newMatch.entryFee,
+      prizePool: newMatch.prizePool,
+      maxPlayers: newMatch.maxPlayers,
+      perKill: newMatch.perKill || 0,
+      roomId: newMatch.roomId,
+      password: newMatch.password,
+      description: newMatch.description,
+      rules: newMatch.rules,
+      type: newMatch.type || 'Solo',
+      map: newMatch.map || 'Bermuda',
+      scheduleTime: newMatch.scheduleTime,
+      endTime: newMatch.endTime,
+      matchType: 'match',
+      status: 'pending',
+      approvalStatus: 'pending'
+    };
+
+    console.log('🎯 Creating MATCH with data:', matchData);
+
+    const result = await createMatch(matchData);
+    
+    setCreateLoading(false);
+    
+    if (result.success) {
+      Alert.alert('Success! 🎉', 'Match created successfully! Waiting for admin approval.', [
+        { 
+          text: 'OK', 
+          onPress: () => {
+            setShowCreateModal(false);
+            // Reset form
+            setNewMatch({
+              title: 'Quick Solo Match',
+              game: 'freefire',
+              entryFee: '50',
+              prizePool: '500',
+              maxPlayers: '25',
+              perKill: '10',
+              roomId: '',
+              password: '',
+              description: 'Join this exciting solo battle match!',
+              rules: 'No cheating, fair play only. Respect other players.',
+              type: 'Solo',
+              map: 'Bermuda',
+              scheduleTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+              endTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+            });
+          }
+        }
+      ]);
+      refreshTournaments();
+    } else {
+      Alert.alert('Error', result.error || 'Failed to create match');
+    }
+  };
 
   const handleJoinPress = async (tournament) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -457,32 +538,38 @@ const TournamentsScreen = ({ navigation }) => {
     }
   };
 
-  // ✅ FIXED: Filtering logic
+  // Utility functions for match creation
+  const generateRoomId = () => {
+    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setNewMatch(prev => ({ ...prev, roomId }));
+  };
+
+  const generatePassword = () => {
+    const password = Math.random().toString(36).substring(2, 6).toUpperCase();
+    setNewMatch(prev => ({ ...prev, password }));
+  };
+
   const getFilteredData = () => {
     let data = [];
     
-    // Main tab filtering
     if (currentMainTab === 'matches') {
       data = userMatches;
     } else if (currentMainTab === 'tournaments') {
       data = userTournaments;
     } else {
-      data = tournaments; // All events
+      data = tournaments;
     }
     
-    // Game filtering
     if (currentGame !== 'all') {
       data = data.filter(match => match.game === currentGame);
     }
     
-    // Search filtering
     if (searchQuery) {
       data = data.filter(match => 
         match.title.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
     
-    // Status filtering - show upcoming and live only
     data = data.filter(match => 
       match.status === 'upcoming' || match.status === 'live'
     );
@@ -492,7 +579,6 @@ const TournamentsScreen = ({ navigation }) => {
 
   const filteredMatches = getFilteredData();
 
-  // Sort by status and time
   const sortedMatches = [...filteredMatches].sort((a, b) => {
     if (a.status === 'live' && b.status !== 'live') return -1;
     if (a.status !== 'live' && b.status === 'live') return 1;
@@ -502,14 +588,12 @@ const TournamentsScreen = ({ navigation }) => {
     return 0;
   });
 
-  // Header animations
   const headerBackground = scrollY.interpolate({
     inputRange: [0, 100],
     outputRange: ['rgba(26, 35, 126, 1)', 'rgba(26, 35, 126, 0.95)'],
     extrapolate: 'clamp',
   });
 
-  // Error state
   if (error) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -526,7 +610,6 @@ const TournamentsScreen = ({ navigation }) => {
     );
   }
 
-  // Loading state
   if (loading && tournaments.length === 0) {
     return (
       <SafeAreaView style={styles.safeArea}>
@@ -555,7 +638,7 @@ const TournamentsScreen = ({ navigation }) => {
             <View style={styles.headerActions}>
               <TouchableOpacity 
                 style={styles.headerActionButton}
-                onPress={() => navigation.navigate('CreateMatch')}
+                onPress={() => setShowCreateModal(true)}
               >
                 <Ionicons name="add" size={22} color="white" />
               </TouchableOpacity>
@@ -745,6 +828,172 @@ const TournamentsScreen = ({ navigation }) => {
           )}
         </View>
       </Animated.ScrollView>
+
+      {/* Create Match Modal */}
+      <Modal visible={showCreateModal} transparent animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create Match</Text>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              <Text style={styles.inputLabel}>Match Title *</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newMatch.title}
+                onChangeText={(text) => setNewMatch(prev => ({ ...prev, title: text }))}
+                placeholder="Enter match title"
+              />
+
+              <Text style={styles.inputLabel}>Select Game *</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.gameOptions}>
+                  {Object.keys(gameIcons).map((gameId) => (
+                    <TouchableOpacity
+                      key={gameId}
+                      style={[
+                        styles.gameOption,
+                        newMatch.game === gameId && { backgroundColor: '#2962ff' }
+                      ]}
+                      onPress={() => setNewMatch(prev => ({ ...prev, game: gameId }))}
+                    >
+                      <Ionicons 
+                        name={gameId === 'freefire' ? 'flame' : 
+                              gameId === 'pubg' ? 'target' : 
+                              gameId === 'cod' ? 'shield' : 'dice'} 
+                        size={20} 
+                        color={newMatch.game === gameId ? 'white' : '#2962ff'} 
+                      />
+                      <Text style={[
+                        styles.gameOptionText,
+                        newMatch.game === gameId && styles.gameOptionTextSelected
+                      ]}>
+                        {getGameDisplayName(gameId)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <View style={styles.row}>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Entry Fee (৳) *</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newMatch.entryFee}
+                    onChangeText={(text) => setNewMatch(prev => ({ ...prev, entryFee: text.replace(/[^0-9]/g, '') }))}
+                    keyboardType="numeric"
+                    placeholder="50"
+                  />
+                </View>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Prize Pool (৳) *</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newMatch.prizePool}
+                    onChangeText={(text) => setNewMatch(prev => ({ ...prev, prizePool: text.replace(/[^0-9]/g, '') }))}
+                    keyboardType="numeric"
+                    placeholder="500"
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.inputLabel}>Max Players *</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newMatch.maxPlayers}
+                onChangeText={(text) => setNewMatch(prev => ({ ...prev, maxPlayers: text.replace(/[^0-9]/g, '') }))}
+                keyboardType="numeric"
+                placeholder="25"
+              />
+
+              <View style={styles.row}>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Type</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newMatch.type}
+                    onChangeText={(text) => setNewMatch(prev => ({ ...prev, type: text }))}
+                    placeholder="Solo"
+                  />
+                </View>
+                <View style={styles.column}>
+                  <Text style={styles.inputLabel}>Map</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    value={newMatch.map}
+                    onChangeText={(text) => setNewMatch(prev => ({ ...prev, map: text }))}
+                    placeholder="Bermuda"
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.inputLabel}>Room ID *</Text>
+              <View style={styles.inputWithButton}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1 }]}
+                  value={newMatch.roomId}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, roomId: text }))}
+                  placeholder="Enter room ID"
+                />
+                <TouchableOpacity style={styles.generateButton} onPress={generateRoomId}>
+                  <Text style={styles.generateButtonText}>Generate</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>Password *</Text>
+              <View style={styles.inputWithButton}>
+                <TextInput
+                  style={[styles.textInput, { flex: 1 }]}
+                  value={newMatch.password}
+                  onChangeText={(text) => setNewMatch(prev => ({ ...prev, password: text }))}
+                  placeholder="Enter password"
+                  secureTextEntry
+                />
+                <TouchableOpacity style={styles.generateButton} onPress={generatePassword}>
+                  <Text style={styles.generateButtonText}>Generate</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>Description</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={newMatch.description}
+                onChangeText={(text) => setNewMatch(prev => ({ ...prev, description: text }))}
+                placeholder="Match description..."
+                multiline
+                numberOfLines={3}
+              />
+
+              <Text style={styles.inputLabel}>Rules</Text>
+              <TextInput
+                style={[styles.textInput, styles.textArea]}
+                value={newMatch.rules}
+                onChangeText={(text) => setNewMatch(prev => ({ ...prev, rules: text }))}
+                placeholder="Match rules..."
+                multiline
+                numberOfLines={2}
+              />
+
+              <TouchableOpacity 
+                style={[styles.createButtonModal, createLoading && styles.createButtonDisabled]} 
+                onPress={handleCreateMatch}
+                disabled={createLoading}
+              >
+                {createLoading ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Text style={styles.createButtonText}>Create Match</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Quick Join Modal */}
       <QuickJoinModal
@@ -1359,6 +1608,106 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  // Create Match Modal Styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    maxHeight: '90%',
+  },
+  modalBody: {
+    padding: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    color: '#333',
+    backgroundColor: '#f9f9f9',
+  },
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  row: {
+    flexDirection: 'row',
+    marginHorizontal: -8,
+    marginBottom: 16,
+  },
+  column: {
+    flex: 1,
+    paddingHorizontal: 8,
+  },
+  gameOptions: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  gameOption: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    marginRight: 12,
+    minWidth: 80,
+    backgroundColor: '#f9f9f9',
+  },
+  gameOptionText: {
+    fontSize: 12,
+    color: '#333',
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  gameOptionTextSelected: {
+    color: 'white',
+  },
+  inputWithButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  generateButton: {
+    backgroundColor: '#2962ff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  generateButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  createButtonModal: {
+    backgroundColor: '#2962ff',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  createButtonDisabled: {
+    opacity: 0.6,
+  },
+  createButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 
