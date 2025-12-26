@@ -1,4 +1,4 @@
-// models/Wallet.js - ENHANCED VERSION
+// models/Wallet.js - ENHANCED VERSION WITH WITHDRAWAL SUPPORT
 const mongoose = require('mongoose');
 
 /* ============================
@@ -12,7 +12,7 @@ const transactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['credit', 'debit', 'deposit', 'withdrawal', 'payment', 'refund', 'bonus'],
+    enum: ['credit', 'debit', 'deposit', 'withdrawal', 'refund', 'bonus', 'entry_fee', 'prize'],
     required: true
   },
   amount: {
@@ -21,11 +21,11 @@ const transactionSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    default: ''
+    required: true
   },
   status: {
     type: String,
-    enum: ['pending', 'completed', 'failed', 'cancelled'],
+    enum: ['pending', 'completed', 'failed', 'cancelled', 'processing'],
     default: 'completed'
   },
   method: {
@@ -35,18 +35,17 @@ const transactionSchema = new mongoose.Schema({
     type: String
   },
   metadata: {
-    type: Object,
+    type: mongoose.Schema.Types.Mixed,
     default: {}
   }
 }, {
   timestamps: true
 });
 
-// Index for better performance
+// Indexes for better performance
 transactionSchema.index({ user_id: 1, createdAt: -1 });
-transactionSchema.index({ reference_id: 1 });
-
-const Transaction = mongoose.model('Transaction', transactionSchema);
+transactionSchema.index({ type: 1 });
+transactionSchema.index({ status: 1 });
 
 /* ============================
    WALLET SCHEMA
@@ -79,15 +78,82 @@ const walletSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for better performance
+// Indexes
 walletSchema.index({ user_id: 1 });
 walletSchema.index({ balance: -1 });
+
+/* ============================
+   WITHDRAWAL SCHEMA
+============================ */
+const withdrawalSchema = new mongoose.Schema({
+  user_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 100,
+    max: 25000
+  },
+  payment_method: {
+    type: String,
+    enum: ['bkash', 'nagad', 'rocket', 'bank'],
+    required: true
+  },
+  account_details: {
+    phone: { type: String, required: true },
+    account_name: String,
+    bank_name: String,
+    branch: String
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'processing', 'completed'],
+    default: 'pending'
+  },
+  transaction_id: String,
+  admin_notes: String,
+  user_note: String,
+  approved_by: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  approved_at: Date,
+  processed_at: Date
+}, {
+  timestamps: true
+});
+
+// Virtuals for population
+withdrawalSchema.virtual('user', {
+  ref: 'User',
+  localField: 'user_id',
+  foreignField: '_id',
+  justOne: true
+});
+
+withdrawalSchema.virtual('approver', {
+  ref: 'User',
+  localField: 'approved_by',
+  foreignField: '_id',
+  justOne: true
+});
+
+withdrawalSchema.set('toJSON', { virtuals: true });
+withdrawalSchema.set('toObject', { virtuals: true });
+
+// Indexes
+withdrawalSchema.index({ user_id: 1, createdAt: -1 });
+withdrawalSchema.index({ status: 1 });
+withdrawalSchema.index({ payment_method: 1 });
 
 /* ============================
    WALLET METHODS
 ============================ */
 
-// Add money to wallet
+// Credit wallet
 walletSchema.methods.credit = async function(amount, description = '', metadata = {}) {
   if (amount <= 0) {
     throw new Error('Credit amount must be positive');
@@ -116,7 +182,7 @@ walletSchema.methods.credit = async function(amount, description = '', metadata 
   return { wallet: this, transaction };
 };
 
-// Remove money from wallet
+// Debit wallet
 walletSchema.methods.debit = async function(amount, description = '', metadata = {}) {
   if (amount <= 0) {
     throw new Error('Debit amount must be positive');
@@ -187,7 +253,42 @@ walletSchema.statics.findOrCreate = async function(userId) {
   return wallet;
 };
 
+/* ============================
+   WITHDRAWAL METHODS
+============================ */
+
+// Withdrawal approval method
+withdrawalSchema.methods.approve = async function(adminId, transactionId, notes = '') {
+  this.status = 'approved';
+  this.approved_by = adminId;
+  this.approved_at = new Date();
+  this.transaction_id = transactionId;
+  this.admin_notes = notes;
+  this.processed_at = new Date();
+  
+  return await this.save();
+};
+
+// Withdrawal rejection method
+withdrawalSchema.methods.reject = async function(adminId, notes = '') {
+  this.status = 'rejected';
+  this.approved_by = adminId;
+  this.approved_at = new Date();
+  this.admin_notes = notes;
+  this.processed_at = new Date();
+  
+  return await this.save();
+};
+
+/* ============================
+   CREATE MODELS
+============================ */
+const Transaction = mongoose.model('Transaction', transactionSchema);
+const Wallet = mongoose.model('Wallet', walletSchema);
+const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
+
 module.exports = {
-  Wallet: mongoose.model('Wallet', walletSchema),
-  Transaction
+  Transaction,
+  Wallet,
+  Withdrawal
 };

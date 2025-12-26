@@ -240,6 +240,61 @@ const WalletControlScreen = ({ navigation }) => {
     }
   };
 
+// WalletControlScreen.js এর withdrawal section এ যোগ করুন:
+
+const loadWithdrawalData = async () => {
+  try {
+    // Withdrawal requests লোড
+    const withdrawalResponse = await walletAPI.getPendingWithdrawals();
+    if (withdrawalResponse.success) {
+      setWithdrawalRequests(withdrawalResponse.data);
+    }
+    
+    // Withdrawal analytics লোড
+    const analyticsResponse = await walletAPI.getWithdrawalAnalytics();
+    if (analyticsResponse.success) {
+      setWithdrawalStats(analyticsResponse.data);
+    }
+  } catch (error) {
+    console.error('Error loading withdrawal data:', error);
+  }
+};
+
+// Approve withdrawal function
+const approveWithdrawal = async (withdrawalId, transactionId) => {
+  try {
+    const response = await walletAPI.approveWithdrawal(
+      withdrawalId, 
+      transactionId,
+      'Approved by admin'
+    );
+    
+    if (response.success) {
+      Alert.alert('Success', 'Withdrawal approved!');
+      loadWithdrawalData(); // Refresh data
+    }
+  } catch (error) {
+    Alert.alert('Error', 'Failed to approve withdrawal');
+  }
+};
+
+// Reject withdrawal function
+const rejectWithdrawal = async (withdrawalId) => {
+  try {
+    const response = await walletAPI.rejectWithdrawal(
+      withdrawalId,
+      'Rejected by admin'
+    );
+    
+    if (response.success) {
+      Alert.alert('Rejected', 'Withdrawal has been rejected');
+      loadWithdrawalData(); // Refresh data
+    }
+  } catch (error) {
+    Alert.alert('Error', 'Failed to reject withdrawal');
+  }
+};
+
   // ✅ Calculate stats from real data
   const loadStats = async () => {
     try {

@@ -4,144 +4,117 @@ const { Withdrawal, Wallet, Transaction } = require('../models/Wallet');
 const User = require('../models/User');
 
 /**
- * Helpers
- */
-const toObjectIdString = (id) => {
-  if (!id) return null;
-  if (typeof id === 'string') return id;
-  if (id.toString) return id.toString();
-  return String(id);
-};
-
-// Constants
-const WITHDRAWAL_LIMITS = { MIN: 100, MAX: 50000 };
-const PAYMENT_METHODS = ['bkash', 'nagad', 'rocket', 'bank'];
-
-/**
- * Create transaction helper
- */
-async function createTransaction({ session, user_id, type, amount, description, metadata = {} }) {
-  const tx = await Transaction.create(
-    [
-      {
-        user_id,
-        type,
-        amount,
-        description,
-        status: metadata?.status || 'pending',
-        metadata
-      }
-    ],
-    { session }
-  );
-  return tx[0];
-}
-
-/**
  * Request withdrawal
  */
 exports.requestWithdrawal = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    const { amount, payment_method, account_details = {}, user_note } = req.body;
+    const { amount, payment_method, account_details = {}, user_note = '' } = req.body;
     const userId = req.user.userId;
 
-    // Validation: amount
+    // Validation
     if (!amount || isNaN(amount)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ success: false, message: 'Invalid amount' });
-    }
-
-    const parsedAmount = Number(amount);
-
-    if (parsedAmount < WITHDRAWAL_LIMITS.MIN || parsedAmount > WITHDRAWAL_LIMITS.MAX) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `Withdrawal amount must be between ৳${WITHDRAWAL_LIMITS.MIN} and ৳${WITHDRAWAL_LIMITS.MAX}`
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid amount' 
       });
     }
 
-    // Payment method validation
-    if (payment_method && !PAYMENT_METHODS.includes(payment_method)) {
-      await session.abortTransaction();
-      session.endSession();
+    const parsedAmount = parseFloat(amount);
+
+    // Check minimum and maximum
+    if (parsedAmount < 100 || parsedAmount > 25000) {
       return res.status(400).json({
         success: false,
-        message: `Invalid payment method. Must be one of: ${PAYMENT_METHODS.join(', ')}`
+        message: 'Withdrawal amount must be between ৳100 and ৳25,000'
       });
     }
 
-    // Wallet atomic decrement
-    const wallet = await Wallet.findOneAndUpdate(
-      { user_id: userId, balance: { $gte: parsedAmount } },
-      { $inc: { balance: -parsedAmount, total_spent: parsedAmount } },
-      { new: true, session }
-    );
+    // Check payment method
+    const validMethods = ['bkash', 'nagad', 'rocket'];
+    if (!validMethods.includes(payment_method)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payment method. Use: bkash, nagad, or rocket'
+      });
+    }
 
+    // Check account number
+    if (!account_details.phone || account_details.phone.length !== 11 || !account_details.phone.startsWith('01')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid 11-digit mobile number starting with 01'
+      });
+    }
+
+    // Get user's wallet
+    let wallet = await Wallet.findOne({ user_id: userId });
+    
     if (!wallet) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ success: false, message: 'Insufficient balance for withdrawal' });
+      // Create wallet if doesn't exist
+      wallet = new Wallet({ user_id: userId });
+      await wallet.save();
     }
 
-    // Create withdrawal
-    const withdrawalArr = await Withdrawal.create(
-      [
-        {
-          user_id: userId,
-          amount: parsedAmount,
-          payment_method: payment_method || 'bkash',
-          account_details: account_details || {},
-          user_note: user_note || '',
-          status: 'pending',
-          requested_at: new Date()
-        }
-      ],
-      { session }
-    );
-    const withdrawal = withdrawalArr[0];
+    // Check balance
+    if (wallet.balance < parsedAmount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient balance for withdrawal'
+      });
+    }
 
-    // Create transaction
-    const tx = await createTransaction({
-      session,
+    // Create withdrawal record
+    const withdrawal = new Withdrawal({
+      user_id: userId,
+      amount: parsedAmount,
+      payment_method,
+      account_details,
+      user_note,
+      status: 'pending'
+    });
+
+    await withdrawal.save();
+
+    // Debit from wallet
+    wallet.balance -= parsedAmount;
+    wallet.total_spent += parsedAmount;
+    wallet.last_activity = new Date();
+    await wallet.save();
+
+    // Create transaction record
+    const transaction = new Transaction({
       user_id: userId,
       type: 'withdrawal',
-      amount: parsedAmount,
-      description: `Withdrawal request - ${(payment_method || 'bkash').toUpperCase()}`,
+      amount: -parsedAmount,
+      description: `Withdrawal request to ${payment_method}`,
+      status: 'pending',
+      method: payment_method,
       metadata: {
-        withdrawalId: String(withdrawal._id),
-        status: 'pending',
-        account: account_details?.phone || null,
-        method: payment_method || 'bkash'
+        withdrawalId: withdrawal._id,
+        account_number: account_details.phone,
+        user_note
       }
     });
 
-    await session.commitTransaction();
-    session.endSession();
+    await transaction.save();
 
-    await withdrawal.populate('user_id', 'username email phone');
-
+    // Populate user data for response
+    const user = await User.findById(userId).select('name email phone');
+    
     return res.status(201).json({
       success: true,
       message: 'Withdrawal request submitted successfully',
       data: {
-        withdrawal,
-        wallet: {
-          balance: wallet.balance,
-          total_earned: wallet.total_earned,
-          total_spent: wallet.total_spent
+        withdrawal: {
+          ...withdrawal.toObject(),
+          user: user
         },
-        transactionId: tx._id
+        new_balance: wallet.balance,
+        transaction_id: transaction._id
       }
     });
+
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error('❌ Withdrawal request error:', error);
     return res.status(500).json({
       success: false,
@@ -152,7 +125,7 @@ exports.requestWithdrawal = async (req, res) => {
 };
 
 /**
- * Get user's withdrawals (paginated)
+ * Get user's withdrawals
  */
 exports.getUserWithdrawals = async (req, res) => {
   try {
@@ -163,58 +136,114 @@ exports.getUserWithdrawals = async (req, res) => {
     if (status && status !== 'all') filter.status = status;
 
     const withdrawals = await Withdrawal.find(filter)
-      .populate('user_id', 'username email phone')
       .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
 
     const total = await Withdrawal.countDocuments(filter);
 
     return res.json({
       success: true,
       data: withdrawals,
-      pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / limit) }
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
     console.error('❌ Get user withdrawals error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch withdrawal history', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch withdrawal history',
+      error: error.message
+    });
   }
 };
 
 /**
- * User withdrawal stats
+ * Get user withdrawal stats
  */
 exports.getWithdrawalStats = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [total, pending, approved] = await Promise.all([
+    const [total, pending, approved, rejected] = await Promise.all([
       Withdrawal.countDocuments({ user_id: userId }),
       Withdrawal.countDocuments({ user_id: userId, status: 'pending' }),
-      Withdrawal.countDocuments({ user_id: userId, status: 'approved' })
+      Withdrawal.countDocuments({ user_id: userId, status: 'approved' }),
+      Withdrawal.countDocuments({ user_id: userId, status: 'rejected' })
     ]);
 
     const wallet = await Wallet.findOne({ user_id: userId });
 
+    // Calculate total withdrawn amount
+    const approvedWithdrawals = await Withdrawal.find({ 
+      user_id: userId, 
+      status: 'approved' 
+    });
+    
+    const totalWithdrawn = approvedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
+
     return res.json({
       success: true,
       data: {
-        walletBalance: wallet?.balance || 0,
-        totalWithdrawals: total,
-        pendingWithdrawals: pending,
-        approvedWithdrawals: approved,
-        totalEarned: wallet?.total_earned || 0,
-        totalSpent: wallet?.total_spent || 0
+        wallet_balance: wallet?.balance || 0,
+        total_withdrawals: total,
+        pending_withdrawals: pending,
+        approved_withdrawals: approved,
+        rejected_withdrawals: rejected,
+        total_withdrawn: totalWithdrawn
       }
     });
   } catch (error) {
     console.error('❌ Get withdrawal stats error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch withdrawal stats', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch withdrawal stats',
+      error: error.message
+    });
   }
 };
 
 /**
- * Admin analytics
+ * Admin: Get pending withdrawals
+ */
+exports.getPendingWithdrawals = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+
+    const withdrawals = await Withdrawal.find({ status: 'pending' })
+      .populate('user_id', 'name email phone username avatar')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+
+    const total = await Withdrawal.countDocuments({ status: 'pending' });
+
+    return res.json({
+      success: true,
+      data: withdrawals,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get pending withdrawals error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending withdrawals',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Admin: Get withdrawal analytics
  */
 exports.getWithdrawalAnalytics = async (req, res) => {
   try {
@@ -224,215 +253,215 @@ exports.getWithdrawalAnalytics = async (req, res) => {
       Withdrawal.countDocuments({ status: 'rejected' })
     ]);
 
-    const [pendingAgg, approvedAgg] = await Promise.all([
-      Withdrawal.aggregate([{ $match: { status: 'pending' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      Withdrawal.aggregate([{ $match: { status: 'approved' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
+    // Calculate total amounts
+    const pendingAgg = await Withdrawal.aggregate([
+      { $match: { status: 'pending' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
 
+    const approvedAgg = await Withdrawal.aggregate([
+      { $match: { status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+
+    // Recent pending withdrawals
     const recentPending = await Withdrawal.find({ status: 'pending' })
-      .populate('user_id', 'username email phone')
+      .populate('user_id', 'name email phone')
       .sort({ createdAt: -1 })
       .limit(5);
 
     return res.json({
       success: true,
       data: {
-        counts: { pending: totalPending, approved: totalApproved, rejected: totalRejected },
-        amounts: { pending: pendingAgg[0]?.total || 0, approved: approvedAgg[0]?.total || 0 },
-        recentPending
+        counts: {
+          pending: totalPending,
+          approved: totalApproved,
+          rejected: totalRejected,
+          total: totalPending + totalApproved + totalRejected
+        },
+        amounts: {
+          pending: pendingAgg[0]?.total || 0,
+          approved: approvedAgg[0]?.total || 0
+        },
+        recent_pending: recentPending
       }
     });
   } catch (error) {
     console.error('❌ Get withdrawal analytics error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch withdrawal analytics', error: error.message });
-  }
-};
-
-/**
- * Admin: get pending withdrawals (paginated)
- */
-exports.getPendingWithdrawals = async (req, res) => {
-  try {
-    const { page = 1, limit = 20 } = req.query;
-
-    const withdrawals = await Withdrawal.find({ status: 'pending' })
-      .populate('user_id', 'username email phone avatar')
-      .populate('approved_by', 'username')
-      .sort({ createdAt: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
-
-    const total = await Withdrawal.countDocuments({ status: 'pending' });
-
-    return res.json({
+    return res.status(500).json({
       success: false,
-      data: withdrawals,
-      pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / limit) }
+      message: 'Failed to fetch withdrawal analytics',
+      error: error.message
     });
-  } catch (error) {
-    console.error('❌ Get pending withdrawals error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch pending withdrawals', error: error.message });
   }
 };
 
 /**
- * Admin: approve withdrawal
+ * Admin: Approve withdrawal
  */
 exports.approveWithdrawal = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { id } = req.params;
     const { transaction_id, admin_notes } = req.body;
     const adminId = req.user.userId;
 
-    const withdrawal = await Withdrawal.findById(id).session(session);
-
+    // Find withdrawal
+    const withdrawal = await Withdrawal.findById(id);
+    
     if (!withdrawal) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ success: false, message: 'Withdrawal request not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Withdrawal request not found'
+      });
     }
 
     if (withdrawal.status !== 'pending') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}` });
+      return res.status(400).json({
+        success: false,
+        message: `Withdrawal is already ${withdrawal.status}`
+      });
     }
 
     // Update withdrawal status
     withdrawal.status = 'approved';
-    withdrawal.transaction_id = transaction_id || withdrawal.transaction_id;
+    withdrawal.transaction_id = transaction_id;
     withdrawal.approved_by = adminId;
     withdrawal.approved_at = new Date();
-    withdrawal.admin_notes = admin_notes || withdrawal.admin_notes;
+    withdrawal.admin_notes = admin_notes;
     withdrawal.processed_at = new Date();
 
-    await withdrawal.save({ session });
+    await withdrawal.save();
 
     // Update transaction status
     await Transaction.findOneAndUpdate(
-      { 'metadata.withdrawalId': toObjectIdString(withdrawal._id) },
+      { 'metadata.withdrawalId': withdrawal._id },
       {
         status: 'completed',
-        description: `Withdrawal processed - ${withdrawal.payment_method?.toUpperCase() || 'BKASH'}`,
-        'metadata.status': 'completed',
-        'metadata.processedBy': adminId
-      },
-      { session }
+        description: `Withdrawal approved - ${withdrawal.payment_method.toUpperCase()}`,
+        'metadata.status': 'approved',
+        'metadata.processedBy': adminId,
+        'metadata.transaction_id': transaction_id
+      }
     );
 
-    await session.commitTransaction();
-    session.endSession();
+    // Get user info for response
+    const user = await User.findById(withdrawal.user_id).select('name email phone');
 
-    await withdrawal.populate('user_id', 'username email phone');
-
-    return res.json({ 
-      success: true, 
-      message: 'Withdrawal approved successfully', 
-      data: withdrawal 
+    return res.json({
+      success: true,
+      message: 'Withdrawal approved successfully',
+      data: {
+        withdrawal: {
+          ...withdrawal.toObject(),
+          user: user
+        }
+      }
     });
-    
+
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error('❌ Approve withdrawal error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to approve withdrawal', 
-      error: error.message 
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to approve withdrawal',
+      error: error.message
     });
   }
 };
 
 /**
- * Admin: reject withdrawal
+ * Admin: Reject withdrawal
  */
 exports.rejectWithdrawal = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { id } = req.params;
     const { admin_notes } = req.body;
     const adminId = req.user.userId;
 
-    const withdrawal = await Withdrawal.findById(id).session(session);
-
+    // Find withdrawal
+    const withdrawal = await Withdrawal.findById(id);
+    
     if (!withdrawal) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ success: false, message: 'Withdrawal request not found' });
+      return res.status(404).json({
+        success: false,
+        message: 'Withdrawal request not found'
+      });
     }
 
     if (withdrawal.status !== 'pending') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ success: false, message: `Withdrawal is already ${withdrawal.status}` });
+      return res.status(400).json({
+        success: false,
+        message: `Withdrawal is already ${withdrawal.status}`
+      });
     }
 
-    // Refund wallet (return money to user)
-    const wallet = await Wallet.findOneAndUpdate(
-      { user_id: withdrawal.user_id },
-      { $inc: { balance: withdrawal.amount, total_spent: -withdrawal.amount } },
-      { new: true, session }
-    );
+    // Refund to wallet
+    const wallet = await Wallet.findOne({ user_id: withdrawal.user_id });
+    
+    if (wallet) {
+      wallet.balance += withdrawal.amount;
+      wallet.total_spent -= withdrawal.amount;
+      await wallet.save();
 
-    if (!wallet) {
-      console.warn(`⚠️ Wallet not found for user ${withdrawal.user_id}`);
-    }
-
-    // Create refund transaction
-    await createTransaction({
-      session,
-      user_id: withdrawal.user_id,
-      type: 'refund',
-      amount: withdrawal.amount,
-      description: `Withdrawal refund - ${withdrawal.payment_method?.toUpperCase() || 'BKASH'}`,
-      metadata: {
-        withdrawalId: String(withdrawal._id),
+      // Create refund transaction
+      const refundTransaction = new Transaction({
+        user_id: withdrawal.user_id,
+        type: 'refund',
+        amount: withdrawal.amount,
+        description: `Withdrawal refund - ${withdrawal.payment_method.toUpperCase()}`,
         status: 'completed',
-        refundedBy: adminId,
-        reason: admin_notes || 'Request rejected'
-      }
-    });
+        method: 'refund',
+        metadata: {
+          withdrawalId: withdrawal._id,
+          reason: 'Withdrawal rejected',
+          rejectedBy: adminId,
+          admin_notes
+        }
+      });
+
+      await refundTransaction.save();
+    }
 
     // Update withdrawal status
     withdrawal.status = 'rejected';
     withdrawal.approved_by = adminId;
     withdrawal.approved_at = new Date();
-    withdrawal.admin_notes = admin_notes || '';
+    withdrawal.admin_notes = admin_notes;
     withdrawal.processed_at = new Date();
 
-    await withdrawal.save({ session });
+    await withdrawal.save();
 
-    await session.commitTransaction();
-    session.endSession();
+    // Update original transaction status
+    await Transaction.findOneAndUpdate(
+      { 'metadata.withdrawalId': withdrawal._id },
+      {
+        status: 'cancelled',
+        description: `Withdrawal rejected - ${withdrawal.payment_method.toUpperCase()}`,
+        'metadata.status': 'rejected',
+        'metadata.rejectedBy': adminId
+      }
+    );
 
-    await withdrawal.populate('user_id', 'username email phone');
+    // Get user info for response
+    const user = await User.findById(withdrawal.user_id).select('name email phone');
 
     return res.json({
       success: true,
       message: 'Withdrawal rejected and amount refunded',
       data: {
-        withdrawal,
-        wallet: {
-          balance: wallet?.balance || 0,
-          total_earned: wallet?.total_earned || 0,
-          total_spent: wallet?.total_spent || 0
-        }
+        withdrawal: {
+          ...withdrawal.toObject(),
+          user: user
+        },
+        refund_amount: withdrawal.amount
       }
     });
-    
+
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error('❌ Reject withdrawal error:', error);
-    return res.status(500).json({ 
-      success: false, 
-      message: 'Failed to reject withdrawal', 
-      error: error.message 
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reject withdrawal',
+      error: error.message
     });
   }
 };
