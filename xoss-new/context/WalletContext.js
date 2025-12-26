@@ -1,320 +1,374 @@
-// context/WalletContext.js - COMPLETE FIXED VERSION
+// context/WalletContext.js - ENHANCED VERSION
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './AuthContext';
+import { walletAPI } from '../api/walletAPI';
+import * as Haptics from 'expo-haptics';
 
 const WalletContext = createContext();
 
-// ✅ API URL
-const API_URL = 'https://xoss.onrender.com/api';
-
 export function WalletProvider({ children }) {
-  const { user, token, isAuthenticated, getUserId } = useAuth();
+  const { user, token, isAuthenticated } = useAuth();
   const [balance, setBalance] = useState(0);
   const [transactions, setTransactions] = useState([]);
+  const [withdrawals, setWithdrawals] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState(null);
+  const [stats, setStats] = useState({
+    totalDeposit: 0,
+    totalWithdraw: 0,
+    totalWin: 0,
+    totalEntry: 0,
+    totalTransfer: 0
+  });
 
-  // ✅ REAL: Fetch wallet balance from server
-  const fetchWalletBalance = useCallback(async () => {
-    if (!isAuthenticated || !token) {
-      console.log('🔐 Not authenticated, loading from storage');
-      await loadFromStorage();
+  // ✅ Load cached data
+  const loadCachedData = async () => {
+    try {
+      const cachedBalance = await AsyncStorage.getItem('wallet_balance');
+      const cachedTransactions = await AsyncStorage.getItem('wallet_transactions');
+      const cachedStats = await AsyncStorage.getItem('wallet_stats');
+      const cachedLastUpdated = await AsyncStorage.getItem('wallet_last_updated');
+
+      if (cachedBalance) {
+        setBalance(parseFloat(cachedBalance));
+      }
+      if (cachedTransactions) {
+        setTransactions(JSON.parse(cachedTransactions));
+      }
+      if (cachedStats) {
+        setStats(JSON.parse(cachedStats));
+      }
+      if (cachedLastUpdated) {
+        setLastUpdated(new Date(cachedLastUpdated));
+      }
+    } catch (error) {
+      console.error('❌ Error loading cached data:', error);
+    }
+  };
+
+  // ✅ Fetch wallet balance (optimized)
+  const fetchWalletBalance = useCallback(async (forceRefresh = false) => {
+    if (!isAuthenticated && !forceRefresh) {
+      await loadCachedData();
+      setIsLoading(false);
       return;
     }
-    
+
     try {
       setIsLoading(true);
-      console.log('🔄 Fetching wallet balance from server...');
+      console.log('🔄 Fetching wallet balance...');
       
-      // ✅ **FIXED: Correct endpoint - should be /wallet not /wallet/balance**
-      const response = await fetch(`${API_URL}/wallet`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
+      const response = await walletAPI.getBalance();
+      
+      if (response.success && response.data?.balance !== undefined) {
+        const newBalance = parseFloat(response.data.balance);
+        setBalance(newBalance);
         
-        if (data.success && data.data?.balance !== undefined) {
-          const newBalance = parseFloat(data.data.balance);
-          setBalance(newBalance);
-          
-          // ✅ Save to AsyncStorage for offline access
-          await AsyncStorage.setItem('wallet_balance', newBalance.toString());
-          await AsyncStorage.setItem('wallet_data', JSON.stringify({
-            balance: newBalance,
-            lastUpdated: new Date().toISOString()
-          }));
-          
-          console.log(`✅ Wallet balance updated: ${newBalance}`);
-          setError(null);
-        } else {
-          console.log('❌ Invalid wallet data:', data);
-          await loadFromStorage();
-        }
+        // Cache the balance
+        await AsyncStorage.setItem('wallet_balance', newBalance.toString());
+        await AsyncStorage.setItem('wallet_last_updated', new Date().toISOString());
+        
+        console.log(`✅ Balance updated: ${newBalance}`);
+        setError(null);
       } else {
-        throw new Error(`Server responded with status: ${response.status}`);
+        throw new Error(response.message || 'Failed to fetch balance');
       }
     } catch (error) {
       console.error('❌ Wallet balance fetch error:', error);
       setError(error.message);
-      await loadFromStorage();
+      await loadCachedData();
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated]);
 
-  // ✅ REAL: Fetch transactions from server
+  // ✅ Fetch transactions (optimized)
   const fetchTransactions = useCallback(async () => {
-    if (!isAuthenticated || !token) {
-      console.log('🔐 Not authenticated, skipping transactions');
+    if (!isAuthenticated) {
+      console.log('🔐 User not authenticated, using cached transactions');
       return;
     }
     
     try {
-      console.log('🔄 Fetching transactions from server...');
+      console.log('🔄 Fetching transactions...');
       
-      const response = await fetch(`${API_URL}/wallet/transactions`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
+      const response = await walletAPI.getTransactions();
+      
+      if (response.success && response.data?.transactions) {
+        const formattedTransactions = response.data.transactions.map(tx => ({
+          id: tx._id || tx.id || Math.random().toString(36).substr(2, 9),
+          type: tx.type || (tx.amount > 0 ? 'credit' : 'debit'),
+          amount: parseFloat(tx.amount) || 0,
+          description: tx.description || tx.note || 'Transaction',
+          date: new Date(tx.createdAt || tx.date || new Date()),
+          status: tx.status || 'completed',
+          transactionId: tx.transactionId || tx._id || 'N/A',
+          category: tx.category || 'general',
+          reference: tx.reference || ''
+        }));
         
-        if (data.success && data.data?.transactions) {
-          // ✅ Format transactions properly
-          const formattedTransactions = data.data.transactions.map(tx => ({
-            id: tx._id || tx.id || Math.random().toString(36).substr(2, 9),
-            type: tx.type || (tx.amount > 0 ? 'credit' : 'debit'),
-            amount: parseFloat(tx.amount) || 0,
-            description: tx.description || tx.note || 'Transaction',
-            date: new Date(tx.createdAt || tx.date || new Date()),
-            status: tx.status || 'completed',
-            transactionId: tx.transactionId || tx._id || 'N/A',
-            category: tx.category || 'general',
-            reference: tx.reference || ''
-          }));
-          
-          setTransactions(formattedTransactions);
-          
-          // ✅ Save to AsyncStorage
-          await AsyncStorage.setItem('wallet_transactions', JSON.stringify(formattedTransactions));
-          await AsyncStorage.setItem('transactions_last_fetch', new Date().toISOString());
-          
-          console.log(`✅ Loaded ${formattedTransactions.length} transactions`);
-        } else {
-          console.log('❌ Invalid transactions data:', data);
-          await loadTransactionsFromStorage();
-        }
-      } else {
-        console.log(`❌ Transactions API failed: ${response.status}`);
-        await loadTransactionsFromStorage();
+        setTransactions(formattedTransactions);
+        
+        // Cache transactions
+        await AsyncStorage.setItem('wallet_transactions', JSON.stringify(formattedTransactions));
+        
+        console.log(`✅ Loaded ${formattedTransactions.length} transactions`);
       }
     } catch (error) {
       console.error('❌ Transactions fetch error:', error);
-      await loadTransactionsFromStorage();
+      await loadCachedData();
     }
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated]);
 
-  // ✅ Load wallet data from storage (offline)
-  const loadFromStorage = async () => {
+  // ✅ Fetch withdrawal history
+  const fetchWithdrawalHistory = useCallback(async () => {
     try {
-      const walletData = await AsyncStorage.getItem('wallet_data');
-      if (walletData) {
-        const parsedData = JSON.parse(walletData);
-        setBalance(parseFloat(parsedData.balance) || 0);
-      } else {
-        const balanceData = await AsyncStorage.getItem('wallet_balance');
-        if (balanceData) {
-          setBalance(parseFloat(balanceData));
-        }
+      const response = await walletAPI.getWithdrawalHistory();
+      if (response.success && response.data?.withdrawals) {
+        setWithdrawals(response.data.withdrawals);
       }
     } catch (error) {
-      console.error('❌ Error loading local wallet:', error);
-      setBalance(0);
-    }
-  };
-
-  // ✅ Load transactions from storage
-  const loadTransactionsFromStorage = async () => {
-    try {
-      const transactionsData = await AsyncStorage.getItem('wallet_transactions');
-      if (transactionsData) {
-        const parsedTransactions = JSON.parse(transactionsData);
-        setTransactions(parsedTransactions);
-      }
-    } catch (error) {
-      console.error('❌ Error loading local transactions:', error);
-    }
-  };
-
-  // ✅ Refresh wallet (both balance and transactions)
-  const refreshWallet = useCallback(async () => {
-    console.log('🔄 Refreshing wallet data...');
-    await fetchWalletBalance();
-    await fetchTransactions();
-  }, [fetchWalletBalance, fetchTransactions]);
-
-  // ✅ Add transaction locally (for immediate UI update)
-  const addTransaction = useCallback((newTransaction) => {
-    setTransactions(prev => [newTransaction, ...prev]);
-    
-    // Update balance if needed
-    if (newTransaction.amount) {
-      setBalance(prev => {
-        const newBalance = prev + parseFloat(newTransaction.amount);
-        AsyncStorage.setItem('wallet_balance', newBalance.toString());
-        return newBalance;
-      });
+      console.error('❌ Withdrawal history fetch error:', error);
     }
   }, []);
 
-  // ✅ Initial load
-  useEffect(() => {
-    const initializeWallet = async () => {
-      if (isAuthenticated && token) {
-        await Promise.all([
-          fetchWalletBalance(),
-          fetchTransactions()
-        ]);
-      } else {
-        await loadFromStorage();
-        await loadTransactionsFromStorage();
-        setIsLoading(false);
-      }
+  // ✅ Calculate statistics
+  const calculateStats = useCallback((txList) => {
+    const newStats = {
+      totalDeposit: 0,
+      totalWithdraw: 0,
+      totalWin: 0,
+      totalEntry: 0,
+      totalTransfer: 0
     };
 
-    initializeWallet();
-  }, [isAuthenticated, token, fetchWalletBalance, fetchTransactions]);
+    txList.forEach(tx => {
+      const amount = Math.abs(tx.amount);
+      switch (tx.type) {
+        case 'deposit':
+        case 'credit':
+          newStats.totalDeposit += amount;
+          break;
+        case 'withdraw':
+        case 'debit':
+          newStats.totalWithdraw += amount;
+          break;
+        case 'win':
+          newStats.totalWin += amount;
+          break;
+        case 'entry':
+          newStats.totalEntry += amount;
+          break;
+        case 'transfer':
+          newStats.totalTransfer += amount;
+          break;
+      }
+    });
 
-  // ✅ Auto-refresh when auth changes
-  useEffect(() => {
-    if (isAuthenticated && token) {
-      refreshWallet();
+    setStats(newStats);
+    AsyncStorage.setItem('wallet_stats', JSON.stringify(newStats));
+  }, []);
+
+  // ✅ Refresh all wallet data
+  const refreshWallet = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    console.log('🔄 Refreshing all wallet data...');
+    setIsLoading(true);
+    
+    try {
+      await Promise.all([
+        fetchWalletBalance(true),
+        fetchTransactions(),
+        fetchWithdrawalHistory()
+      ]);
+      
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('❌ Wallet refresh error:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsLoading(false);
     }
-  }, [isAuthenticated, token, refreshWallet]);
+  }, [fetchWalletBalance, fetchTransactions, fetchWithdrawalHistory]);
 
-  // ✅ Calculate recent transactions
+  // ✅ Make a payment/transfer
+  const makePayment = useCallback(async (recipientId, amount, description = '') => {
+    try {
+      if (!isAuthenticated) {
+        throw new Error('Please login to make payments');
+      }
+
+      const parsedAmount = parseFloat(amount);
+      if (parsedAmount > balance) {
+        throw new Error('Insufficient balance');
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      const response = await walletAPI.transferMoney(
+        recipientId, 
+        parsedAmount, 
+        description
+      );
+
+      if (response.success) {
+        // Update balance immediately
+        const newBalance = balance - parsedAmount;
+        setBalance(newBalance);
+        await AsyncStorage.setItem('wallet_balance', newBalance.toString());
+        
+        // Add transaction to list
+        const newTransaction = {
+          id: response.data?.transactionId || Math.random().toString(36).substr(2, 9),
+          type: 'transfer',
+          amount: -parsedAmount,
+          description: description || `Payment to ${recipientId}`,
+          date: new Date(),
+          status: 'completed',
+          transactionId: response.data?.transactionId,
+          category: 'transfer',
+          recipientId
+        };
+        
+        setTransactions(prev => [newTransaction, ...prev]);
+        
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return { success: true, newBalance, transaction: newTransaction };
+      } else {
+        throw new Error(response.message || 'Payment failed');
+      }
+    } catch (error) {
+      console.error('❌ Payment error:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      throw error;
+    }
+  }, [balance, isAuthenticated]);
+
+  // ✅ Request withdrawal
+  const requestWithdrawal = useCallback(async (amount, paymentMethod, accountDetails, note = '') => {
+    try {
+      const parsedAmount = parseFloat(amount);
+      if (parsedAmount > balance) {
+        throw new Error('Insufficient balance');
+      }
+
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      const response = await walletAPI.withdrawRequest(
+        parsedAmount,
+        paymentMethod,
+        accountDetails,
+        note
+      );
+
+      if (response.success) {
+        // Update balance
+        const newBalance = balance - parsedAmount;
+        setBalance(newBalance);
+        await AsyncStorage.setItem('wallet_balance', newBalance.toString());
+        
+        // Add to withdrawal list
+        const newWithdrawal = {
+          id: response.data?.withdrawal?._id || Math.random().toString(36).substr(2, 9),
+          amount: parsedAmount,
+          payment_method: paymentMethod,
+          account_details: accountDetails,
+          status: 'pending',
+          date: new Date(),
+          note
+        };
+        
+        setWithdrawals(prev => [newWithdrawal, ...prev]);
+        
+        // Add transaction
+        const newTransaction = {
+          id: newWithdrawal.id,
+          type: 'withdraw',
+          amount: -parsedAmount,
+          description: `${paymentMethod.toUpperCase()} Withdrawal`,
+          date: new Date(),
+          status: 'pending',
+          transactionId: newWithdrawal.id,
+          category: 'withdrawal'
+        };
+        
+        setTransactions(prev => [newTransaction, ...prev]);
+        
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return { success: true, withdrawal: newWithdrawal, newBalance };
+      } else {
+        throw new Error(response.message || 'Withdrawal failed');
+      }
+    } catch (error) {
+      console.error('❌ Withdrawal error:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      throw error;
+    }
+  }, [balance]);
+
+  // ✅ Get recent transactions
   const getRecentTransactions = useCallback((count = 5) => {
     return transactions
       .sort((a, b) => new Date(b.date) - new Date(a.date))
       .slice(0, count);
   }, [transactions]);
 
-  // ✅ Check if user can afford
+  // ✅ Check if user can afford an amount
   const canAfford = useCallback((amount) => {
     return balance >= parseFloat(amount);
   }, [balance]);
 
-  // ✅ Make payment/transfer
-  const makePayment = useCallback(async (recipientId, amount, description = '') => {
-    if (!token) {
-      throw new Error('User not authenticated');
-    }
+  // ✅ Get pending withdrawals
+  const getPendingWithdrawals = useCallback(() => {
+    return withdrawals.filter(w => w.status === 'pending');
+  }, [withdrawals]);
 
-    try {
-      console.log(`💸 Making payment of ${amount} to ${recipientId}`);
-      
-      const response = await fetch(`${API_URL}/wallet/transfer`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          recipientId,
-          amount: parseFloat(amount),
-          description: description || `Payment to user ${recipientId}`
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.success) {
-          // ✅ Update local balance
-          setBalance(result.newBalance || balance - amount);
-          
-          // ✅ Add transaction to local list
-          const newTransaction = {
-            id: result.transactionId || Math.random().toString(36).substr(2, 9),
-            type: 'debit',
-            amount: -parseFloat(amount),
-            description: description || `Payment sent`,
-            date: new Date(),
-            status: 'completed',
-            transactionId: result.transactionId || 'N/A',
-            category: 'transfer',
-            recipientId
-          };
-          
-          addTransaction(newTransaction);
-          
-          console.log('✅ Payment successful');
-          return {
-            success: true,
-            newBalance: result.newBalance,
-            transactionId: result.transactionId
-          };
-        } else {
-          throw new Error(result.message || 'Payment failed');
-        }
+  // Initialize wallet
+  useEffect(() => {
+    const initializeWallet = async () => {
+      if (isAuthenticated) {
+        await Promise.all([
+          fetchWalletBalance(),
+          fetchTransactions(),
+          fetchWithdrawalHistory()
+        ]);
       } else {
-        throw new Error(`Payment failed with status: ${response.status}`);
+        await loadCachedData();
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('❌ Payment error:', error);
-      throw error;
-    }
-  }, [token, balance, addTransaction]);
-
-  // ✅ Get wallet statistics
-  const getWalletStats = useCallback(() => {
-    const stats = {
-      totalDeposit: 0,
-      totalWithdraw: 0,
-      totalWin: 0,
-      totalEntry: 0,
-      totalTransfer: 0,
-      totalTransactions: transactions.length
     };
 
-    transactions.forEach(tx => {
-      if (tx.type === 'deposit' || tx.amount > 0) {
-        stats.totalDeposit += Math.abs(tx.amount);
-      } else if (tx.type === 'withdraw' || tx.amount < 0) {
-        stats.totalWithdraw += Math.abs(tx.amount);
-      } else if (tx.type === 'win') {
-        stats.totalWin += tx.amount;
-      } else if (tx.type === 'entry') {
-        stats.totalEntry += Math.abs(tx.amount);
-      } else if (tx.type === 'transfer') {
-        stats.totalTransfer += Math.abs(tx.amount);
-      }
-    });
+    initializeWallet();
+  }, [isAuthenticated, fetchWalletBalance, fetchTransactions, fetchWithdrawalHistory]);
 
-    return stats;
-  }, [transactions]);
+  // Recalculate stats when transactions change
+  useEffect(() => {
+    if (transactions.length > 0) {
+      calculateStats(transactions);
+    }
+  }, [transactions, calculateStats]);
 
   const value = {
     balance,
     transactions,
+    withdrawals,
     isLoading,
     error,
+    lastUpdated,
+    stats,
     refreshWallet,
+    fetchWalletBalance,
+    fetchTransactions,
+    fetchWithdrawalHistory,
     getRecentTransactions,
     canAfford,
     makePayment,
-    getWalletStats,
-    addTransaction
+    requestWithdrawal,
+    getPendingWithdrawals,
+    clearCache: walletAPI.clearCache
   };
 
   return (

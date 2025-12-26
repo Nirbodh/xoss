@@ -1,5 +1,5 @@
-// screens/WithdrawScreen.js - COMPLETE WORKING VERSION
-import React, { useState, useEffect } from 'react';
+// screens/WithdrawScreen.js - COMPLETELY ENHANCED VERSION
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,20 +12,22 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
-  Dimensions
+  Dimensions,
+  Animated,
+  SafeAreaView
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import { useWallet } from '../context/WalletContext';
 import { walletAPI } from '../api/walletAPI';
 import * as Haptics from 'expo-haptics';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
-const WithdrawScreen = ({ navigation, route }) => {
-  const { user, token, isAuthenticated } = useAuth();
-  const { balance, refreshWallet } = useWallet();
+const WithdrawScreen = ({ navigation }) => {
+  const { user, isAuthenticated } = useAuth();
+  const { balance, requestWithdrawal, refreshWallet, getPendingWithdrawals } = useWallet();
   
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('bkash');
@@ -34,15 +36,27 @@ const WithdrawScreen = ({ navigation, route }) => {
   const [availableBalance, setAvailableBalance] = useState(0);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [note, setNote] = useState('');
-  const [eligibility, setEligibility] = useState({ eligible: true, errors: [] });
+  const [eligibility, setEligibility] = useState({ eligible: true, errors: [], currentBalance: 0 });
+  const [stats, setStats] = useState({
+    totalWithdrawn: 0,
+    pendingWithdrawals: 0,
+    completedWithdrawals: 0
+  });
+  const [recentWithdrawals, setRecentWithdrawals] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
 
   const paymentMethods = [
     { 
       id: 'bkash', 
       name: 'bKash', 
-      icon: '📱', 
-      color: '#e2136e', 
-      minAmount: 100, 
+      icon: 'mobile-alt', 
+      color: '#E2136E',
+      minAmount: 100,
       maxAmount: 25000,
       accountPlaceholder: 'bKash Number (01XXXXXXXXX)',
       instructions: 'আপনার bKash নাম্বার দিন'
@@ -50,9 +64,9 @@ const WithdrawScreen = ({ navigation, route }) => {
     { 
       id: 'nagad', 
       name: 'Nagad', 
-      icon: '💳', 
-      color: '#f60', 
-      minAmount: 100, 
+      icon: 'money-check-alt', 
+      color: '#F22D65',
+      minAmount: 100,
       maxAmount: 25000,
       accountPlaceholder: 'Nagad Number (01XXXXXXXXX)',
       instructions: 'আপনার Nagad নাম্বার দিন'
@@ -60,9 +74,9 @@ const WithdrawScreen = ({ navigation, route }) => {
     { 
       id: 'rocket', 
       name: 'Rocket', 
-      icon: '🚀', 
-      color: '#784bd1', 
-      minAmount: 100, 
+      icon: 'rocket', 
+      color: '#128C7E',
+      minAmount: 100,
       maxAmount: 25000,
       accountPlaceholder: 'Rocket Number (01XXXXXXXXX)',
       instructions: 'আপনার Rocket নাম্বার দিন'
@@ -71,45 +85,66 @@ const WithdrawScreen = ({ navigation, route }) => {
 
   const quickAmounts = [100, 200, 500, 1000, 2000, 5000];
 
-  // Load available balance
+  // Initialize animations
   useEffect(() => {
-    const loadBalance = async () => {
-      try {
-        if (balance > 0) {
-          setAvailableBalance(balance);
-        } else {
-          const walletData = await walletAPI.getBalance();
-          if (walletData.success && walletData.data?.balance !== undefined) {
-            setAvailableBalance(parseFloat(walletData.data.balance));
-          } else {
-            setAvailableBalance(0);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading balance:', error);
-        setAvailableBalance(0);
-      }
-    };
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      })
+    ]).start();
     
-    if (isAuthenticated) {
-      loadBalance();
+    loadInitialData();
+  }, []);
+
+  // Load initial data
+  const loadInitialData = async () => {
+    try {
+      setAvailableBalance(balance);
+      
+      // Load stats
+      const statsResponse = await walletAPI.getWithdrawalStats();
+      if (statsResponse.success) {
+        setStats(statsResponse.data);
+      }
+      
+      // Load recent withdrawals
+      const historyResponse = await walletAPI.getWithdrawalHistory(1, 3);
+      if (historyResponse.success) {
+        setRecentWithdrawals(historyResponse.data.withdrawals || []);
+      }
+    } catch (error) {
+      console.error('❌ Error loading initial data:', error);
     }
-  }, [balance, isAuthenticated]);
+  };
 
   // Check eligibility when amount changes
   useEffect(() => {
     const checkEligibility = async () => {
       if (amount && parseFloat(amount) > 0) {
-        const result = await walletAPI.checkEligibility(parseFloat(amount));
+        const result = await walletAPI.checkEligibility(amount);
         setEligibility(result);
+      } else {
+        setEligibility({ eligible: true, errors: [], currentBalance: availableBalance });
       }
     };
     
-    if (amount) {
-      checkEligibility();
-    }
-  }, [amount]);
+    const timer = setTimeout(checkEligibility, 300);
+    return () => clearTimeout(timer);
+  }, [amount, availableBalance]);
 
+  // Validate form
   const validateForm = () => {
     const withdrawAmount = parseFloat(amount);
     
@@ -139,14 +174,15 @@ const WithdrawScreen = ({ navigation, route }) => {
     }
 
     if (accountNumber.length !== 11 || !accountNumber.startsWith('01')) {
-      Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি বৈধ মোবাইল নাম্বার দিন (01XXXXXXXXX)');
+      Alert.alert('ত্রুটি', 'অনুগ্রহ করে একটি বৈধ ১১ ডিজিটের মোবাইল নাম্বার দিন (01XXXXXXXXX)');
       return false;
     }
 
     return true;
   };
 
-  const handleWithdraw = () => {
+  // Handle withdrawal
+  const handleWithdraw = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
     if (!validateForm()) {
@@ -156,6 +192,7 @@ const WithdrawScreen = ({ navigation, route }) => {
     setShowConfirmation(true);
   };
 
+  // Confirm withdrawal
   const confirmWithdrawal = async () => {
     setLoading(true);
     setShowConfirmation(false);
@@ -164,37 +201,51 @@ const WithdrawScreen = ({ navigation, route }) => {
       const withdrawAmount = parseFloat(amount);
       const selectedMethod = paymentMethods.find(m => m.id === method);
 
-      console.log('🚀 Processing withdrawal...', {
-        amount: withdrawAmount,
-        method: selectedMethod?.name,
-        account: accountNumber
-      });
-
       // Prepare account details
-      const account_details = {
+      const accountDetails = {
         phone: accountNumber,
         account_name: user?.name || 'User',
-        bank_name: selectedMethod?.name || 'Mobile Banking'
+        method: selectedMethod?.name
       };
 
-      // Call withdrawal API
-      const response = await walletAPI.withdrawRequest(
+      // Call withdrawal function from context
+      const result = await requestWithdrawal(
         withdrawAmount,
         method,
-        account_details,
-        note || `${selectedMethod?.name} উত্তোলন`
+        accountDetails,
+        note
       );
 
-      if (response.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (result.success) {
+        // Update stats
+        const newStats = {
+          ...stats,
+          pendingWithdrawals: stats.pendingWithdrawals + 1,
+          totalWithdrawn: stats.totalWithdrawn + withdrawAmount
+        };
+        setStats(newStats);
         
-        // Refresh wallet balance
-        await refreshWallet();
+        // Add to recent withdrawals
+        const newWithdrawal = {
+          id: result.withdrawal.id,
+          amount: withdrawAmount,
+          payment_method: method,
+          account_details: accountDetails,
+          status: 'pending',
+          date: new Date(),
+          note
+        };
+        setRecentWithdrawals(prev => [newWithdrawal, ...prev]);
         
-        // Show success message
+        // Reset form
+        setAmount('');
+        setAccountNumber('');
+        setNote('');
+        setEligibility({ eligible: true, errors: [], currentBalance: availableBalance - withdrawAmount });
+        
         Alert.alert(
           '✅ সফল!',
-          `৳${withdrawAmount} উত্তোলনের রিকোয়েস্ট জমা হয়েছে।\n\nরিকোয়েস্ট আইডি: ${response.data?.withdrawal?._id?.substring(0, 8) || 'N/A'}\n\nএটি এপ্রুভালের জন্য পেন্ডিং থাকবে।`,
+          `৳${withdrawAmount} উত্তোলনের রিকোয়েস্ট জমা হয়েছে।\n\nআপনার রিকোয়েস্ট এপ্রুভালের জন্য পেন্ডিং থাকবে।`,
           [
             { 
               text: 'হিস্টোরি দেখুন', 
@@ -202,280 +253,396 @@ const WithdrawScreen = ({ navigation, route }) => {
             },
             { 
               text: 'ঠিক আছে', 
-              onPress: () => navigation.goBack()
+              onPress: () => {}
             }
           ]
         );
-        
-        // Reset form
-        setAmount('');
-        setAccountNumber('');
-        setNote('');
       } else {
-        throw new Error(response.message || 'উত্তোলন ব্যর্থ হয়েছে');
+        throw new Error('উত্তোলন ব্যর্থ হয়েছে');
       }
     } catch (error) {
       console.error('❌ Withdrawal error:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      
       Alert.alert(
         'ত্রুটি',
-        error.message || 'উত্তোলন ব্যর্থ হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।',
-        [{ text: 'ঠিক আছে' }]
+        error.message || 'উত্তোলন ব্যর্থ হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।'
       );
     } finally {
       setLoading(false);
     }
   };
 
+  // Format phone number
+  const formatPhoneNumber = (value) => {
+    const numericValue = value.replace(/[^0-9]/g, '');
+    if (numericValue.length <= 11) {
+      setAccountNumber(numericValue);
+    }
+  };
+
+  // Format amount
+  const formatAmount = (value) => {
+    const numericValue = value.replace(/[^0-9]/g, '');
+    if (numericValue.length <= 6) {
+      setAmount(numericValue);
+    }
+  };
+
   const selectedMethod = paymentMethods.find(m => m.id === method);
 
-  return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView 
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <LinearGradient
-          colors={['#1a237e', '#283593']}
-          style={styles.header}
-        >
-          <View style={styles.headerTop}>
-            <TouchableOpacity 
-              onPress={() => navigation.goBack()}
-              style={styles.backButton}
-            >
-              <Ionicons name="arrow-back" size={24} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>উইথড্র মানি</Text>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {/* Balance Info */}
-          <View style={styles.balanceInfo}>
-            <Text style={styles.balanceLabel}>বর্তমান ব্যালেন্স</Text>
-            <Text style={styles.balanceAmount}>৳ {availableBalance.toLocaleString('bn-BD')}</Text>
-            <Text style={styles.balanceNote}>
-              ন্যূনতম: ৳১০০ | সর্বোচ্চ: ৳২৫,০০০
+  // Render withdrawal history item
+  const renderWithdrawalItem = (item) => {
+    const statusColors = {
+      pending: '#FFA500',
+      approved: '#4CAF50',
+      rejected: '#ff4444',
+      completed: '#4CAF50'
+    };
+    
+    const statusText = {
+      pending: 'পেন্ডিং',
+      approved: 'এপ্রুভড',
+      rejected: 'রিজেক্টেড',
+      completed: 'সম্পন্ন'
+    };
+    
+    return (
+      <View key={item.id} style={styles.historyItem}>
+        <View style={styles.historyHeader}>
+          <View style={styles.historyLeft}>
+            <FontAwesome5 
+              name={paymentMethods.find(m => m.id === item.payment_method)?.icon || 'money-bill'} 
+              size={16} 
+              color="#667eea" 
+            />
+            <Text style={styles.historyMethod}>
+              {item.payment_method?.toUpperCase()}
             </Text>
           </View>
-        </LinearGradient>
-
-        {/* Payment Methods */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>পেমেন্ট মেথড সিলেক্ট করুন</Text>
-          <View style={styles.methodsGrid}>
-            {paymentMethods.map((paymentMethod) => (
-              <TouchableOpacity
-                key={paymentMethod.id}
-                style={[
-                  styles.methodButton,
-                  method === paymentMethod.id && styles.methodButtonActive,
-                  { borderColor: paymentMethod.color }
-                ]}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setMethod(paymentMethod.id);
-                }}
-                disabled={loading}
-              >
-                <View style={[
-                  styles.methodIconContainer,
-                  { backgroundColor: `${paymentMethod.color}20` }
-                ]}>
-                  <Text style={styles.methodIcon}>{paymentMethod.icon}</Text>
-                </View>
-                <Text style={[
-                  styles.methodName,
-                  method === paymentMethod.id && { color: paymentMethod.color }
-                ]}>
-                  {paymentMethod.name}
-                </Text>
-                <Text style={styles.methodLimit}>
-                  ৳{paymentMethod.minAmount}-{paymentMethod.maxAmount}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <Text style={styles.historyAmount}>৳{item.amount}</Text>
+        </View>
+        
+        <View style={styles.historyDetails}>
+          <Text style={styles.historyAccount}>{item.account_details?.phone}</Text>
+          <Text style={styles.historyDate}>
+            {new Date(item.date).toLocaleDateString('bn-BD')}
+          </Text>
+        </View>
+        
+        <View style={styles.historyStatus}>
+          <View style={[
+            styles.statusBadge,
+            { backgroundColor: `${statusColors[item.status]}20` }
+          ]}>
+            <Text style={[styles.statusText, { color: statusColors[item.status] }]}>
+              {statusText[item.status] || item.status?.toUpperCase()}
+            </Text>
           </View>
         </View>
+      </View>
+    );
+  };
 
-        {/* Amount Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>উত্তোলনের অ্যামাউন্ট</Text>
-          
-          <View style={styles.amountInputContainer}>
-            <Text style={styles.currencySymbol}>৳</Text>
-            <TextInput
-              style={styles.amountInput}
-              placeholder="অ্যামাউন্ট লিখুন"
-              placeholderTextColor="#999"
-              value={amount}
-              onChangeText={(text) => {
-                const numericText = text.replace(/[^0-9]/g, '');
-                setAmount(numericText);
-              }}
-              keyboardType="numeric"
-              maxLength={6}
-              editable={!loading}
-              selectionColor="#2962ff"
-            />
-            {amount ? (
+  return (
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView 
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView 
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <Animated.View 
+            style={[
+              styles.header,
+              {
+                opacity: fadeAnim,
+                transform: [
+                  { translateY: slideAnim },
+                  { scale: scaleAnim }
+                ]
+              }
+            ]}
+          >
+            <View style={styles.headerTop}>
               <TouchableOpacity 
-                onPress={() => setAmount('')}
-                style={styles.clearButton}
+                onPress={() => navigation.goBack()}
+                style={styles.backButton}
               >
-                <Ionicons name="close-circle" size={20} color="#999" />
+                <Ionicons name="arrow-back" size={24} color="white" />
               </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* Eligibility Warning */}
-          {!eligibility.eligible && eligibility.errors.length > 0 && (
-            <View style={styles.warningBox}>
-              <Ionicons name="warning" size={16} color="#FF6B6B" />
-              <Text style={styles.warningText}>
-                {eligibility.errors[0]}
-              </Text>
+              <Text style={styles.headerTitle}>উইথড্র মানি</Text>
+              <TouchableOpacity 
+                style={styles.historyButton}
+                onPress={() => setShowHistory(true)}
+              >
+                <Ionicons name="time-outline" size={24} color="white" />
+              </TouchableOpacity>
             </View>
-          )}
+
+            {/* Balance Card */}
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.balanceCard}
+            >
+              <Text style={styles.balanceLabel}>Available Balance</Text>
+              <Text style={styles.balanceAmount}>৳ {availableBalance.toLocaleString()}</Text>
+              
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>৳{stats.totalWithdrawn?.toLocaleString() || '0'}</Text>
+                  <Text style={styles.statLabel}>Total Withdrawn</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{stats.pendingWithdrawals || 0}</Text>
+                  <Text style={styles.statLabel}>Pending</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{stats.completedWithdrawals || 0}</Text>
+                  <Text style={styles.statLabel}>Completed</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </Animated.View>
 
           {/* Quick Amounts */}
-          <Text style={styles.quickAmountsTitle}>দ্রুত সিলেকশন</Text>
-          <View style={styles.quickAmounts}>
-            {quickAmounts.map((quickAmount) => (
-              <TouchableOpacity
-                key={quickAmount}
-                style={[
-                  styles.quickAmountButton,
-                  amount === quickAmount.toString() && styles.quickAmountActive,
-                  quickAmount > availableBalance && styles.quickAmountDisabled
-                ]}
-                onPress={() => {
-                  if (quickAmount <= availableBalance) {
+          <View style={styles.quickAmountsContainer}>
+            <Text style={styles.sectionTitle}>Quick Select</Text>
+            <View style={styles.quickAmountsRow}>
+              {quickAmounts.map((quickAmount) => (
+                <TouchableOpacity
+                  key={quickAmount}
+                  style={[
+                    styles.quickAmountButton,
+                    amount === quickAmount.toString() && styles.quickAmountButtonActive
+                  ]}
+                  onPress={() => {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setAmount(quickAmount.toString());
-                  }
-                }}
-                disabled={loading || quickAmount > availableBalance}
-              >
-                <Text style={[
-                  styles.quickAmountText,
-                  quickAmount > availableBalance && styles.quickAmountTextDisabled
-                ]}>
-                  ৳{quickAmount}
-                </Text>
-              </TouchableOpacity>
-            ))}
+                  }}
+                >
+                  <Text style={[
+                    styles.quickAmountText,
+                    amount === quickAmount.toString() && styles.quickAmountTextActive
+                  ]}>
+                    ৳{quickAmount}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-        </View>
 
-        {/* Account Number */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            আপনার {selectedMethod?.name} নাম্বার
-          </Text>
-          
-          <View style={styles.accountInputContainer}>
-            <Ionicons name="call-outline" size={20} color="#666" style={styles.inputIcon} />
-            <TextInput
-              style={styles.accountInput}
-              placeholder={selectedMethod?.accountPlaceholder || 'মোবাইল নাম্বার'}
-              placeholderTextColor="#999"
-              value={accountNumber}
-              onChangeText={(text) => {
-                const numericText = text.replace(/[^0-9]/g, '');
-                if (numericText.length <= 11) {
-                  setAccountNumber(numericText);
-                }
-              }}
-              keyboardType="phone-pad"
-              maxLength={11}
-              editable={!loading}
-              selectionColor="#2962ff"
-            />
-            {accountNumber ? (
+          {/* Withdrawal Form */}
+          <View style={styles.formCard}>
+            {/* Amount Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                Amount <Text style={styles.required}>*</Text>
+              </Text>
+              <View style={styles.amountInputContainer}>
+                <Text style={styles.currencySymbol}>৳</Text>
+                <TextInput
+                  style={styles.amountInput}
+                  value={amount}
+                  onChangeText={formatAmount}
+                  placeholder="100 - 25,000"
+                  keyboardType="numeric"
+                  maxLength={6}
+                  editable={!loading}
+                />
+              </View>
+              
+              {/* Eligibility Status */}
+              {eligibility && !eligibility.eligible && (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={16} color="#ff4444" />
+                  <Text style={styles.errorText}>
+                    {eligibility.errors[0]}
+                  </Text>
+                </View>
+              )}
+              
+              {eligibility && eligibility.eligible && amount && (
+                <View style={styles.successContainer}>
+                  <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                  <Text style={styles.successText}>
+                    ✓ You can withdraw this amount
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Payment Method */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                Payment Method <Text style={styles.required}>*</Text>
+              </Text>
+              <View style={styles.methodsContainer}>
+                {paymentMethods.map((methodItem) => (
+                  <TouchableOpacity
+                    key={methodItem.id}
+                    style={[
+                      styles.methodButton,
+                      method === methodItem.id && styles.methodButtonActive,
+                      { borderColor: methodItem.color }
+                    ]}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setMethod(methodItem.id);
+                    }}
+                    disabled={loading}
+                  >
+                    <FontAwesome5 
+                      name={methodItem.icon} 
+                      size={20} 
+                      color={method === methodItem.id ? '#fff' : methodItem.color} 
+                    />
+                    <Text style={[
+                      styles.methodText,
+                      method === methodItem.id && styles.methodTextActive
+                    ]}>
+                      {methodItem.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Account Number */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                {selectedMethod?.name} Number <Text style={styles.required}>*</Text>
+              </Text>
+              <View style={styles.accountInputContainer}>
+                <Text style={styles.countryCode}>+88</Text>
+                <TextInput
+                  style={styles.accountInput}
+                  value={accountNumber}
+                  onChangeText={formatPhoneNumber}
+                  placeholder="01XXXXXXXXX"
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                  editable={!loading}
+                />
+              </View>
+              
+              {accountNumber && (accountNumber.length !== 11 || !accountNumber.startsWith('01')) && (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={16} color="#ff4444" />
+                  <Text style={styles.errorText}>
+                    Please enter a valid 11-digit mobile number
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Note */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Note (Optional)</Text>
+              <TextInput
+                style={styles.noteInput}
+                value={note}
+                onChangeText={setNote}
+                placeholder="Add a note for this withdrawal"
+                multiline
+                numberOfLines={3}
+                editable={!loading}
+              />
+            </View>
+
+            {/* Rules */}
+            <View style={styles.rulesContainer}>
+              <Text style={styles.rulesTitle}>📌 Withdrawal Rules:</Text>
+              <View style={styles.ruleItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.ruleText}>Minimum withdrawal: ৳100</Text>
+              </View>
+              <View style={styles.ruleItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.ruleText}>Maximum withdrawal: ৳25,000</Text>
+              </View>
+              <View style={styles.ruleItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.ruleText}>Processing time: 24-48 hours</Text>
+              </View>
+              <View style={styles.ruleItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.ruleText}>No withdrawal fee</Text>
+              </View>
+            </View>
+
+            {/* Submit Button */}
+            <TouchableOpacity
+              style={[
+                styles.withdrawButton,
+                (loading || !amount || !accountNumber || (eligibility && !eligibility.eligible)) && 
+                styles.withdrawButtonDisabled
+              ]}
+              onPress={handleWithdraw}
+              disabled={loading || !amount || !accountNumber || (eligibility && !eligibility.eligible)}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <FontAwesome5 name="paper-plane" size={18} color="#fff" />
+                  <Text style={styles.withdrawButtonText}>Request Withdrawal</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* History Modal */}
+      <Modal
+        visible={showHistory}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowHistory(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Withdrawal History</Text>
               <TouchableOpacity 
-                onPress={() => setAccountNumber('')}
-                style={styles.clearButton}
+                onPress={() => setShowHistory(false)}
+                style={styles.modalCloseButton}
               >
-                <Ionicons name="close-circle" size={20} color="#999" />
+                <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
-            ) : null}
-          </View>
-          <Text style={styles.accountHint}>
-            {selectedMethod?.instructions}
-          </Text>
-        </View>
+            </View>
 
-        {/* Note (Optional) */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>নোট (ঐচ্ছিক)</Text>
-          <TextInput
-            style={styles.noteInput}
-            placeholder="উত্তোলনের জন্য অতিরিক্ত তথ্য..."
-            placeholderTextColor="#999"
-            value={note}
-            onChangeText={setNote}
-            multiline
-            numberOfLines={3}
-            editable={!loading}
-            selectionColor="#2962ff"
-          />
-        </View>
+            <ScrollView style={styles.modalBody}>
+              {recentWithdrawals.length === 0 ? (
+                <View style={styles.emptyHistory}>
+                  <Ionicons name="receipt-outline" size={64} color="#ccc" />
+                  <Text style={styles.emptyHistoryText}>No withdrawal history</Text>
+                  <Text style={styles.emptyHistorySubText}>
+                    Your withdrawal requests will appear here
+                  </Text>
+                </View>
+              ) : (
+                recentWithdrawals.map(renderWithdrawalItem)
+              )}
+            </ScrollView>
 
-        {/* Info Box */}
-        <View style={styles.infoBox}>
-          <Ionicons name="information-circle" size={24} color="#2962ff" />
-          <View style={styles.infoContent}>
-            <Text style={styles.infoTitle}>উত্তোলন প্রক্রিয়া</Text>
-            <Text style={styles.infoText}>
-              • ন্যূনতম উত্তোলন: ৳১০০{'\n'}
-              • প্রসেসিং টাইম: ২-৪ ঘণ্টা{'\n'}
-              • কোনো উত্তোলন ফি নেই{'\n'}
-              • ২৪/৭ সাপোর্ট
-            </Text>
+            <TouchableOpacity
+              style={styles.viewAllButton}
+              onPress={() => {
+                setShowHistory(false);
+                navigation.navigate('TransactionHistory');
+              }}
+            >
+              <Text style={styles.viewAllButtonText}>View All History</Text>
+            </TouchableOpacity>
           </View>
         </View>
-
-        {/* Withdraw Button */}
-        <TouchableOpacity 
-          style={[
-            styles.withdrawButton,
-            (loading || !amount || !accountNumber) && styles.withdrawButtonDisabled
-          ]}
-          onPress={handleWithdraw}
-          disabled={loading || !amount || !accountNumber}
-        >
-          <LinearGradient
-            colors={['#2962ff', '#1a237e']}
-            style={styles.withdrawButtonGradient}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <>
-                <Ionicons name="arrow-up-circle" size={24} color="white" />
-                <Text style={styles.withdrawButtonText}>
-                  উত্তোলন করুন ৳{amount || '০'}
-                </Text>
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
-
-        {/* Support */}
-        <View style={styles.supportBox}>
-          <Ionicons name="headset-outline" size={16} color="#2962ff" />
-          <Text style={styles.supportText}>
-            সাহায্য প্রয়োজন? কল করুন: ০১৭৫১৩৩২৩৮৬
-          </Text>
-        </View>
-      </ScrollView>
+      </Modal>
 
       {/* Confirmation Modal */}
       <Modal
@@ -484,88 +651,85 @@ const WithdrawScreen = ({ navigation, route }) => {
         animationType="fade"
         onRequestClose={() => setShowConfirmation(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
+        <View style={styles.confirmationModal}>
+          <View style={styles.confirmationContent}>
+            <View style={styles.confirmationHeader}>
               <Ionicons name="checkmark-circle" size={40} color="#4CAF50" />
-              <Text style={styles.modalTitle}>উত্তোলন নিশ্চিত করুন</Text>
+              <Text style={styles.confirmationTitle}>Confirm Withdrawal</Text>
             </View>
-
-            <View style={styles.modalBody}>
+            
+            <View style={styles.confirmationBody}>
               <View style={styles.confirmationDetail}>
-                <Text style={styles.confirmationLabel}>অ্যামাউন্ট:</Text>
+                <Text style={styles.confirmationLabel}>Amount:</Text>
                 <Text style={styles.confirmationValue}>৳{amount}</Text>
               </View>
               
               <View style={styles.confirmationDetail}>
-                <Text style={styles.confirmationLabel}>মেথড:</Text>
+                <Text style={styles.confirmationLabel}>Method:</Text>
                 <Text style={styles.confirmationValue}>{selectedMethod?.name}</Text>
               </View>
               
               <View style={styles.confirmationDetail}>
-                <Text style={styles.confirmationLabel}>অ্যাকাউন্ট:</Text>
+                <Text style={styles.confirmationLabel}>Account:</Text>
                 <Text style={styles.confirmationValue}>{accountNumber}</Text>
               </View>
               
+              {note && (
+                <View style={styles.confirmationDetail}>
+                  <Text style={styles.confirmationLabel}>Note:</Text>
+                  <Text style={styles.confirmationValue}>{note}</Text>
+                </View>
+              )}
+              
               <Text style={styles.confirmationNote}>
-                আপনি উত্তোলন রিকোয়েস্ট করছেন। এপ্রুভালের জন্য ২-৪ ঘণ্টা সময় লাগতে পারে।
+                Your money will be sent within 24-48 hours after approval.
               </Text>
             </View>
-
-            <View style={styles.modalActions}>
+            
+            <View style={styles.confirmationActions}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
+                style={[styles.confirmationButton, styles.cancelButton]}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setShowConfirmation(false);
                 }}
                 disabled={loading}
               >
-                <Text style={styles.cancelButtonText}>বাতিল</Text>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               
               <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
+                style={[styles.confirmationButton, styles.confirmButton]}
                 onPress={confirmWithdrawal}
                 disabled={loading}
               >
                 {loading ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={styles.confirmButtonText}>নিশ্চিত করুন</Text>
+                  <Text style={styles.confirmButtonText}>Confirm</Text>
                 )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-
-      {/* Loading Overlay */}
-      {loading && (
-        <View style={styles.loadingOverlay}>
-          <View style={styles.loadingContent}>
-            <ActivityIndicator size="large" color="#2962ff" />
-            <Text style={styles.loadingText}>উত্তোলন প্রসেস হচ্ছে...</Text>
-            <Text style={styles.loadingSubText}>অনুগ্রহ করে অপেক্ষা করুন</Text>
-          </View>
-        </View>
-      )}
-    </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0c23',
+    backgroundColor: '#f8f9fa',
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 30,
   },
   header: {
     paddingHorizontal: 20,
     paddingTop: 60,
-    paddingBottom: 30,
+    paddingBottom: 20,
+    backgroundColor: '#667eea',
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
   },
@@ -582,281 +746,408 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
     color: 'white',
-    textAlign: 'center',
-    flex: 1,
   },
-  balanceInfo: {
-    alignItems: 'center',
+  historyButton: {
+    padding: 5,
+  },
+  balanceCard: {
+    padding: 20,
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
   },
   balanceLabel: {
-    color: '#b0b8ff',
-    fontSize: 16,
-    marginBottom: 8,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
   },
   balanceAmount: {
+    color: '#fff',
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#FFD700',
-    marginBottom: 8,
+    marginTop: 5,
   },
-  balanceNote: {
-    color: '#90caf9',
-    fontSize: 12,
-    textAlign: 'center',
-  },
-  section: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    margin: 16,
-    marginTop: 10,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  sectionTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  methodsGrid: {
+  statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginTop: 20,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
   },
-  methodButton: {
+  statItem: {
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
     flex: 1,
-    marginHorizontal: 4,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 2,
   },
-  methodButtonActive: {
-    backgroundColor: 'rgba(41,98,255,0.1)',
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
-  methodIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
+  statValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  quickAmountsContainer: {
+    marginHorizontal: 20,
+    marginTop: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 10,
+  },
+  quickAmountsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+  },
+  quickAmountButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    marginBottom: 10,
+    minWidth: '30%',
     alignItems: 'center',
+  },
+  quickAmountButtonActive: {
+    backgroundColor: '#667eea',
+    borderColor: '#667eea',
+  },
+  quickAmountText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  quickAmountTextActive: {
+    color: '#fff',
+  },
+  formCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 30,
+    padding: 20,
+    borderRadius: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
     marginBottom: 8,
   },
-  methodIcon: {
-    fontSize: 20,
-  },
-  methodName: {
-    color: '#ccc',
-    fontWeight: 'bold',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  methodLimit: {
-    color: '#FF8A00',
-    fontSize: 10,
-    fontWeight: 'bold',
+  required: {
+    color: '#ff4444',
   },
   amountInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 2,
-    borderColor: '#2962ff',
-    borderRadius: 12,
-    marginBottom: 12,
-    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    overflow: 'hidden',
   },
   currencySymbol: {
-    color: '#2962ff',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginRight: 8,
+    color: '#333',
+    paddingHorizontal: 15,
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 15,
   },
   amountInput: {
     flex: 1,
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-    paddingVertical: 14,
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    paddingHorizontal: 15,
+    paddingVertical: 15,
   },
-  clearButton: {
-    padding: 4,
-  },
-  warningBox: {
+  errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,107,107,0.1)',
-    padding: 12,
+    backgroundColor: '#ffebee',
+    padding: 10,
     borderRadius: 8,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF6B6B',
+    marginTop: 8,
   },
-  warningText: {
-    color: '#FF6B6B',
-    fontSize: 12,
+  errorText: {
+    color: '#d32f2f',
+    fontSize: 14,
     marginLeft: 8,
     flex: 1,
   },
-  quickAmountsTitle: {
-    color: '#b0b8ff',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  quickAmounts: {
+  successContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    backgroundColor: '#e8f5e9',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  successText: {
+    color: '#2e7d32',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  methodsContainer: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  quickAmountButton: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 10,
-    minWidth: '30%',
+  methodButton: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'transparent',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    marginHorizontal: 5,
   },
-  quickAmountActive: {
-    borderColor: '#2962ff',
-    backgroundColor: 'rgba(41,98,255,0.2)',
+  methodButtonActive: {
+    backgroundColor: '#667eea',
   },
-  quickAmountDisabled: {
-    opacity: 0.5,
-  },
-  quickAmountText: {
-    color: 'white',
-    fontWeight: 'bold',
+  methodText: {
     fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
-  quickAmountTextDisabled: {
-    color: '#666',
+  methodTextActive: {
+    color: '#fff',
   },
   accountInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 2,
-    borderColor: '#2962ff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    overflow: 'hidden',
   },
-  inputIcon: {
-    marginRight: 8,
+  countryCode: {
+    fontSize: 16,
+    color: '#333',
+    paddingHorizontal: 15,
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 15,
   },
   accountInput: {
     flex: 1,
-    color: 'white',
     fontSize: 16,
-    paddingVertical: 14,
-  },
-  accountHint: {
-    color: '#90caf9',
-    fontSize: 12,
-    marginTop: 4,
+    color: '#333',
+    paddingHorizontal: 15,
+    paddingVertical: 15,
   },
   noteInput: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#f8f9fa',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 12,
-    padding: 16,
-    color: 'white',
-    fontSize: 14,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
     minHeight: 80,
     textAlignVertical: 'top',
   },
-  infoBox: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(41,98,255,0.1)',
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2962ff',
+  rulesContainer: {
+    backgroundColor: '#f0f7ff',
+    padding: 15,
+    borderRadius: 10,
+    marginTop: 10,
   },
-  infoContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  infoTitle: {
-    color: '#2962ff',
-    fontWeight: 'bold',
-    marginBottom: 6,
+  rulesTitle: {
     fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
   },
-  infoText: {
-    color: '#b0b8ff',
-    fontSize: 12,
-    lineHeight: 18,
+  ruleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  ruleText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
   },
   withdrawButton: {
-    margin: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#2962ff',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    backgroundColor: '#667eea',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 10,
+    marginTop: 20,
   },
   withdrawButtonDisabled: {
-    opacity: 0.6,
-  },
-  withdrawButtonGradient: {
-    padding: 20,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
+    backgroundColor: '#a0a0a0',
   },
   withdrawButtonText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+    marginLeft: 10,
   },
-  supportBox: {
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  emptyHistory: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
-    gap: 8,
+    paddingVertical: 40,
   },
-  supportText: {
-    color: '#2962ff',
+  emptyHistoryText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#999',
+    marginTop: 16,
+  },
+  emptyHistorySubText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 8,
+  },
+  historyItem: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 10,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  historyLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  historyMethod: {
     fontSize: 14,
     fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
   },
-  modalOverlay: {
+  historyAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  historyDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  historyAccount: {
+    fontSize: 14,
+    color: '#666',
+  },
+  historyDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  historyStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  viewAllButton: {
+    backgroundColor: '#667eea',
+    marginHorizontal: 20,
+    marginBottom: 20,
+    paddingVertical: 15,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  viewAllButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmationModal: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  modalContent: {
-    backgroundColor: '#1a1f3d',
+  confirmationContent: {
+    backgroundColor: '#fff',
     borderRadius: 20,
     padding: 24,
     width: '100%',
     maxWidth: 400,
   },
-  modalHeader: {
+  confirmationHeader: {
     alignItems: 'center',
     marginBottom: 20,
   },
-  modalTitle: {
-    color: 'white',
+  confirmationTitle: {
     fontSize: 20,
     fontWeight: 'bold',
+    color: '#333',
     marginTop: 12,
   },
-  modalBody: {
+  confirmationBody: {
     marginBottom: 20,
   },
   confirmationDetail: {
@@ -866,79 +1157,49 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: '#e0e0e0',
   },
   confirmationLabel: {
-    color: '#b0b8ff',
+    color: '#666',
     fontSize: 14,
   },
   confirmationValue: {
-    color: 'white',
+    color: '#333',
     fontSize: 16,
     fontWeight: 'bold',
   },
   confirmationNote: {
-    color: '#90caf9',
+    color: '#666',
     fontSize: 12,
     textAlign: 'center',
     marginTop: 16,
-    lineHeight: 16,
+    fontStyle: 'italic',
   },
-  modalActions: {
+  confirmationActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  modalButton: {
+  confirmationButton: {
     flex: 1,
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
   },
   cancelButton: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 1,
-    borderColor: '#666',
+    backgroundColor: '#f0f0f0',
   },
   confirmButton: {
     backgroundColor: '#4CAF50',
   },
   cancelButtonText: {
-    color: 'white',
+    color: '#333',
     fontSize: 16,
     fontWeight: 'bold',
   },
   confirmButtonText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingContent: {
-    backgroundColor: '#1a1f3d',
-    padding: 30,
-    borderRadius: 20,
-    alignItems: 'center',
-    width: '80%',
-  },
-  loadingText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  loadingSubText: {
-    color: '#b0b8ff',
-    fontSize: 14,
   },
 });
 

@@ -1,14 +1,13 @@
-// controllers/withdrawalController.js - COMPLETE FIXED VERSION
+// controllers/withdrawalController.js - COMPLETE WITHDRAWAL CONTROLLER
 const mongoose = require('mongoose');
-const { Withdrawal, Wallet, Transaction } = require('../models/Wallet');
+const { Wallet, Transaction } = require('../models/Wallet');
+const Withdrawal = require('../models/withdrawal');
 const User = require('../models/User');
 
-/**
- * Request withdrawal
- */
+// 🔹 REQUEST WITHDRAWAL (USER)
 exports.requestWithdrawal = async (req, res) => {
   try {
-    const { amount, payment_method, account_details = {}, user_note = '' } = req.body;
+    const { amount, payment_method, account_details = {}, user_note = '', withdrawal_type = 'manual' } = req.body;
     const userId = req.user.userId;
 
     // Validation
@@ -22,10 +21,17 @@ exports.requestWithdrawal = async (req, res) => {
     const parsedAmount = parseFloat(amount);
 
     // Check minimum and maximum
-    if (parsedAmount < 100 || parsedAmount > 25000) {
+    if (parsedAmount < 100) {
       return res.status(400).json({
         success: false,
-        message: 'Withdrawal amount must be between ৳100 and ৳25,000'
+        message: 'Minimum withdrawal amount is ৳100'
+      });
+    }
+
+    if (parsedAmount > 25000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Maximum withdrawal amount is ৳25,000'
       });
     }
 
@@ -44,6 +50,32 @@ exports.requestWithdrawal = async (req, res) => {
         success: false,
         message: 'Please provide a valid 11-digit mobile number starting with 01'
       });
+    }
+
+    // Check if auto withdrawal is requested (for future)
+    if (withdrawal_type === 'auto') {
+      return res.status(400).json({
+        success: false,
+        message: 'Auto withdrawal is currently disabled. Please use manual withdrawal.'
+      });
+      
+      /* 🔹 FUTURE AUTO WITHDRAWAL CODE (COMMENTED)
+      // Check auto withdrawal availability
+      const wallet = await Wallet.findOne({ user_id: userId });
+      if (!wallet.settings.auto_withdraw) {
+        return res.status(400).json({
+          success: false,
+          message: 'Auto withdrawal is not enabled in your settings'
+        });
+      }
+      
+      if (parsedAmount > 10000) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum auto withdrawal amount is ৳10,000'
+        });
+      }
+      */
     }
 
     // Get user's wallet
@@ -70,12 +102,13 @@ exports.requestWithdrawal = async (req, res) => {
       payment_method,
       account_details,
       user_note,
+      withdrawal_type,
       status: 'pending'
     });
 
     await withdrawal.save();
 
-    // Debit from wallet
+    // Debit from wallet immediately
     wallet.balance -= parsedAmount;
     wallet.total_spent += parsedAmount;
     wallet.last_activity = new Date();
@@ -89,21 +122,48 @@ exports.requestWithdrawal = async (req, res) => {
       description: `Withdrawal request to ${payment_method}`,
       status: 'pending',
       method: payment_method,
+      related_to: withdrawal._id,
+      related_model: 'Withdrawal',
       metadata: {
         withdrawalId: withdrawal._id,
         account_number: account_details.phone,
-        user_note
+        user_note,
+        withdrawal_type
       }
     });
 
     await transaction.save();
 
+    // If auto withdrawal, process immediately (for future)
+    /*
+    if (withdrawal_type === 'auto') {
+      try {
+        await withdrawal.processAuto();
+        
+        // Update transaction status
+        transaction.status = 'completed';
+        transaction.description = `Auto withdrawal to ${payment_method}`;
+        await transaction.save();
+        
+        // Update wallet withdrawn total
+        wallet.total_withdrawn += parsedAmount;
+        await wallet.save();
+      } catch (error) {
+        console.error('Auto withdrawal failed:', error);
+        // If auto fails, revert to manual
+        withdrawal.status = 'pending';
+        withdrawal.withdrawal_type = 'manual';
+        await withdrawal.save();
+      }
+    }
+    */
+
     // Populate user data for response
-    const user = await User.findById(userId).select('name email phone');
+    const user = await User.findById(userId).select('name email phone username');
     
     return res.status(201).json({
       success: true,
-      message: 'Withdrawal request submitted successfully',
+      message: 'Withdrawal request submitted successfully! Admin will process it soon.',
       data: {
         withdrawal: {
           ...withdrawal.toObject(),
@@ -124,9 +184,7 @@ exports.requestWithdrawal = async (req, res) => {
   }
 };
 
-/**
- * Get user's withdrawals
- */
+// 🔹 GET USER WITHDRAWALS
 exports.getUserWithdrawals = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -141,10 +199,14 @@ exports.getUserWithdrawals = async (req, res) => {
       .skip((parseInt(page) - 1) * parseInt(limit));
 
     const total = await Withdrawal.countDocuments(filter);
+    
+    // Get wallet balance
+    const wallet = await Wallet.findOne({ user_id: userId });
 
     return res.json({
       success: true,
       data: withdrawals,
+      wallet_balance: wallet?.balance || 0,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -162,9 +224,7 @@ exports.getUserWithdrawals = async (req, res) => {
   }
 };
 
-/**
- * Get user withdrawal stats
- */
+// 🔹 GET USER WITHDRAWAL STATS
 exports.getWithdrawalStats = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -194,7 +254,8 @@ exports.getWithdrawalStats = async (req, res) => {
         pending_withdrawals: pending,
         approved_withdrawals: approved,
         rejected_withdrawals: rejected,
-        total_withdrawn: totalWithdrawn
+        total_withdrawn: totalWithdrawn,
+        can_withdraw: wallet?.balance >= 100
       }
     });
   } catch (error) {
@@ -207,9 +268,7 @@ exports.getWithdrawalStats = async (req, res) => {
   }
 };
 
-/**
- * Admin: Get pending withdrawals
- */
+// 🔹 GET PENDING WITHDRAWALS (ADMIN)
 exports.getPendingWithdrawals = async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
@@ -221,10 +280,18 @@ exports.getPendingWithdrawals = async (req, res) => {
       .skip((parseInt(page) - 1) * parseInt(limit));
 
     const total = await Withdrawal.countDocuments({ status: 'pending' });
+    
+    // Calculate total pending amount
+    const totalAmount = withdrawals.reduce((sum, w) => sum + w.amount, 0);
 
     return res.json({
       success: true,
       data: withdrawals,
+      summary: {
+        total_pending: total,
+        total_amount: totalAmount,
+        average_amount: total > 0 ? totalAmount / total : 0
+      },
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -242,48 +309,146 @@ exports.getPendingWithdrawals = async (req, res) => {
   }
 };
 
-/**
- * Admin: Get withdrawal analytics
- */
+// 🔹 GET ALL WITHDRAWALS (ADMIN - FOR HISTORY)
+exports.getAdminWithdrawals = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, status, startDate, endDate, payment_method } = req.query;
+
+    const filter = {};
+    
+    if (status && status !== 'all') filter.status = status;
+    if (payment_method && payment_method !== 'all') filter.payment_method = payment_method;
+    
+    // Date filter
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const withdrawals = await Withdrawal.find(filter)
+      .populate('user_id', 'name email phone username avatar')
+      .populate('approved_by', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+
+    const total = await Withdrawal.countDocuments(filter);
+    
+    // Calculate totals
+    const totals = await Withdrawal.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    return res.json({
+      success: true,
+      data: withdrawals,
+      summary: {
+        total_count: total,
+        total_amount: totals[0]?.totalAmount || 0,
+        average_amount: total > 0 ? (totals[0]?.totalAmount || 0) / total : 0
+      },
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get admin withdrawals error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch withdrawals',
+      error: error.message
+    });
+  }
+};
+
+// 🔹 GET WITHDRAWAL ANALYTICS (ADMIN)
 exports.getWithdrawalAnalytics = async (req, res) => {
   try {
-    const [totalPending, totalApproved, totalRejected] = await Promise.all([
+    // Get counts by status
+    const [pending, approved, rejected, processing, completed] = await Promise.all([
       Withdrawal.countDocuments({ status: 'pending' }),
       Withdrawal.countDocuments({ status: 'approved' }),
-      Withdrawal.countDocuments({ status: 'rejected' })
+      Withdrawal.countDocuments({ status: 'rejected' }),
+      Withdrawal.countDocuments({ status: 'processing' }),
+      Withdrawal.countDocuments({ status: 'completed' })
     ]);
 
-    // Calculate total amounts
-    const pendingAgg = await Withdrawal.aggregate([
-      { $match: { status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
+    // Get amounts by status
+    const amountAggregation = await Withdrawal.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          totalAmount: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
     ]);
 
-    const approvedAgg = await Withdrawal.aggregate([
-      { $match: { status: 'approved' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-
-    // Recent pending withdrawals
-    const recentPending = await Withdrawal.find({ status: 'pending' })
+    // Get recent withdrawals
+    const recentWithdrawals = await Withdrawal.find()
       .populate('user_id', 'name email phone')
       .sort({ createdAt: -1 })
-      .limit(5);
+      .limit(10);
+
+    // Get today's statistics
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayStats = await Withdrawal.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: today }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    // Get method distribution
+    const methodDistribution = await Withdrawal.aggregate([
+      {
+        $group: {
+          _id: '$payment_method',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' }
+        }
+      }
+    ]);
 
     return res.json({
       success: true,
       data: {
         counts: {
-          pending: totalPending,
-          approved: totalApproved,
-          rejected: totalRejected,
-          total: totalPending + totalApproved + totalRejected
+          pending,
+          approved,
+          rejected,
+          processing,
+          completed,
+          total: pending + approved + rejected + processing + completed
         },
-        amounts: {
-          pending: pendingAgg[0]?.total || 0,
-          approved: approvedAgg[0]?.total || 0
+        amounts: amountAggregation,
+        today: {
+          count: todayStats[0]?.count || 0,
+          amount: todayStats[0]?.totalAmount || 0
         },
-        recent_pending: recentPending
+        recent_withdrawals: recentWithdrawals,
+        method_distribution: methodDistribution
       }
     });
   } catch (error) {
@@ -296,9 +461,7 @@ exports.getWithdrawalAnalytics = async (req, res) => {
   }
 };
 
-/**
- * Admin: Approve withdrawal
- */
+// 🔹 APPROVE WITHDRAWAL (ADMIN - MANUAL)
 exports.approveWithdrawal = async (req, res) => {
   try {
     const { id } = req.params;
@@ -323,14 +486,15 @@ exports.approveWithdrawal = async (req, res) => {
     }
 
     // Update withdrawal status
-    withdrawal.status = 'approved';
-    withdrawal.transaction_id = transaction_id;
-    withdrawal.approved_by = adminId;
-    withdrawal.approved_at = new Date();
-    withdrawal.admin_notes = admin_notes;
-    withdrawal.processed_at = new Date();
+    await withdrawal.approve(adminId, transaction_id, admin_notes);
 
-    await withdrawal.save();
+    // Update wallet's total withdrawn
+    const wallet = await Wallet.findOne({ user_id: withdrawal.user_id });
+    if (wallet) {
+      wallet.total_withdrawn += withdrawal.amount;
+      wallet.last_activity = new Date();
+      await wallet.save();
+    }
 
     // Update transaction status
     await Transaction.findOneAndUpdate(
@@ -368,9 +532,7 @@ exports.approveWithdrawal = async (req, res) => {
   }
 };
 
-/**
- * Admin: Reject withdrawal
- */
+// 🔹 REJECT WITHDRAWAL (ADMIN)
 exports.rejectWithdrawal = async (req, res) => {
   try {
     const { id } = req.params;
@@ -422,13 +584,7 @@ exports.rejectWithdrawal = async (req, res) => {
     }
 
     // Update withdrawal status
-    withdrawal.status = 'rejected';
-    withdrawal.approved_by = adminId;
-    withdrawal.approved_at = new Date();
-    withdrawal.admin_notes = admin_notes;
-    withdrawal.processed_at = new Date();
-
-    await withdrawal.save();
+    await withdrawal.reject(adminId, admin_notes);
 
     // Update original transaction status
     await Transaction.findOneAndUpdate(
@@ -461,6 +617,85 @@ exports.rejectWithdrawal = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to reject withdrawal',
+      error: error.message
+    });
+  }
+};
+
+// 🔹 PROCESS AUTO WITHDRAWALS (ADMIN - FOR FUTURE)
+exports.processAutoWithdrawals = async (req, res) => {
+  try {
+    // This is for future auto withdrawal processing
+    // Currently returns a message that auto withdrawal is not enabled
+    
+    return res.json({
+      success: true,
+      message: 'Auto withdrawal processing endpoint',
+      note: 'Auto withdrawal system is not enabled yet. When you integrate payment gateway, uncomment the code in withdrawalController.js',
+      processed: 0
+    });
+    
+    /* 🔹 FUTURE AUTO PROCESSING CODE (COMMENTED)
+    const pendingAutoWithdrawals = await Withdrawal.find({
+      status: 'pending',
+      withdrawal_type: 'auto',
+      createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+    }).limit(10);
+    
+    let processed = 0;
+    let failed = 0;
+    
+    for (const withdrawal of pendingAutoWithdrawals) {
+      try {
+        await withdrawal.processAuto();
+        processed++;
+      } catch (error) {
+        console.error(`Auto processing failed for ${withdrawal._id}:`, error);
+        failed++;
+      }
+    }
+    
+    return res.json({
+      success: true,
+      message: `Auto processing completed`,
+      data: {
+        processed,
+        failed,
+        total: pendingAutoWithdrawals.length
+      }
+    });
+    */
+    
+  } catch (error) {
+    console.error('❌ Process auto withdrawals error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to process auto withdrawals',
+      error: error.message
+    });
+  }
+};
+
+// 🔹 TOGGLE AUTO WITHDRAWAL SYSTEM (ADMIN)
+exports.toggleAutoWithdrawal = async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    
+    // This would enable/disable auto withdrawal system
+    // For now, just return a success message
+    
+    return res.json({
+      success: true,
+      message: `Auto withdrawal system would be ${enabled ? 'enabled' : 'disabled'}`,
+      note: 'This feature is not implemented yet. When you have payment gateway API, implement this functionality.',
+      auto_enabled: false
+    });
+    
+  } catch (error) {
+    console.error('❌ Toggle auto withdrawal error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to toggle auto withdrawal',
       error: error.message
     });
   }

@@ -1,4 +1,4 @@
-// screens/TransactionHistoryScreen.js - REAL-TIME DATA + LARGER TABS
+// screens/TransactionHistoryScreen.js - FIXED VERSION
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -13,23 +13,24 @@ import {
   Dimensions,
   SafeAreaView,
   StatusBar,
-  Modal
+  Modal,
+  Alert
 } from 'react-native';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
-import { LinearGradient } from 'expo-linear-gradient';
+import { walletAPI } from '../api/walletAPI';
 import * as Haptics from 'expo-haptics';
 
 const { width } = Dimensions.get('window');
-const API_URL = 'https://xoss.onrender.com/api'; // ✅ রিয়েল API URL
+const API_URL = 'https://xoss.onrender.com/api';
 
 const TransactionHistoryScreen = ({ navigation }) => {
-  const { user, token } = useAuth();
+  const { user, token, isAuthenticated } = useAuth();
   
-  // ✅ FIXED: Animated values with useRef
+  // ✅ FIXED: Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
   
   const [transactions, setTransactions] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -42,67 +43,84 @@ const TransactionHistoryScreen = ({ navigation }) => {
     totalWithdraw: 0,
     totalWin: 0,
     totalEntry: 0,
-    totalTransfer: 0
+    totalTransfer: 0,
+    totalBonus: 0,
+    totalRefund: 0
   });
 
-  // ✅ বড় ট্যাব অপশন - হাইড্রেটেড ডিজাইন
+  // ✅ ফিল্টার অপশন - API response types অনুযায়ী
   const filters = [
     { id: 'all', label: 'সব ট্রানজেকশন', icon: 'list', color: '#ff8a00' },
     { id: 'deposit', label: 'ডিপোজিট', icon: 'arrow-down-circle', color: '#4CAF50' },
-    { id: 'withdraw', label: 'উইথড্র', icon: 'arrow-up-circle', color: '#FF6B35' },
+    { id: 'withdrawal', label: 'উইথড্র', icon: 'arrow-up-circle', color: '#FF6B35' },
     { id: 'win', label: 'টুর্নামেন্ট জয়', icon: 'trophy', color: '#9C27B0' },
-    { id: 'entry', label: 'এন্ট্রি ফি', icon: 'game-controller', color: '#FF9800' },
+    { id: 'entry_fee', label: 'এন্ট্রি ফি', icon: 'game-controller', color: '#FF9800' },
+    { id: 'prize', label: 'প্রাইজ', icon: 'gift', color: '#9C27B0' },
+    { id: 'bonus', label: 'বোনাস', icon: 'star', color: '#FFD700' },
     { id: 'transfer', label: 'ট্রান্সফার', icon: 'swap-horizontal', color: '#2196F3' },
   ];
 
-  // ✅ রিয়েল-টাইম ডেটা লোড করার ফাংশন
+  // ✅ API থেকে রিয়েল ডেটা লোড
   const loadTransactions = async () => {
     try {
       setLoading(true);
       
-      // ✅ API থেকে ডেটা ফেচ করুন
-      const response = await fetch(`${API_URL}/wallet/transactions`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
+      if (!isAuthenticated || !token) {
+        Alert.alert('লগইন করুন', 'দয়া করে লগইন করুন');
+        return;
+      }
 
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.success && data.transactions) {
-          // ✅ ডেটা ফরম্যাট করুন
-          const formattedTransactions = data.transactions.map(tx => ({
-            id: tx._id || tx.id,
-            type: tx.type || 'deposit',
+      // ✅ walletAPI ব্যবহার করে ডেটা ফেচ করুন
+      const response = await walletAPI.getTransactions(1, 50);
+      
+      if (response.success) {
+        // ✅ API response format আপনার Wallet model অনুযায়ী
+        const formattedTransactions = (response.data?.transactions || []).map(tx => {
+          // Type mapping based on your Wallet model
+          let displayType = tx.type;
+          let displayDescription = tx.description || 'ট্রানজেকশন';
+          
+          // Type mapping for UI
+          if (tx.type === 'credit' && tx.description?.includes('deposit')) {
+            displayType = 'deposit';
+          } else if (tx.type === 'debit' && tx.description?.includes('withdrawal')) {
+            displayType = 'withdrawal';
+          } else if (tx.type === 'credit' && tx.description?.includes('prize')) {
+            displayType = 'win';
+          } else if (tx.type === 'debit' && tx.description?.includes('entry')) {
+            displayType = 'entry_fee';
+          } else if (tx.type === 'bonus') {
+            displayType = 'bonus';
+          } else if (tx.type === 'transfer') {
+            displayType = 'transfer';
+          }
+          
+          return {
+            id: tx._id || tx.id || `tx_${Date.now()}_${Math.random()}`,
+            type: displayType,
             amount: tx.amount || 0,
-            description: tx.description || 'ট্রানজেকশন',
-            date: new Date(tx.createdAt || tx.date),
+            description: displayDescription,
+            date: new Date(tx.createdAt || tx.date || Date.now()),
             status: tx.status || 'completed',
-            transactionId: tx.transactionId || tx._id,
-            gameName: tx.gameName || tx.tournamentName || null,
-            method: tx.method || tx.paymentMethod || null,
-            recipient: tx.recipient || tx.receiver || null
-          }));
-          
-          setTransactions(formattedTransactions);
-          
-          // ✅ স্ট্যাটস ক্যালকুলেট করুন
-          calculateStats(formattedTransactions);
-        } else {
-          // Fallback to sample data if API fails
-          console.log('API response not successful, using sample data');
-          loadSampleData();
-        }
+            transactionId: tx._id || tx.id || 'N/A',
+            method: tx.method || null,
+            metadata: tx.metadata || {},
+            gameName: tx.metadata?.tournamentName || tx.metadata?.game || null,
+            recipient: tx.metadata?.recipientName || tx.metadata?.receiver || null
+          };
+        });
+        
+        setTransactions(formattedTransactions);
+        
+        // ✅ স্ট্যাটস ক্যালকুলেশন
+        calculateStats(formattedTransactions);
       } else {
-        console.log('API call failed, using sample data');
+        // Fallback to sample data
         loadSampleData();
       }
     } catch (error) {
       console.error('Error loading transactions:', error);
-      // Fallback to sample data
+      Alert.alert('ত্রুটি', 'ডেটা লোড করতে সমস্যা হচ্ছে। ইন্টারনেট চেক করুন।');
       loadSampleData();
     } finally {
       setLoading(false);
@@ -117,27 +135,29 @@ const TransactionHistoryScreen = ({ navigation }) => {
         id: '1',
         type: 'win',
         amount: 500,
-        description: 'টুর্নামেন্ট জয়',
+        description: 'টুর্নামেন্ট জয় - Free Fire',
         date: new Date('2024-01-20T14:30:00'),
         status: 'completed',
         transactionId: 'TX123456',
-        gameName: 'Free Fire Tournament'
+        gameName: 'Free Fire Tournament',
+        method: 'system'
       },
       {
         id: '2',
-        type: 'entry',
+        type: 'entry_fee',
         amount: -50,
-        description: 'এন্ট্রি ফি',
+        description: 'এন্ট্রি ফি - PUBG Match',
         date: new Date('2024-01-20T13:15:00'),
         status: 'completed',
         transactionId: 'TX123457',
-        gameName: 'PUBG Match'
+        gameName: 'PUBG Match',
+        method: 'wallet'
       },
       {
         id: '3',
         type: 'deposit',
         amount: 1000,
-        description: 'বিকাশ থেকে ডিপোজিট',
+        description: 'ডিপোজিট - বিকাশ',
         date: new Date('2024-01-19T11:20:00'),
         status: 'completed',
         transactionId: 'TX123458',
@@ -145,9 +165,9 @@ const TransactionHistoryScreen = ({ navigation }) => {
       },
       {
         id: '4',
-        type: 'withdraw',
+        type: 'withdrawal',
         amount: -200,
-        description: 'উইথড্র রিকোয়েস্ট',
+        description: 'উইথড্র রিকোয়েস্ট - নগদ',
         date: new Date('2024-01-18T16:45:00'),
         status: 'pending',
         transactionId: 'TX123459',
@@ -155,19 +175,19 @@ const TransactionHistoryScreen = ({ navigation }) => {
       },
       {
         id: '5',
-        type: 'win',
-        amount: 300,
-        description: 'টুর্নামেন্ট জয়',
+        type: 'bonus',
+        amount: 100,
+        description: 'রেফারেল বোনাস',
         date: new Date('2024-01-17T10:30:00'),
         status: 'completed',
         transactionId: 'TX123460',
-        gameName: '8 Ball Pool'
+        method: 'system'
       },
       {
         id: '6',
         type: 'transfer',
         amount: -100,
-        description: 'বন্ধুকে গিফট',
+        description: 'ট্রান্সফার - বন্ধুকে গিফট',
         date: new Date('2024-01-16T09:15:00'),
         status: 'completed',
         transactionId: 'TX123461',
@@ -175,23 +195,23 @@ const TransactionHistoryScreen = ({ navigation }) => {
       },
       {
         id: '7',
-        type: 'deposit',
-        amount: 500,
-        description: 'নগদ থেকে ডিপোজিট',
+        type: 'prize',
+        amount: 300,
+        description: 'প্রাইজ - ডেইলি টুর্নামেন্ট',
         date: new Date('2024-01-15T14:00:00'),
         status: 'completed',
         transactionId: 'TX123462',
-        method: 'Nagad'
+        gameName: '8 Ball Pool'
       },
       {
         id: '8',
-        type: 'entry',
-        amount: -30,
-        description: 'এন্ট্রি ফি',
+        type: 'deposit',
+        amount: 500,
+        description: 'ডিপোজিট - রকেট',
         date: new Date('2024-01-14T12:30:00'),
         status: 'completed',
         transactionId: 'TX123463',
-        gameName: 'Ludo King'
+        method: 'Rocket'
       },
     ];
     
@@ -199,58 +219,79 @@ const TransactionHistoryScreen = ({ navigation }) => {
     calculateStats(sampleTransactions);
   };
 
-  // ✅ স্ট্যাটস ক্যালকুলেট করার ফাংশন
+  // ✅ স্ট্যাটস ক্যালকুলেশন
   const calculateStats = (txList) => {
-    const stats = {
+    const newStats = {
       totalDeposit: 0,
       totalWithdraw: 0,
       totalWin: 0,
       totalEntry: 0,
-      totalTransfer: 0
+      totalTransfer: 0,
+      totalBonus: 0,
+      totalRefund: 0
     };
 
     txList.forEach(tx => {
-      if (tx.type === 'deposit') {
-        stats.totalDeposit += tx.amount;
-      } else if (tx.type === 'withdraw') {
-        stats.totalWithdraw += Math.abs(tx.amount);
-      } else if (tx.type === 'win') {
-        stats.totalWin += tx.amount;
-      } else if (tx.type === 'entry') {
-        stats.totalEntry += Math.abs(tx.amount);
-      } else if (tx.type === 'transfer') {
-        stats.totalTransfer += Math.abs(tx.amount);
+      const amount = Math.abs(tx.amount);
+      
+      switch (tx.type) {
+        case 'deposit':
+          newStats.totalDeposit += tx.amount;
+          break;
+        case 'withdrawal':
+          newStats.totalWithdraw += amount;
+          break;
+        case 'win':
+        case 'prize':
+          newStats.totalWin += tx.amount;
+          break;
+        case 'entry_fee':
+          newStats.totalEntry += amount;
+          break;
+        case 'transfer':
+          newStats.totalTransfer += amount;
+          break;
+        case 'bonus':
+          newStats.totalBonus += tx.amount;
+          break;
+        case 'refund':
+          newStats.totalRefund += tx.amount;
+          break;
       }
     });
 
-    setStats(stats);
+    setStats(newStats);
   };
 
-  // Initialize animations and load data
+  // ✅ Initialize and load data
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    
-    loadTransactions();
-  }, []);
+    if (isAuthenticated) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+      loadTransactions();
+    }
+  }, [isAuthenticated]);
 
-  // Screen focus হলে ডেটা রিফ্রেশ
+  // ✅ Screen focus হলে ডেটা রিফ্রেশ
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      loadTransactions();
+      if (isAuthenticated) {
+        loadTransactions();
+      }
     });
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, isAuthenticated]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -266,10 +307,13 @@ const TransactionHistoryScreen = ({ navigation }) => {
   const getTransactionIcon = (type) => {
     switch (type) {
       case 'deposit': return 'arrow-down-circle';
-      case 'withdraw': return 'arrow-up-circle';
-      case 'win': return 'trophy';
-      case 'entry': return 'game-controller';
+      case 'withdrawal': return 'arrow-up-circle';
+      case 'win':
+      case 'prize': return 'trophy';
+      case 'entry_fee': return 'game-controller';
       case 'transfer': return 'swap-horizontal';
+      case 'bonus': return 'star';
+      case 'refund': return 'refresh-circle';
       default: return 'cash';
     }
   };
@@ -277,31 +321,43 @@ const TransactionHistoryScreen = ({ navigation }) => {
   const getTransactionColor = (type) => {
     switch (type) {
       case 'deposit': return '#4CAF50';
-      case 'withdraw': return '#FF6B35';
-      case 'win': return '#9C27B0';
-      case 'entry': return '#FF9800';
+      case 'withdrawal': return '#FF6B35';
+      case 'win':
+      case 'prize': return '#9C27B0';
+      case 'entry_fee': return '#FF9800';
       case 'transfer': return '#2196F3';
+      case 'bonus': return '#FFD700';
+      case 'refund': return '#00BCD4';
       default: return '#666';
     }
   };
 
+  const getTransactionLabel = (type) => {
+    const filterItem = filters.find(f => f.id === type);
+    return filterItem ? filterItem.label : type;
+  };
+
   const formatDate = (date) => {
-    const now = new Date();
-    const diff = now - date;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor(diff / (1000 * 60));
-    
-    if (minutes < 60) return `${minutes} মিনিট আগে`;
-    if (hours < 24) return `${hours} ঘণ্টা আগে`;
-    if (days === 1) return 'গতকাল';
-    if (days < 7) return `${days} দিন আগে`;
-    
-    return date.toLocaleDateString('bn-BD', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    });
+    try {
+      const now = new Date();
+      const diff = now - date;
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor(diff / (1000 * 60));
+      
+      if (minutes < 60) return `${minutes} মিনিট আগে`;
+      if (hours < 24) return `${hours} ঘণ্টা আগে`;
+      if (days === 1) return 'গতকাল';
+      if (days < 7) return `${days} দিন আগে`;
+      
+      return date.toLocaleDateString('bn-BD', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+    } catch (error) {
+      return 'তারিখ নেই';
+    }
   };
 
   const handleTransactionPress = (transaction) => {
@@ -312,6 +368,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
 
   const renderTransactionItem = ({ item, index }) => {
     const isPositive = item.amount > 0;
+    const transactionType = item.type;
     
     return (
       <TouchableOpacity 
@@ -322,22 +379,26 @@ const TransactionHistoryScreen = ({ navigation }) => {
         <View style={styles.transactionLeft}>
           <View style={[
             styles.iconContainer,
-            { backgroundColor: `${getTransactionColor(item.type)}20` }
+            { backgroundColor: `${getTransactionColor(transactionType)}20` }
           ]}>
             <Ionicons 
-              name={getTransactionIcon(item.type)} 
+              name={getTransactionIcon(transactionType)} 
               size={28} 
-              color={getTransactionColor(item.type)} 
+              color={getTransactionColor(transactionType)} 
             />
           </View>
           <View style={styles.transactionInfo}>
-            <Text style={styles.transactionTitle}>{item.description}</Text>
+            <Text style={styles.transactionTitle} numberOfLines={1}>
+              {item.description}
+            </Text>
             <View style={styles.transactionMeta}>
               <Text style={styles.transactionDate}>{formatDate(item.date)}</Text>
               {item.gameName && (
                 <>
                   <Text style={styles.dot}>•</Text>
-                  <Text style={styles.gameName}>{item.gameName}</Text>
+                  <Text style={styles.gameName} numberOfLines={1}>
+                    {item.gameName}
+                  </Text>
                 </>
               )}
             </View>
@@ -354,11 +415,15 @@ const TransactionHistoryScreen = ({ navigation }) => {
           <View style={[
             styles.statusBadge,
             item.status === 'completed' ? styles.completedBadge : 
-            item.status === 'pending' ? styles.pendingBadge : styles.failedBadge
+            item.status === 'pending' ? styles.pendingBadge : 
+            item.status === 'failed' ? styles.failedBadge :
+            item.status === 'processing' ? styles.processingBadge : styles.completedBadge
           ]}>
             <Text style={styles.statusText}>
               {item.status === 'completed' ? 'সফল' : 
-               item.status === 'pending' ? 'পেন্ডিং' : 'ব্যর্থ'}
+               item.status === 'pending' ? 'পেন্ডিং' : 
+               item.status === 'failed' ? 'ব্যর্থ' :
+               item.status === 'processing' ? 'প্রসেসিং' : item.status}
             </Text>
           </View>
         </View>
@@ -366,7 +431,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
     );
   };
 
-  // ✅ বড় ট্যাব কম্পোনেন্ট
+  // ✅ ফিল্টার ট্যাব কম্পোনেন্ট
   const FilterTab = ({ filterItem }) => {
     const isActive = filter === filterItem.id;
     
@@ -392,7 +457,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
           styles.filterText,
           isActive && styles.filterTextActive,
           isActive && { color: filterItem.color }
-        ]}>
+        ]} numberOfLines={1}>
           {filterItem.label}
         </Text>
         {isActive && (
@@ -404,6 +469,28 @@ const TransactionHistoryScreen = ({ navigation }) => {
       </TouchableOpacity>
     );
   };
+
+  // ✅ লগইন না থাকলে শো করুন
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar backgroundColor="#0a0c23" barStyle="light-content" />
+        <View style={styles.notAuthenticatedContainer}>
+          <Ionicons name="lock-closed" size={80} color="#666" />
+          <Text style={styles.notAuthenticatedTitle}>লগইন করুন</Text>
+          <Text style={styles.notAuthenticatedText}>
+            ট্রানজেকশন হিস্টোরি দেখতে লগইন করুন
+          </Text>
+          <TouchableOpacity 
+            style={styles.loginButton}
+            onPress={() => navigation.navigate('Login')}
+          >
+            <Text style={styles.loginButtonText}>লগইন করুন</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -431,7 +518,6 @@ const TransactionHistoryScreen = ({ navigation }) => {
             style={styles.filterButton}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFilter('all');
               loadTransactions();
             }}
           >
@@ -458,13 +544,13 @@ const TransactionHistoryScreen = ({ navigation }) => {
             <Ionicons name="arrow-up-circle" size={20} color="#FF6B35" />
             <Text style={styles.statLabel}>উইথড্র</Text>
             <Text style={[styles.statValue, { color: '#FF6B35' }]}>
-              -{stats.totalWithdraw} ৳
+              {stats.totalWithdraw} ৳
             </Text>
           </View>
           
           <View style={styles.statItem}>
             <Ionicons name="trophy" size={20} color="#9C27B0" />
-            <Text style={styles.statLabel}>জয়</Text>
+            <Text style={styles.statLabel}>জয়/প্রাইজ</Text>
             <Text style={[styles.statValue, { color: '#9C27B0' }]}>
               +{stats.totalWin} ৳
             </Text>
@@ -474,13 +560,23 @@ const TransactionHistoryScreen = ({ navigation }) => {
             <Ionicons name="game-controller" size={20} color="#FF9800" />
             <Text style={styles.statLabel}>এন্ট্রি</Text>
             <Text style={[styles.statValue, { color: '#FF9800' }]}>
-              -{stats.totalEntry} ৳
+              {stats.totalEntry} ৳
             </Text>
           </View>
+
+          {stats.totalBonus > 0 && (
+            <View style={styles.statItem}>
+              <Ionicons name="star" size={20} color="#FFD700" />
+              <Text style={styles.statLabel}>বোনাস</Text>
+              <Text style={[styles.statValue, { color: '#FFD700' }]}>
+                +{stats.totalBonus} ৳
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </Animated.View>
 
-      {/* ✅ বড় ফিল্টার ট্যাবস */}
+      {/* ফিল্টার ট্যাবস */}
       <View style={styles.filterSection}>
         <Text style={styles.filterTitle}>ফিল্টার করুন:</Text>
         <ScrollView 
@@ -569,22 +665,16 @@ const TransactionHistoryScreen = ({ navigation }) => {
         onRequestClose={() => setShowDetailsModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <Animated.View 
-            style={[
-              styles.modalContent,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }]
-              }
-            ]}
-          >
+          <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View style={styles.modalTitleContainer}>
-                <Ionicons 
-                  name={selectedTransaction ? getTransactionIcon(selectedTransaction.type) : 'receipt'} 
-                  size={24} 
-                  color={selectedTransaction ? getTransactionColor(selectedTransaction.type) : '#ff8a00'} 
-                />
+                {selectedTransaction && (
+                  <Ionicons 
+                    name={getTransactionIcon(selectedTransaction.type)} 
+                    size={24} 
+                    color={getTransactionColor(selectedTransaction.type)} 
+                  />
+                )}
                 <Text style={styles.modalTitle}>ট্রানজেকশন বিস্তারিত</Text>
               </View>
               <TouchableOpacity 
@@ -606,14 +696,8 @@ const TransactionHistoryScreen = ({ navigation }) => {
                   </View>
 
                   <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>অ্যামাউন্ট</Text>
-                    <View style={styles.amountContainer}>
-                      <Text style={[
-                        styles.detailValue,
-                        selectedTransaction.amount > 0 ? styles.positiveAmount : styles.negativeAmount
-                      ]}>
-                        {selectedTransaction.amount > 0 ? '+' : ''}{selectedTransaction.amount} ৳
-                      </Text>
+                    <Text style={styles.detailLabel}>ধরন</Text>
+                    <View style={styles.typeContainer}>
                       <View style={[
                         styles.typeBadge,
                         { backgroundColor: `${getTransactionColor(selectedTransaction.type)}20` }
@@ -622,10 +706,21 @@ const TransactionHistoryScreen = ({ navigation }) => {
                           styles.typeBadgeText,
                           { color: getTransactionColor(selectedTransaction.type) }
                         ]}>
-                          {filters.find(f => f.id === selectedTransaction.type)?.label || selectedTransaction.type}
+                          {getTransactionLabel(selectedTransaction.type)}
                         </Text>
                       </View>
                     </View>
+                  </View>
+
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>অ্যামাউন্ট</Text>
+                    <Text style={[
+                      styles.detailValue,
+                      selectedTransaction.amount > 0 ? styles.positiveAmount : styles.negativeAmount,
+                      { fontSize: 18 }
+                    ]}>
+                      {selectedTransaction.amount > 0 ? '+' : ''}{selectedTransaction.amount} ৳
+                    </Text>
                   </View>
 
                   <View style={styles.detailItem}>
@@ -643,7 +738,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
 
                   <View style={styles.detailItem}>
                     <Text style={styles.detailLabel}>ট্রানজেকশন আইডি</Text>
-                    <Text style={styles.detailValue}>{selectedTransaction.transactionId}</Text>
+                    <Text style={[styles.detailValue, { fontSize: 12 }]}>{selectedTransaction.transactionId}</Text>
                   </View>
 
                   <View style={styles.detailItem}>
@@ -651,11 +746,15 @@ const TransactionHistoryScreen = ({ navigation }) => {
                     <View style={[
                       styles.statusBadgeLarge,
                       selectedTransaction.status === 'completed' ? styles.completedBadge : 
-                      selectedTransaction.status === 'pending' ? styles.pendingBadge : styles.failedBadge
+                      selectedTransaction.status === 'pending' ? styles.pendingBadge : 
+                      selectedTransaction.status === 'failed' ? styles.failedBadge :
+                      styles.processingBadge
                     ]}>
                       <Text style={styles.statusTextLarge}>
                         {selectedTransaction.status === 'completed' ? 'সফল' : 
-                         selectedTransaction.status === 'pending' ? 'পেন্ডিং' : 'ব্যর্থ'}
+                         selectedTransaction.status === 'pending' ? 'পেন্ডিং' : 
+                         selectedTransaction.status === 'failed' ? 'ব্যর্থ' :
+                         selectedTransaction.status === 'processing' ? 'প্রসেসিং' : selectedTransaction.status}
                       </Text>
                     </View>
                   </View>
@@ -667,7 +766,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
                     
                     {selectedTransaction.gameName && (
                       <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>গেম</Text>
+                        <Text style={styles.detailLabel}>গেম/টুর্নামেন্ট</Text>
                         <Text style={styles.detailValue}>{selectedTransaction.gameName}</Text>
                       </View>
                     )}
@@ -681,10 +780,24 @@ const TransactionHistoryScreen = ({ navigation }) => {
 
                     {selectedTransaction.recipient && (
                       <View style={styles.detailItem}>
-                        <Text style={styles.detailLabel}>প্রাপক</Text>
+                        <Text style={styles.detailLabel}>প্রাপক/প্রেরক</Text>
                         <Text style={styles.detailValue}>{selectedTransaction.recipient}</Text>
                       </View>
                     )}
+                  </View>
+                )}
+
+                {selectedTransaction.metadata && Object.keys(selectedTransaction.metadata).length > 0 && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitle}>মেটাডাটা</Text>
+                    {Object.entries(selectedTransaction.metadata).map(([key, value]) => (
+                      <View key={key} style={styles.detailItem}>
+                        <Text style={styles.detailLabel}>{key}</Text>
+                        <Text style={[styles.detailValue, { fontSize: 12 }]}>
+                          {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                        </Text>
+                      </View>
+                    ))}
                   </View>
                 )}
 
@@ -692,7 +805,6 @@ const TransactionHistoryScreen = ({ navigation }) => {
                   <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={() => {
-                      // Share transaction
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                       Alert.alert('শেয়ার', 'ট্রানজেকশন শেয়ার করুন');
                     }}
@@ -701,17 +813,18 @@ const TransactionHistoryScreen = ({ navigation }) => {
                     <Text style={[styles.actionButtonText, { color: '#2962ff' }]}>শেয়ার</Text>
                   </TouchableOpacity>
                   
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => {
-                      // Report transaction
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      Alert.alert('রিপোর্ট', 'এই ট্রানজেকশন রিপোর্ট করুন');
-                    }}
-                  >
-                    <Ionicons name="flag" size={20} color="#FF6B35" />
-                    <Text style={[styles.actionButtonText, { color: '#FF6B35' }]}>রিপোর্ট</Text>
-                  </TouchableOpacity>
+                  {selectedTransaction.status === 'failed' && (
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        Alert.alert('সহায়তা', 'সমস্যার জন্য সহায়তা নিন');
+                      }}
+                    >
+                      <Ionicons name="help-circle" size={20} color="#FF6B35" />
+                      <Text style={[styles.actionButtonText, { color: '#FF6B35' }]}>সহায়তা</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </ScrollView>
             )}
@@ -724,7 +837,7 @@ const TransactionHistoryScreen = ({ navigation }) => {
                 <Text style={styles.modalButtonText}>ঠিক আছে</Text>
               </TouchableOpacity>
             </View>
-          </Animated.View>
+          </View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -735,6 +848,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0c23',
+  },
+  notAuthenticatedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  notAuthenticatedTitle: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 20,
+  },
+  notAuthenticatedText: {
+    color: '#b0b8ff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  loginButton: {
+    backgroundColor: '#ff8a00',
+    paddingHorizontal: 30,
+    paddingVertical: 15,
+    borderRadius: 12,
+  },
+  loginButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   header: {
     backgroundColor: '#1a1f3d',
@@ -793,7 +936,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  // ✅ বড় ফিল্টার সেকশন
   filterSection: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -814,14 +956,14 @@ const styles = StyleSheet.create({
   filterTab: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     marginRight: 12,
     borderRadius: 16,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.1)',
     backgroundColor: 'rgba(255,255,255,0.05)',
-    minWidth: 120,
+    minWidth: 100,
     position: 'relative',
   },
   filterTabActive: {
@@ -971,9 +1113,11 @@ const styles = StyleSheet.create({
   gameName: {
     color: '#ff8a00',
     fontSize: 12,
+    maxWidth: 100,
   },
   transactionRight: {
     alignItems: 'flex-end',
+    minWidth: 100,
   },
   amount: {
     fontSize: 18,
@@ -990,7 +1134,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    minWidth: 60,
+    minWidth: 70,
     alignItems: 'center',
   },
   completedBadge: {
@@ -1001,6 +1145,9 @@ const styles = StyleSheet.create({
   },
   failedBadge: {
     backgroundColor: 'rgba(244,67,54,0.2)',
+  },
+  processingBadge: {
+    backgroundColor: 'rgba(33,150,243,0.2)',
   },
   statusText: {
     fontSize: 10,
@@ -1082,7 +1229,7 @@ const styles = StyleSheet.create({
     flex: 2,
     textAlign: 'right',
   },
-  amountContainer: {
+  typeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,

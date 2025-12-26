@@ -1,9 +1,9 @@
-// models/Wallet.js - ENHANCED VERSION WITH WITHDRAWAL SUPPORT
+// models/Wallet.js - COMPLETE WALLET MODEL WITH ALL SCHEMAS
 const mongoose = require('mongoose');
 
-/* ============================
-   TRANSACTION SCHEMA
-============================ */
+// ============================
+// 🔹 TRANSACTION SCHEMA
+// ============================
 const transactionSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -12,7 +12,7 @@ const transactionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['credit', 'debit', 'deposit', 'withdrawal', 'refund', 'bonus', 'entry_fee', 'prize'],
+    enum: ['credit', 'debit', 'deposit', 'withdrawal', 'refund', 'bonus', 'entry_fee', 'prize', 'transfer'],
     required: true
   },
   amount: {
@@ -28,28 +28,33 @@ const transactionSchema = new mongoose.Schema({
     enum: ['pending', 'completed', 'failed', 'cancelled', 'processing'],
     default: 'completed'
   },
-  method: {
-    type: String
-  },
-  reference_id: {
-    type: String
-  },
+  method: String,
+  reference_id: String,
   metadata: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
+  },
+  related_to: {
+    type: mongoose.Schema.Types.ObjectId,
+    refPath: 'related_model'
+  },
+  related_model: {
+    type: String,
+    enum: ['Match', 'Tournament', 'Withdrawal', 'Deposit']
   }
 }, {
   timestamps: true
 });
 
-// Indexes for better performance
+// Indexes for transactions
 transactionSchema.index({ user_id: 1, createdAt: -1 });
 transactionSchema.index({ type: 1 });
 transactionSchema.index({ status: 1 });
+transactionSchema.index({ reference_id: 1 });
 
-/* ============================
-   WALLET SCHEMA
-============================ */
+// ============================
+// 🔹 WALLET SCHEMA
+// ============================
 const walletSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -70,88 +75,54 @@ const walletSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  total_withdrawn: {
+    type: Number,
+    default: 0
+  },
   last_activity: {
     type: Date,
     default: Date.now
+  },
+  settings: {
+    auto_withdraw: {
+      type: Boolean,
+      default: false
+    },
+    min_auto_withdraw: {
+      type: Number,
+      default: 500
+    },
+    preferred_method: {
+      type: String,
+      enum: ['bkash', 'nagad', 'rocket'],
+      default: 'bkash'
+    }
   }
 }, {
   timestamps: true
 });
 
-// Indexes
+// Indexes for wallet
 walletSchema.index({ user_id: 1 });
 walletSchema.index({ balance: -1 });
+walletSchema.index({ 'settings.auto_withdraw': 1 });
 
-/* ============================
-   WITHDRAWAL SCHEMA
-============================ */
-const withdrawalSchema = new mongoose.Schema({
-  user_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  amount: {
-    type: Number,
-    required: true,
-    min: 100,
-    max: 25000
-  },
-  payment_method: {
-    type: String,
-    enum: ['bkash', 'nagad', 'rocket', 'bank'],
-    required: true
-  },
-  account_details: {
-    phone: { type: String, required: true },
-    account_name: String,
-    bank_name: String,
-    branch: String
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'approved', 'rejected', 'processing', 'completed'],
-    default: 'pending'
-  },
-  transaction_id: String,
-  admin_notes: String,
-  user_note: String,
-  approved_by: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  approved_at: Date,
-  processed_at: Date
-}, {
-  timestamps: true
-});
+// ============================
+// 🔹 WALLET METHODS
+// ============================
 
-// Virtuals for population
-withdrawalSchema.virtual('user', {
-  ref: 'User',
-  localField: 'user_id',
-  foreignField: '_id',
-  justOne: true
-});
-
-withdrawalSchema.virtual('approver', {
-  ref: 'User',
-  localField: 'approved_by',
-  foreignField: '_id',
-  justOne: true
-});
-
-withdrawalSchema.set('toJSON', { virtuals: true });
-withdrawalSchema.set('toObject', { virtuals: true });
-
-// Indexes
-withdrawalSchema.index({ user_id: 1, createdAt: -1 });
-withdrawalSchema.index({ status: 1 });
-withdrawalSchema.index({ payment_method: 1 });
-
-/* ============================
-   WALLET METHODS
-============================ */
+// Find or create wallet
+walletSchema.statics.findOrCreate = async function(userId) {
+  let wallet = await this.findOne({ user_id: userId });
+  
+  if (!wallet) {
+    wallet = new this({ user_id: userId });
+    await wallet.save();
+    console.log(`✅ New wallet created for user: ${userId}`);
+  }
+  
+  return wallet;
+};
 
 // Credit wallet
 walletSchema.methods.credit = async function(amount, description = '', metadata = {}) {
@@ -165,7 +136,8 @@ walletSchema.methods.credit = async function(amount, description = '', metadata 
   
   await this.save();
 
-  // Create transaction record
+  // Create transaction
+  const Transaction = mongoose.model('Transaction');
   const transaction = await Transaction.create({
     user_id: this.user_id,
     type: 'credit',
@@ -177,8 +149,7 @@ walletSchema.methods.credit = async function(amount, description = '', metadata 
     metadata
   });
 
-  console.log(`✅ Wallet credited: User ${this.user_id}, Amount: ${amount}, New Balance: ${this.balance}`);
-
+  console.log(`✅ Wallet credited: ${amount}, New Balance: ${this.balance}`);
   return { wallet: this, transaction };
 };
 
@@ -198,7 +169,8 @@ walletSchema.methods.debit = async function(amount, description = '', metadata =
   
   await this.save();
 
-  // Create transaction record
+  // Create transaction
+  const Transaction = mongoose.model('Transaction');
   const transaction = await Transaction.create({
     user_id: this.user_id,
     type: 'debit',
@@ -210,25 +182,28 @@ walletSchema.methods.debit = async function(amount, description = '', metadata =
     metadata
   });
 
-  console.log(`✅ Wallet debited: User ${this.user_id}, Amount: ${amount}, New Balance: ${this.balance}`);
-
+  console.log(`✅ Wallet debited: ${amount}, New Balance: ${this.balance}`);
   return { wallet: this, transaction };
 };
 
-// Check if user has sufficient balance
+// Check sufficient balance
 walletSchema.methods.hasSufficientBalance = function(amount) {
   return this.balance >= amount;
 };
 
 // Get transaction history
-walletSchema.methods.getTransactionHistory = async function(limit = 50, page = 1) {
-  const transactions = await Transaction.find({ user_id: this.user_id })
+walletSchema.methods.getTransactionHistory = async function(limit = 50, page = 1, type = null) {
+  const Transaction = mongoose.model('Transaction');
+  const filter = { user_id: this.user_id };
+  if (type) filter.type = type;
+  
+  const transactions = await Transaction.find(filter)
     .sort({ createdAt: -1 })
     .limit(limit)
     .skip((page - 1) * limit);
-
-  const total = await Transaction.countDocuments({ user_id: this.user_id });
-
+  
+  const total = await Transaction.countDocuments(filter);
+  
   return {
     transactions,
     pagination: {
@@ -240,55 +215,41 @@ walletSchema.methods.getTransactionHistory = async function(limit = 50, page = 1
   };
 };
 
-// Static method to find or create wallet
-walletSchema.statics.findOrCreate = async function(userId) {
-  let wallet = await this.findOne({ user_id: userId });
-  
-  if (!wallet) {
-    wallet = new this({ user_id: userId });
-    await wallet.save();
-    console.log(`🆕 New wallet created for user: ${userId}`);
+// Auto withdraw check (for future)
+walletSchema.methods.checkAutoWithdraw = async function() {
+  if (this.settings.auto_withdraw && this.balance >= this.settings.min_auto_withdraw) {
+    console.log(`⚡ Auto withdraw triggered for user ${this.user_id}`);
+    
+    // This will be implemented when auto withdrawal is enabled
+    /*
+    const Withdrawal = require('./withdrawal');
+    const withdrawal = new Withdrawal({
+      user_id: this.user_id,
+      amount: this.settings.min_auto_withdraw,
+      payment_method: this.settings.preferred_method,
+      account_details: await this.getUserAccountDetails(),
+      withdrawal_type: 'auto',
+      status: 'processing'
+    });
+    
+    await withdrawal.save();
+    await this.debit(this.settings.min_auto_withdraw, 'Auto withdrawal');
+    */
+    
+    return { triggered: true, amount: this.settings.min_auto_withdraw };
   }
   
-  return wallet;
+  return { triggered: false };
 };
 
-/* ============================
-   WITHDRAWAL METHODS
-============================ */
-
-// Withdrawal approval method
-withdrawalSchema.methods.approve = async function(adminId, transactionId, notes = '') {
-  this.status = 'approved';
-  this.approved_by = adminId;
-  this.approved_at = new Date();
-  this.transaction_id = transactionId;
-  this.admin_notes = notes;
-  this.processed_at = new Date();
-  
-  return await this.save();
-};
-
-// Withdrawal rejection method
-withdrawalSchema.methods.reject = async function(adminId, notes = '') {
-  this.status = 'rejected';
-  this.approved_by = adminId;
-  this.approved_at = new Date();
-  this.admin_notes = notes;
-  this.processed_at = new Date();
-  
-  return await this.save();
-};
-
-/* ============================
-   CREATE MODELS
-============================ */
+// ============================
+// 🔹 CREATE MODELS
+// ============================
 const Transaction = mongoose.model('Transaction', transactionSchema);
 const Wallet = mongoose.model('Wallet', walletSchema);
-const Withdrawal = mongoose.model('Withdrawal', withdrawalSchema);
 
 module.exports = {
   Transaction,
   Wallet,
-  Withdrawal
+  // Withdrawal model will be imported separately
 };
