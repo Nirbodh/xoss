@@ -1,57 +1,100 @@
-// routes/tournaments.js - COMPLETE FILE FOR TOURNAMENTS ONLY
+// routes/tournaments.js - COMPLETELY FIXED WITH ROLE-BASED APPROVAL
 const express = require('express');
 const Tournament = require('../models/Tournament');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// Data mapping function for tournaments
-const mapTournamentData = (reqBody, userId) => {
-  console.log('🔄 Mapping tournament data:', reqBody);
+// ✅ FIXED DATA MAPPING FUNCTION - ROLE-BASED APPROVAL
+const mapTournamentData = (reqBody, userId, userRole) => {
+  console.log('🔄 Mapping tournament data (BOTH FORMATS):', reqBody);
+  
+  const isAdmin = userRole === 'admin';
   
   return {
+    // Basic info
     title: reqBody.title,
     game: reqBody.game,
     description: reqBody.description || '',
     rules: reqBody.rules || '',
     
+    // Financial - ✅ ACCEPT BOTH FORMATS
     entry_fee: Number(reqBody.entry_fee) || Number(reqBody.entryFee) || 0,
     total_prize: Number(reqBody.total_prize) || Number(reqBody.prizePool) || 0,
     per_kill: Number(reqBody.per_kill) || Number(reqBody.perKill) || 0,
     
+    // Participants - ✅ ACCEPT BOTH FORMATS
     max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 50,
     current_participants: Number(reqBody.current_participants) || Number(reqBody.currentPlayers) || 0,
     
+    // Game settings
     type: reqBody.type || 'Squad',
     map: reqBody.map || 'Bermuda',
     match_type: 'tournament',
     
+    // Room info
     room_id: reqBody.room_id || reqBody.roomId || '',
     room_password: reqBody.room_password || reqBody.password || '',
     
+    // Timing - ✅ FIXED: Handle missing dates properly
     start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
     schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     
-    status: 'upcoming',
-    approval_status: 'approved',
+    // ✅ FIXED: Role-based approval
+    status: isAdmin ? 'upcoming' : 'pending',
+    approval_status: isAdmin ? 'approved' : 'pending',
     created_by: userId,
-    approved_by: userId,
-    approved_at: new Date()
+    
+    // ✅ Auto-set approval fields only for admin
+    ...(isAdmin && {
+      approved_by: userId,
+      approved_at: new Date()
+    })
   };
 };
 
-// GET all tournaments
+// ✅ FIXED: GET all tournaments - SHOW BASED ON USER ROLE
 router.get('/', async (req, res) => {
   try {
-    console.log('🔍 Fetching ALL tournaments...');
+    console.log('🔍 Fetching tournaments...');
     
-    const tournaments = await Tournament.find({})
+    let filter = {};
+    
+    // ✅ FIXED: Check if user is admin via query param or auth
+    const isAdmin = req.query.admin === 'true' || 
+                   (req.user && req.user.role === 'admin');
+    
+    if (isAdmin) {
+      console.log('👑 Admin: No default filters');
+      // Admin sees everything - no default filters
+    } else {
+      // Non-admin users see only approved and upcoming/live tournaments
+      filter.approval_status = 'approved';
+      filter.status = { $in: ['upcoming', 'live'] };
+      console.log('👤 Non-admin filter applied:', filter);
+    }
+
+    // Additional filters
+    if (req.query.status && req.query.status !== 'all') {
+      filter.status = req.query.status;
+    }
+    if (req.query.game && req.query.game !== 'all') {
+      filter.game = req.query.game;
+    }
+    if (req.query.search) {
+      filter.title = { $regex: req.query.search, $options: 'i' };
+    }
+
+    console.log('📊 Final filter:', filter);
+
+    const tournaments = await Tournament.find(filter)
       .populate('created_by', 'username')
       .populate('approved_by', 'username')
       .sort({ createdAt: -1 });
     
     console.log(`✅ Found ${tournaments.length} tournaments`);
     
+    // Count by status for debugging
     const approvedCount = tournaments.filter(t => t.approval_status === 'approved').length;
     const pendingCount = tournaments.filter(t => t.approval_status === 'pending').length;
     const rejectedCount = tournaments.filter(t => t.approval_status === 'rejected').length;
@@ -60,7 +103,7 @@ router.get('/', async (req, res) => {
     
     res.json({ 
       success: true, 
-      tournaments, 
+      data: tournaments,
       count: tournaments.length,
       statusCounts: {
         approved: approvedCount,
@@ -74,16 +117,23 @@ router.get('/', async (req, res) => {
   }
 });
 
-// CREATE tournament
+// ✅ FIXED: CREATE tournament - ROLE-BASED APPROVAL
 router.post('/create', auth, async (req, res) => {
   try {
     console.log('📥 Received tournament creation request:', req.body);
     console.log('👤 User creating tournament:', req.user);
+    console.log('👑 User role:', req.user.role);
     
-    const tournamentData = mapTournamentData(req.body, req.user.userId);
+    // ✅ FIXED: Pass userId AND userRole to mapTournamentData
+    const tournamentData = mapTournamentData(req.body, req.user._id, req.user.role);
 
     console.log('🔄 Mapped tournament data:', tournamentData);
+    console.log('✅ Tournament will be created with status:', {
+      status: tournamentData.status,
+      approval_status: tournamentData.approval_status
+    });
 
+    // ✅ FIXED: Better validation with specific messages
     const requiredFields = ['title', 'game', 'max_participants'];
     const missingFields = [];
     
@@ -101,6 +151,7 @@ router.post('/create', auth, async (req, res) => {
       });
     }
 
+    // ✅ FIXED: Validate schedule_time
     if (!tournamentData.schedule_time || isNaN(tournamentData.schedule_time.getTime())) {
       return res.status(400).json({ 
         success: false, 
@@ -110,14 +161,25 @@ router.post('/create', auth, async (req, res) => {
 
     const tournament = await Tournament.create(tournamentData);
     await tournament.populate('created_by', 'username');
-    await tournament.populate('approved_by', 'username');
     
-    console.log('✅ Tournament created successfully (Auto-approved):', tournament._id);
+    if (tournamentData.approval_status === 'approved') {
+      await tournament.populate('approved_by', 'username');
+    }
+    
+    console.log('✅ Tournament created successfully:', tournament._id);
+    console.log('📊 Tournament details:', {
+      status: tournament.status,
+      approval_status: tournament.approval_status,
+      approved_by: tournament.approved_by,
+      approved_at: tournament.approved_at
+    });
     
     res.json({ 
       success: true, 
       tournament,
-      message: 'Tournament created successfully and is now live! (Auto-approved)'
+      message: req.user.role === 'admin'
+        ? 'Tournament created successfully and is now live! (Auto-approved)'
+        : 'Tournament created successfully! Waiting for admin approval.'
     });
   } catch (err) {
     console.error('❌ Tournament creation error:', err);
@@ -129,11 +191,15 @@ router.post('/create', auth, async (req, res) => {
   }
 });
 
-// Alternative CREATE endpoint
+// ✅ SIMPLIFIED CREATE endpoint (alternative) - ROLE-BASED APPROVAL
 router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 SIMPLE CREATE tournament request:', req.body);
+    console.log('👤 User role:', req.user.role);
     
+    const isAdmin = req.user.role === 'admin';
+    
+    // ✅ SIMPLE DATA MAPPING - ROLE-BASED APPROVAL
     const tournamentData = {
       title: req.body.title,
       game: req.body.game,
@@ -152,15 +218,26 @@ router.post('/', auth, async (req, res) => {
       start_time: new Date(req.body.startTime || req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
       end_time: new Date(req.body.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
       schedule_time: new Date(req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-      status: 'upcoming',
-      approval_status: 'approved',
-      approved_by: req.user.userId,
-      approved_at: new Date(),
-      created_by: req.user.userId
+      
+      // ✅ FIXED: Role-based approval
+      status: isAdmin ? 'upcoming' : 'pending',
+      approval_status: isAdmin ? 'approved' : 'pending',
+      created_by: req.user._id,
+      
+      // ✅ Auto-set approval fields only for admin
+      ...(isAdmin && {
+        approved_by: req.user._id,
+        approved_at: new Date()
+      })
     };
 
     console.log('🔄 Simple tournament data:', tournamentData);
+    console.log('✅ Tournament will be created with status:', {
+      status: tournamentData.status,
+      approval_status: tournamentData.approval_status
+    });
 
+    // Basic validation
     if (!tournamentData.title || !tournamentData.game) {
       return res.status(400).json({
         success: false,
@@ -170,12 +247,17 @@ router.post('/', auth, async (req, res) => {
 
     const tournament = await Tournament.create(tournamentData);
     await tournament.populate('created_by', 'username');
-    await tournament.populate('approved_by', 'username');
+    
+    if (tournamentData.approval_status === 'approved') {
+      await tournament.populate('approved_by', 'username');
+    }
 
     res.json({
       success: true,
       tournament,
-      message: 'Tournament created successfully and is now live! (Auto-approved)'
+      message: isAdmin
+        ? 'Tournament created successfully and is now live! (Auto-approved)'
+        : 'Tournament created successfully! Waiting for admin approval.'
     });
   } catch (err) {
     console.error('❌ Simple create tournament error:', err);
@@ -186,7 +268,227 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// ADMIN: Get pending tournaments
+// ✅ GET tournament by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id)
+      .populate('created_by', 'username')
+      .populate('approved_by', 'username')
+      .populate('participants.user', 'username email');
+
+    if (!tournament) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Tournament not found' 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: tournament 
+    });
+  } catch (err) {
+    console.error('❌ GET tournament by ID error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+// ✅ UPDATE tournament
+router.put('/:id', auth, async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id);
+    
+    if (!tournament) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Tournament not found' 
+      });
+    }
+    
+    // Check if user is owner or admin
+    if (tournament.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Not authorized to update this tournament' 
+      });
+    }
+    
+    const updateData = mapTournamentData(req.body, req.user._id, req.user.role);
+    
+    // Don't update approval status if user is not admin
+    if (req.user.role !== 'admin') {
+      delete updateData.approval_status;
+      delete updateData.status;
+    }
+
+    const updatedTournament = await Tournament.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    )
+      .populate('created_by', 'username')
+      .populate('approved_by', 'username');
+    
+    res.json({ 
+      success: true, 
+      tournament: updatedTournament,
+      message: 'Tournament updated successfully'
+    });
+  } catch (err) {
+    console.error('❌ UPDATE tournament error:', err);
+    res.status(400).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+// ✅ DELETE tournament
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id);
+    
+    if (!tournament) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Tournament not found' 
+      });
+    }
+    
+    // Check if user is owner or admin
+    if (tournament.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Not authorized to delete this tournament' 
+      });
+    }
+    
+    await Tournament.findByIdAndDelete(req.params.id);
+    
+    res.json({ 
+      success: true, 
+      message: 'Tournament deleted successfully' 
+    });
+  } catch (err) {
+    console.error('❌ DELETE tournament error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+// ✅ JOIN tournament
+router.post('/:id/join', auth, async (req, res) => {
+  try {
+    const tournament = await Tournament.findById(req.params.id);
+
+    if (!tournament) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Tournament not found' 
+      });
+    }
+
+    // Check if tournament is approved
+    if (tournament.approval_status !== 'approved') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'This tournament is not approved yet' 
+      });
+    }
+
+    if (tournament.status !== 'upcoming') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Tournament is not joinable' 
+      });
+    }
+
+    const alreadyJoined = tournament.participants.some(
+      participant => participant.user.toString() === req.user._id.toString()
+    );
+
+    if (alreadyJoined) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Already joined this tournament' 
+      });
+    }
+
+    if (tournament.current_participants >= tournament.max_participants) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No spots left in this tournament' 
+      });
+    }
+
+    tournament.participants.push({
+      user: req.user._id,
+      status: 'joined'
+    });
+
+    tournament.current_participants += 1;
+    await tournament.save();
+
+    await tournament.populate('participants.user', 'username');
+
+    res.json({ 
+      success: true, 
+      message: 'Successfully joined tournament',
+      data: tournament 
+    });
+  } catch (error) {
+    console.error('❌ JOIN tournament error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to join tournament',
+      error: error.message 
+    });
+  }
+});
+
+// ✅ ADMIN: Get all tournaments (including pending) - FIXED
+router.get('/admin/all', adminAuth, async (req, res) => {
+  try {
+    console.log('👑 ADMIN: Fetching ALL tournaments (including pending)...');
+    
+    const tournaments = await Tournament.find({})
+      .populate('created_by', 'username email')
+      .populate('approved_by', 'username')
+      .sort({ createdAt: -1 });
+    
+    console.log(`👑 ADMIN: Found ${tournaments.length} tournaments (all statuses)`);
+    
+    // Count by status for dashboard
+    const approvedCount = tournaments.filter(t => t.approval_status === 'approved').length;
+    const pendingCount = tournaments.filter(t => t.approval_status === 'pending').length;
+    const rejectedCount = tournaments.filter(t => t.approval_status === 'rejected').length;
+    
+    res.json({ 
+      success: true, 
+      data: tournaments, 
+      count: tournaments.length,
+      dashboard: {
+        approved: approvedCount,
+        pending: pendingCount,
+        rejected: rejectedCount,
+        total: tournaments.length
+      }
+    });
+  } catch (err) {
+    console.error('❌ ADMIN all tournaments error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+});
+
+// ✅ ADMIN: Get pending tournaments
 router.get('/admin/pending', adminAuth, async (req, res) => {
   try {
     const tournaments = await Tournament.find({ 
@@ -200,11 +502,12 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
     
     res.json({ 
       success: true, 
-      tournaments, 
+      data: tournaments, 
       count: tournaments.length,
-      message: tournaments.length === 0 ? 'No pending tournaments (All tournaments are auto-approved)' : 'Found pending tournaments'
+      message: tournaments.length === 0 ? 'No pending tournaments' : 'Found pending tournaments'
     });
   } catch (err) {
+    console.error('❌ ADMIN pending tournaments error:', err);
     res.status(500).json({ 
       success: false, 
       message: err.message 
@@ -212,7 +515,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ADMIN: Approve tournament
+// ✅ ADMIN: Approve tournament
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
     const tournament = await Tournament.findByIdAndUpdate(
@@ -220,7 +523,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
       {
         approval_status: 'approved',
         status: 'upcoming',
-        approved_by: req.user.userId,
+        approved_by: req.user._id,
         approved_at: new Date(),
         admin_notes: req.body.adminNotes || ''
       },
@@ -252,7 +555,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ADMIN: Reject tournament
+// ✅ ADMIN: Reject tournament
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
     const tournament = await Tournament.findByIdAndUpdate(
@@ -284,63 +587,6 @@ router.post('/admin/reject/:id', adminAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('❌ ADMIN reject tournament error:', err);
-    res.status(500).json({ 
-      success: false, 
-      message: err.message 
-    });
-  }
-});
-
-// UPDATE tournament
-router.put('/:id', auth, async (req, res) => {
-  try {
-    const updateData = mapTournamentData(req.body, req.user.userId);
-    
-    const tournament = await Tournament.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    )
-      .populate('created_by', 'username')
-      .populate('approved_by', 'username');
-    
-    if (!tournament) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Tournament not found' 
-      });
-    }
-    
-    res.json({ 
-      success: true, 
-      tournament,
-      message: 'Tournament updated successfully'
-    });
-  } catch (err) {
-    res.status(400).json({ 
-      success: false, 
-      message: err.message 
-    });
-  }
-});
-
-// DELETE tournament
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const tournament = await Tournament.findByIdAndDelete(req.params.id);
-    
-    if (!tournament) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Tournament not found' 
-      });
-    }
-    
-    res.json({ 
-      success: true, 
-      message: 'Tournament deleted successfully' 
-    });
-  } catch (err) {
     res.status(500).json({ 
       success: false, 
       message: err.message 
