@@ -1,68 +1,57 @@
-// routes/tournaments.js - COMPLETELY FIXED - TOURNAMENT AUTO-APPROVED
+// routes/tournaments.js - COMPLETE FILE FOR TOURNAMENTS ONLY
 const express = require('express');
 const Tournament = require('../models/Tournament');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// ✅ FIXED DATA MAPPING FUNCTION - TOURNAMENT AUTO-APPROVED
+// Data mapping function for tournaments
 const mapTournamentData = (reqBody, userId) => {
-  console.log('🔄 Mapping tournament data (BOTH FORMATS):', reqBody);
+  console.log('🔄 Mapping tournament data:', reqBody);
   
   return {
-    // Basic info
     title: reqBody.title,
     game: reqBody.game,
     description: reqBody.description || '',
     rules: reqBody.rules || '',
     
-    // Financial - ✅ ACCEPT BOTH FORMATS
     entry_fee: Number(reqBody.entry_fee) || Number(reqBody.entryFee) || 0,
     total_prize: Number(reqBody.total_prize) || Number(reqBody.prizePool) || 0,
     per_kill: Number(reqBody.per_kill) || Number(reqBody.perKill) || 0,
     
-    // Participants - ✅ ACCEPT BOTH FORMATS
     max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 50,
     current_participants: Number(reqBody.current_participants) || Number(reqBody.currentPlayers) || 0,
     
-    // Game settings
     type: reqBody.type || 'Squad',
     map: reqBody.map || 'Bermuda',
-    match_type: reqBody.match_type || reqBody.matchType || 'tournament',
+    match_type: 'tournament',
     
-    // Room info
     room_id: reqBody.room_id || reqBody.roomId || '',
     room_password: reqBody.room_password || reqBody.password || '',
     
-    // Timing - ✅ FIXED: Handle missing dates properly
     start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
     schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     
-    // ✅ CRITICAL FIX: Tournament AUTO-APPROVED by default
-    status: 'upcoming', // সরাসরি upcoming হবে
-    approval_status: 'approved', // Auto-approved
+    status: 'upcoming',
+    approval_status: 'approved',
     created_by: userId,
-    
-    // ✅ Auto-set approval fields
-    approved_by: userId, // যিনি ক্রিয়েট করছেন তিনিই approve করছেন
+    approved_by: userId,
     approved_at: new Date()
   };
 };
 
-// ✅ FIXED: GET all tournaments - SHOW ALL (approved + pending)
+// GET all tournaments
 router.get('/', async (req, res) => {
   try {
-    console.log('🔍 Fetching ALL tournaments (all statuses)...');
+    console.log('🔍 Fetching ALL tournaments...');
     
-    // ✅ Get ALL tournaments (both approved and pending)
     const tournaments = await Tournament.find({})
       .populate('created_by', 'username')
       .populate('approved_by', 'username')
       .sort({ createdAt: -1 });
     
-    console.log(`✅ Found ${tournaments.length} tournaments (all statuses)`);
+    console.log(`✅ Found ${tournaments.length} tournaments`);
     
-    // Count by status for debugging
     const approvedCount = tournaments.filter(t => t.approval_status === 'approved').length;
     const pendingCount = tournaments.filter(t => t.approval_status === 'pending').length;
     const rejectedCount = tournaments.filter(t => t.approval_status === 'rejected').length;
@@ -85,24 +74,16 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ CREATE tournament - TOURNAMENT AUTO-APPROVED (HARDCODED)
+// CREATE tournament
 router.post('/create', auth, async (req, res) => {
   try {
     console.log('📥 Received tournament creation request:', req.body);
     console.log('👤 User creating tournament:', req.user);
     
-    // ✅ FIXED: Pass userId to mapTournamentData
     const tournamentData = mapTournamentData(req.body, req.user.userId);
 
     console.log('🔄 Mapped tournament data:', tournamentData);
-    console.log('✅ Tournament will be created with AUTO-APPROVED status:', {
-      status: tournamentData.status,
-      approval_status: tournamentData.approval_status,
-      approved_by: tournamentData.approved_by,
-      approved_at: tournamentData.approved_at
-    });
 
-    // ✅ FIXED: Better validation with specific messages
     const requiredFields = ['title', 'game', 'max_participants'];
     const missingFields = [];
     
@@ -120,7 +101,6 @@ router.post('/create', auth, async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Validate schedule_time
     if (!tournamentData.schedule_time || isNaN(tournamentData.schedule_time.getTime())) {
       return res.status(400).json({ 
         success: false, 
@@ -133,12 +113,6 @@ router.post('/create', auth, async (req, res) => {
     await tournament.populate('approved_by', 'username');
     
     console.log('✅ Tournament created successfully (Auto-approved):', tournament._id);
-    console.log('📊 Tournament details:', {
-      status: tournament.status,
-      approval_status: tournament.approval_status,
-      approved_by: tournament.approved_by,
-      approved_at: tournament.approved_at
-    });
     
     res.json({ 
       success: true, 
@@ -155,12 +129,11 @@ router.post('/create', auth, async (req, res) => {
   }
 });
 
-// ✅ SIMPLIFIED CREATE endpoint (alternative) - TOURNAMENT AUTO-APPROVED
+// Alternative CREATE endpoint
 router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 SIMPLE CREATE tournament request:', req.body);
     
-    // ✅ SIMPLE DATA MAPPING - AUTO-APPROVED (HARDCODED)
     const tournamentData = {
       title: req.body.title,
       game: req.body.game,
@@ -168,7 +141,7 @@ router.post('/', auth, async (req, res) => {
       rules: req.body.rules || '',
       entry_fee: Number(req.body.entryFee) || 0,
       total_prize: Number(req.body.prizePool) || 0,
-      per_kill: Number(reqBody.perKill) || 0,
+      per_kill: Number(req.body.perKill) || 0,
       max_participants: Number(req.body.maxPlayers) || 50,
       current_participants: 0,
       type: req.body.type || 'Squad',
@@ -179,23 +152,15 @@ router.post('/', auth, async (req, res) => {
       start_time: new Date(req.body.startTime || req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
       end_time: new Date(req.body.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
       schedule_time: new Date(req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-      
-      // ✅ FIXED: Tournament auto-approved (HARDCODED - NO REQBODY)
       status: 'upcoming',
       approval_status: 'approved',
       approved_by: req.user.userId,
       approved_at: new Date(),
-      
       created_by: req.user.userId
     };
 
     console.log('🔄 Simple tournament data:', tournamentData);
-    console.log('✅ Tournament will be created with status:', {
-      status: tournamentData.status,
-      approval_status: tournamentData.approval_status
-    });
 
-    // Basic validation
     if (!tournamentData.title || !tournamentData.game) {
       return res.status(400).json({
         success: false,
@@ -221,7 +186,7 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// ✅ ADMIN: Get pending tournaments (if any exist)
+// ADMIN: Get pending tournaments
 router.get('/admin/pending', adminAuth, async (req, res) => {
   try {
     const tournaments = await Tournament.find({ 
@@ -247,7 +212,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ ADMIN: Approve tournament (for manual approval if needed)
+// ADMIN: Approve tournament
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
     const tournament = await Tournament.findByIdAndUpdate(
@@ -287,7 +252,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ ADMIN: Reject tournament
+// ADMIN: Reject tournament
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
     const tournament = await Tournament.findByIdAndUpdate(
@@ -326,7 +291,7 @@ router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ UPDATE tournament
+// UPDATE tournament
 router.put('/:id', auth, async (req, res) => {
   try {
     const updateData = mapTournamentData(req.body, req.user.userId);
@@ -359,7 +324,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ DELETE tournament
+// DELETE tournament
 router.delete('/:id', auth, async (req, res) => {
   try {
     const tournament = await Tournament.findByIdAndDelete(req.params.id);
