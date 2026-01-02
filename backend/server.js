@@ -1,4 +1,4 @@
-// server.js - XOSS GAMING PROFESSIONAL SERVER (UPDATED VERSION)
+// server.js - XOSS GAMING PROFESSIONAL SERVER (MERGED & OPTIMIZED)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -65,45 +65,25 @@ const startServer = async () => {
     // ✅ API Routes - Organized by Feature
     console.log('🔄 Loading API routes...');
 
-    // ==============================================
-    // ✅ CORE ROUTES - UPDATED VERSIONS
-    // ==============================================
-    
-    // ✅ FINAL VERSION: Matches with Admin Approval System
-    app.use('/api/matches', require('./routes/matches')); 
-    
-    // ✅ FINAL VERSION: Tournaments with Admin Approval System  
+    // Core Routes
+    app.use('/api/matches', require('./routes/matchRoutes'));
     app.use('/api/tournaments', require('./routes/tournaments'));
-    
-    // ❌ COMMENT OUT OLD ROUTES IF THEY EXIST
-    // app.use('/api/matches', require('./routes/matchRoutes')); // পুরোনো ফাইল
-    // app.use('/api/tournaments', require('./routes/tournaments_old')); // পুরোনো ফাইল
-    
-    // ✅ Combined routes (if needed)
     app.use('/api/combined', require('./routes/combined'));
 
-    // ==============================================
-    // ✅ USER MANAGEMENT ROUTES
-    // ==============================================
+    // User Management Routes
     app.use('/api/auth', require('./routes/auth'));
     app.use('/api/users', require('./routes/users'));
     app.use('/api/wallet', require('./routes/wallet'));
 
-    // ==============================================
-    // ✅ PAYMENT SYSTEM ROUTES
-    // ==============================================
+    // ✅ Payment System Routes
     app.use('/api/deposits', require('./routes/deposits'));
     app.use('/api/withdraw', withdrawalRoutes);
 
-    // ==============================================
-    // ✅ PRIZE & RESULT SYSTEM ROUTES
-    // ==============================================
+    // Prize & Result System Routes
     app.use('/api/prize', require('./routes/prizeRoutes'));
     app.use('/api/results', require('./routes/resultRoutes'));
 
-    // ==============================================
     // ✅ HEALTH & STATUS ENDPOINTS
-    // ==============================================
     app.get('/', (req, res) => {
       res.json({
         success: true,
@@ -161,9 +141,7 @@ const startServer = async () => {
       });
     });
 
-    // ==============================================
-    // ✅ TEST ENDPOINTS
-    // ==============================================
+    // ✅ TEST DEPOSIT ENDPOINT (From Second Server)
     app.get('/api/deposits/test', (req, res) => {
       res.json({
         success: true,
@@ -172,9 +150,7 @@ const startServer = async () => {
       });
     });
 
-    // ==============================================
     // ✅ PROFESSIONAL DATABASE OPERATIONS
-    // ==============================================
     app.post('/api/direct/update-results/:eventId', async (req, res) => {
       try {
         const { eventId } = req.params;
@@ -246,9 +222,7 @@ const startServer = async () => {
       }
     });
 
-    // ==============================================
     // ✅ DATABASE MIGRATION ENDPOINTS
-    // ==============================================
     app.post('/api/migrate/add-results-fields', async (req, res) => {
       try {
         console.log('🔄 Starting database migration: Adding results fields...');
@@ -315,9 +289,7 @@ const startServer = async () => {
       }
     });
 
-    // ==============================================
     // ✅ TESTING & DEVELOPMENT ENDPOINTS
-    // ==============================================
     app.post('/api/test/completed-match', async (req, res) => {
       try {
         const Match = require('./models/Match');
@@ -370,9 +342,7 @@ const startServer = async () => {
       }
     });
 
-    // ==============================================
     // ✅ BULK OPERATIONS
-    // ==============================================
     app.post('/api/bulk/verify-results/:eventId', async (req, res) => {
       try {
         const { eventId } = req.params;
@@ -451,9 +421,7 @@ const startServer = async () => {
       }
     });
 
-    // ==============================================
     // ✅ SYSTEM UTILITIES
-    // ==============================================
     app.get('/api/system/stats', async (req, res) => {
       try {
         const Match = require('./models/Match');
@@ -496,9 +464,7 @@ const startServer = async () => {
       }
     });
 
-    // ==============================================
     // ✅ ERROR HANDLING MIDDLEWARE
-    // ==============================================
     app.use((err, req, res, next) => {
       console.error('💥 Unhandled Error:', err);
 
@@ -525,9 +491,7 @@ const startServer = async () => {
       });
     });
 
-    // ==============================================
-    // ✅ 404 HANDLER
-    // ==============================================
+    // ✅ 404 HANDLER (MERGED FROM BOTH)
     app.use('*', (req, res) => {
       res.status(404).json({
         success: false,
@@ -556,9 +520,7 @@ const startServer = async () => {
       });
     });
 
-    // ==============================================
     // ✅ START SERVER
-    // ==============================================
     const PORT = process.env.PORT || 5000;
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('\n' + '='.repeat(60));
@@ -582,18 +544,11 @@ const startServer = async () => {
       console.log('\n🔧 Database Operations:');
       console.log(`   🛠️ Direct Update: POST http://192.168.0.100:${PORT}/api/direct/update-results/:eventId`);
       console.log(`   🚀 Migration: POST http://192.168.0.100:${PORT}/api/migrate/add-results-fields`);
-      console.log('\n🎮 MATCH & TOURNAMENT SYSTEM:');
-      console.log(`   ⚡ All Matches (Admin): GET http://192.168.0.100:${PORT}/api/matches/admin/all`);
-      console.log(`   ⚡ Pending Matches: GET http://192.168.0.100:${PORT}/api/matches/admin/pending`);
-      console.log(`   🏆 All Tournaments (Admin): GET http://192.168.0.100:${PORT}/api/tournaments/admin/all`);
-      console.log(`   🏆 Pending Tournaments: GET http://192.168.0.100:${PORT}/api/tournaments/admin/pending`);
       console.log('='.repeat(60));
       console.log('🚀 Server ready to handle requests!');
     });
 
-    // ==============================================
     // ✅ GRACEFUL SHUTDOWN HANDLERS
-    // ==============================================
     const gracefulShutdown = async (signal) => {
       console.log(`\n⚠️ Received ${signal}. Starting graceful shutdown...`);
       server.close(async () => {
