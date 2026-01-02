@@ -1,12 +1,14 @@
-// routes/matches.js - COMPLETE FILE FOR MATCHES ONLY
+// routes/matches.js - COMPLETELY FIXED WITH ROLE-BASED APPROVAL
 const express = require('express');
 const Match = require('../models/Match');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// Data mapping function for matches
-const mapMatchData = (reqBody, userId) => {
+// ✅ FIXED: Data mapping function with role-based approval
+const mapMatchData = (reqBody, userId, userRole) => {
   console.log('🔄 Mapping match data:', reqBody);
+  
+  const isAdmin = userRole === 'admin';
   
   return {
     // Basic info
@@ -34,18 +36,24 @@ const mapMatchData = (reqBody, userId) => {
     room_password: reqBody.room_password || reqBody.password || '',
 
     // Timing
-    start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime),
+    start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
-    schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime),
+    schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
 
-    // Status & Approval
-    status: reqBody.status || 'pending',
-    approval_status: reqBody.approval_status || reqBody.approvalStatus || 'pending',
-    created_by: userId
+    // ✅ FIXED: Role-based approval
+    status: isAdmin ? 'upcoming' : 'pending',
+    approval_status: isAdmin ? 'approved' : 'pending',
+    created_by: userId,
+    
+    // ✅ Auto-set approval fields only for admin
+    ...(isAdmin && {
+      approved_by: userId,
+      approved_at: new Date()
+    })
   };
 };
 
-// GET all matches
+// ✅ GET all matches - FIXED ADMIN FILTER
 router.get('/', async (req, res) => {
   try {
     console.log('🔍 Fetching matches...');
@@ -61,16 +69,21 @@ router.get('/', async (req, res) => {
 
     let filter = {};
     
-    const isAdmin = req.user?.role === 'admin' || req.query.admin === 'true';
+    // ✅ FIXED: Check if user is admin via query param or auth
+    const isAdmin = req.query.admin === 'true' || 
+                   (req.user && req.user.role === 'admin');
     
     if (isAdmin) {
       console.log('👑 Admin: No default filters');
+      // Admin sees everything - no default filters
     } else {
+      // Non-admin users see only approved and upcoming/live matches
       filter.approval_status = 'approved';
       filter.status = { $in: ['upcoming', 'live'] };
       console.log('👤 Non-admin filter applied:', filter);
     }
 
+    // Additional filters
     if (status && status !== 'all') {
       filter.status = status;
     }
@@ -92,6 +105,7 @@ router.get('/', async (req, res) => {
 
     const matches = await Match.find(filter)
       .populate('created_by', 'username')
+      .populate('approved_by', 'username')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(pageSize);
@@ -118,16 +132,20 @@ router.get('/', async (req, res) => {
   }
 });
 
-// CREATE match
+// ✅ FIXED: CREATE match - WITH ROLE-BASED APPROVAL
 router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 CREATE match request:', req.body);
     console.log('👤 User creating match:', req.user);
+    console.log('👑 User role:', req.user.role);
 
-    const matchData = mapMatchData(req.body, req.user.userId);
+    // ✅ FIXED: Pass user role to mapMatchData
+    const matchData = mapMatchData(req.body, req.user._id, req.user.role);
 
     console.log('✅ Processed match data:', matchData);
+    console.log('🎯 Approval status:', matchData.approval_status);
 
+    // Validation
     if (!matchData.title || !matchData.game) {
       return res.status(400).json({
         success: false,
@@ -144,12 +162,18 @@ router.post('/', auth, async (req, res) => {
 
     const match = await Match.create(matchData);
     await match.populate('created_by', 'username');
+    
+    if (matchData.approval_status === 'approved') {
+      await match.populate('approved_by', 'username');
+    }
 
     console.log('✅ Match created successfully:', match._id);
 
     res.status(201).json({
       success: true,
-      message: 'Match created successfully! Waiting for admin approval.',
+      message: req.user.role === 'admin' 
+        ? 'Match created successfully and is now live! (Auto-approved)' 
+        : 'Match created successfully! Waiting for admin approval.',
       data: match
     });
   } catch (error) {
@@ -162,12 +186,13 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// GET match by ID
+// ✅ GET match by ID
 router.get('/:id', async (req, res) => {
   try {
     const match = await Match.findById(req.params.id)
       .populate('created_by', 'username')
-      .populate('participants.user', 'username email');
+      .populate('participants.user', 'username email')
+      .populate('approved_by', 'username');
 
     if (!match) {
       return res.status(404).json({
@@ -190,28 +215,46 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// UPDATE match
+// ✅ UPDATE match
 router.put('/:id', auth, async (req, res) => {
   try {
-    const updateData = mapMatchData(req.body, req.user.userId);
-
-    const match = await Match.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('created_by', 'username');
-
+    const match = await Match.findById(req.params.id);
+    
     if (!match) {
       return res.status(404).json({
         success: false,
         message: 'Match not found'
       });
     }
+    
+    // Check if user is owner or admin
+    if (match.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this match'
+      });
+    }
+    
+    const updateData = mapMatchData(req.body, req.user._id, req.user.role);
+    
+    // Don't update approval status if user is not admin
+    if (req.user.role !== 'admin') {
+      delete updateData.approval_status;
+      delete updateData.status;
+    }
+
+    const updatedMatch = await Match.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    )
+    .populate('created_by', 'username')
+    .populate('approved_by', 'username');
 
     res.json({
       success: true,
       message: 'Match updated successfully',
-      data: match
+      data: updatedMatch
     });
   } catch (error) {
     console.error('❌ UPDATE match error:', error);
@@ -223,17 +266,27 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// DELETE match
+// ✅ DELETE match
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const match = await Match.findByIdAndDelete(req.params.id);
-
+    const match = await Match.findById(req.params.id);
+    
     if (!match) {
       return res.status(404).json({
         success: false,
         message: 'Match not found'
       });
     }
+    
+    // Check if user is owner or admin
+    if (match.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to delete this match'
+      });
+    }
+
+    await Match.findByIdAndDelete(req.params.id);
 
     res.json({
       success: true,
@@ -249,7 +302,7 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// UPDATE match status
+// ✅ UPDATE match status
 router.put('/:id/status', auth, async (req, res) => {
   try {
     const { status } = req.body;
@@ -290,7 +343,7 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
-// JOIN match
+// ✅ JOIN match
 router.post('/:id/join', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -302,6 +355,14 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
+    // Check if match is approved
+    if (match.approval_status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'This match is not approved yet'
+      });
+    }
+
     if (match.status !== 'upcoming') {
       return res.status(400).json({
         success: false,
@@ -310,7 +371,7 @@ router.post('/:id/join', auth, async (req, res) => {
     }
 
     const alreadyJoined = match.participants.some(
-      participant => participant.user.toString() === req.user.userId
+      participant => participant.user.toString() === req.user._id.toString()
     );
 
     if (alreadyJoined) {
@@ -328,7 +389,7 @@ router.post('/:id/join', auth, async (req, res) => {
     }
 
     match.participants.push({
-      user: req.user.userId,
+      user: req.user._id,
       status: 'joined'
     });
 
@@ -352,7 +413,82 @@ router.post('/:id/join', auth, async (req, res) => {
   }
 });
 
-// ADMIN: Get pending matches
+// ✅ ADMIN: Get all matches (including pending) - FIXED
+router.get('/admin/all', adminAuth, async (req, res) => {
+  try {
+    console.log('👑 ADMIN: Fetching ALL matches (including pending)...');
+    
+    const { 
+      limit = 100, 
+      page = 1, 
+      status,
+      approval_status,
+      game,
+      search 
+    } = req.query;
+
+    let filter = {};
+    
+    // Admin can see everything - no default filters
+    
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    if (approval_status && approval_status !== 'all') {
+      filter.approval_status = approval_status;
+    }
+    if (game && game !== 'all') {
+      filter.game = game;
+    }
+    if (search) {
+      filter.title = { $regex: search, $options: 'i' };
+    }
+
+    const pageNumber = parseInt(page);
+    const pageSize = parseInt(limit);
+    const skip = (pageNumber - 1) * pageSize;
+
+    const matches = await Match.find(filter)
+      .populate('created_by', 'username email')
+      .populate('approved_by', 'username')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize);
+
+    const totalMatches = await Match.countDocuments(filter);
+
+    console.log(`👑 ADMIN: Found ${matches.length} matches (all statuses)`);
+
+    // Get counts for dashboard
+    const pendingCount = await Match.countDocuments({ approval_status: 'pending' });
+    const approvedCount = await Match.countDocuments({ approval_status: 'approved' });
+    const rejectedCount = await Match.countDocuments({ approval_status: 'rejected' });
+
+    res.json({
+      success: true,
+      count: matches.length,
+      total: totalMatches,
+      page: pageNumber,
+      pages: Math.ceil(totalMatches / pageSize),
+      data: matches,
+      dashboard: {
+        pending: pendingCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+        total: totalMatches
+      }
+    });
+  } catch (error) {
+    console.error('❌ ADMIN all matches error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch matches',
+      error: error.message
+    });
+  }
+});
+
+// ✅ ADMIN: Get pending matches
 router.get('/admin/pending', adminAuth, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
@@ -362,6 +498,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
       approval_status: 'pending'
     })
       .populate('created_by', 'username email')
+      .populate('approved_by', 'username')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(Number(limit));
@@ -369,6 +506,8 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
     const total = await Match.countDocuments({
       approval_status: 'pending'
     });
+
+    console.log(`👑 ADMIN: Found ${matches.length} pending matches`);
 
     res.json({
       success: true,
@@ -390,7 +529,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ADMIN: Approve match
+// ✅ ADMIN: Approve match
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
     const match = await Match.findByIdAndUpdate(
@@ -398,12 +537,14 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
       {
         approval_status: 'approved',
         status: 'upcoming',
-        approved_by: req.user.userId,
+        approved_by: req.user._id,
         approved_at: new Date(),
         admin_notes: req.body.adminNotes || ''
       },
       { new: true }
-    ).populate('created_by', 'username email');
+    )
+    .populate('created_by', 'username email')
+    .populate('approved_by', 'username');
 
     if (!match) {
       return res.status(404).json({
@@ -411,6 +552,8 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
         message: 'Match not found'
       });
     }
+
+    console.log('✅ ADMIN: Match approved:', match._id);
 
     res.json({
       success: true,
@@ -427,7 +570,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ADMIN: Reject match
+// ✅ ADMIN: Reject match
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
     const match = await Match.findByIdAndUpdate(
@@ -439,7 +582,9 @@ router.post('/admin/reject/:id', adminAuth, async (req, res) => {
         admin_notes: req.body.adminNotes || ''
       },
       { new: true }
-    ).populate('created_by', 'username email');
+    )
+    .populate('created_by', 'username email')
+    .populate('approved_by', 'username');
 
     if (!match) {
       return res.status(404).json({
@@ -447,6 +592,8 @@ router.post('/admin/reject/:id', adminAuth, async (req, res) => {
         message: 'Match not found'
       });
     }
+
+    console.log('✅ ADMIN: Match rejected:', match._id);
 
     res.json({
       success: true,
