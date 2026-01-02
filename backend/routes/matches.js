@@ -1,10 +1,10 @@
-// routes/matches.js - COMPLETELY FIXED WITH ROLE-BASED APPROVAL
+// routes/matches.js - COMPLETELY FIXED WITH userId SUPPORT
 const express = require('express');
 const Match = require('../models/Match');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// ✅ FIXED: Data mapping function with role-based approval
+// ✅ FIXED: Data mapping function with userId support
 const mapMatchData = (reqBody, userId, userRole) => {
   console.log('🔄 Mapping match data:', reqBody);
   
@@ -132,18 +132,28 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ FIXED: CREATE match - WITH ROLE-BASED APPROVAL
+// ✅ FIXED: CREATE match - WITH userId SUPPORT
 router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 CREATE match request:', req.body);
     console.log('👤 User creating match:', req.user);
     console.log('👑 User role:', req.user.role);
 
-    // ✅ FIXED: Pass user role to mapMatchData
-    const matchData = mapMatchData(req.body, req.user._id, req.user.role);
+    // ✅ FIXED: Use req.user.userId if req.user._id is undefined
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+    
+    const matchData = mapMatchData(req.body, userId, req.user.role);
 
     console.log('✅ Processed match data:', matchData);
     console.log('🎯 Approval status:', matchData.approval_status);
+    console.log('👤 Created by:', matchData.created_by);
 
     // Validation
     if (!matchData.title || !matchData.game) {
@@ -215,7 +225,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ✅ UPDATE match
+// ✅ FIXED: UPDATE match - WITH userId SUPPORT
 router.put('/:id', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -227,15 +237,24 @@ router.put('/:id', auth, async (req, res) => {
       });
     }
     
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+    
     // Check if user is owner or admin
-    if (match.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to update this match'
       });
     }
     
-    const updateData = mapMatchData(req.body, req.user._id, req.user.role);
+    const updateData = mapMatchData(req.body, userId, req.user.role);
     
     // Don't update approval status if user is not admin
     if (req.user.role !== 'admin') {
@@ -266,7 +285,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ DELETE match
+// ✅ FIXED: DELETE match - WITH userId SUPPORT
 router.delete('/:id', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -278,8 +297,17 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
     
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+    
     // Check if user is owner or admin
-    if (match.created_by.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+    if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         message: 'Not authorized to delete this match'
@@ -343,7 +371,7 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
-// ✅ JOIN match
+// ✅ FIXED: JOIN match - WITH userId SUPPORT
 router.post('/:id/join', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -352,6 +380,15 @@ router.post('/:id/join', auth, async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Match not found'
+      });
+    }
+
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
       });
     }
 
@@ -371,7 +408,7 @@ router.post('/:id/join', auth, async (req, res) => {
     }
 
     const alreadyJoined = match.participants.some(
-      participant => participant.user.toString() === req.user._id.toString()
+      participant => participant.user.toString() === userId.toString()
     );
 
     if (alreadyJoined) {
@@ -389,7 +426,7 @@ router.post('/:id/join', auth, async (req, res) => {
     }
 
     match.participants.push({
-      user: req.user._id,
+      user: userId,
       status: 'joined'
     });
 
@@ -529,15 +566,24 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ ADMIN: Approve match
+// ✅ FIXED: ADMIN: Approve match - WITH userId SUPPORT
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+    
     const match = await Match.findByIdAndUpdate(
       req.params.id,
       {
         approval_status: 'approved',
         status: 'upcoming',
-        approved_by: req.user._id,
+        approved_by: userId,
         approved_at: new Date(),
         admin_notes: req.body.adminNotes || ''
       },
@@ -570,9 +616,18 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ ADMIN: Reject match
+// ✅ FIXED: ADMIN: Reject match - WITH userId SUPPORT
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+    
     const match = await Match.findByIdAndUpdate(
       req.params.id,
       {
