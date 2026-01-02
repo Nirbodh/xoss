@@ -4,9 +4,9 @@ import { Platform } from 'react-native';
 // ✅ Smart URL Detection
 const getBaseUrl = () => {
   // Development URLs
-  const LOCAL_URL = "http://192.168.0.200:5000/api";
-  const LOCAL_ALT = "http://192.168.0.100:5000/api";
-  const PROD_URL = "https://xoss.onrender.com/api";
+  const LOCAL_URL = "http://192.168.0.200:5000";
+  const LOCAL_ALT = "http://192.168.0.100:5000";
+  const PROD_URL = "https://xoss.onrender.com";
 
   // যদি development mode এ থাকি
   if (__DEV__) {
