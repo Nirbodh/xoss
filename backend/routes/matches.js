@@ -1,6 +1,7 @@
-// routes/matches.js - COMPLETELY FIXED WITH userId SUPPORT
+// routes/matches.js - COMPLETELY FIXED WITH userId SUPPORT + PAYMENT JOIN
 const express = require('express');
 const Match = require('../models/Match');
+const { Wallet, Transaction } = require('../models/Wallet'); // ✅ Wallet model import
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
@@ -445,6 +446,161 @@ router.post('/:id/join', auth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to join match',
+      error: error.message
+    });
+  }
+});
+
+// ✅ NEW: JOIN match WITH PAYMENT - AUTO DEDUCT FROM WALLET
+router.post('/:id/join-with-payment', auth, async (req, res) => {
+  const session = await Match.startSession(); // Start a MongoDB session for transaction
+  session.startTransaction();
+  
+  try {
+    console.log('💳 JOIN match WITH PAYMENT request:', req.params.id);
+    
+    const match = await Match.findById(req.params.id).session(session);
+
+    if (!match) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: 'Match not found'
+      });
+    }
+
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'User ID not found. Please login again.'
+      });
+    }
+
+    // Check if match is approved
+    if (match.approval_status !== 'approved') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'This match is not approved yet'
+      });
+    }
+
+    if (match.status !== 'upcoming') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Match is not joinable'
+      });
+    }
+
+    const alreadyJoined = match.participants.some(
+      participant => participant.user.toString() === userId.toString()
+    );
+
+    if (alreadyJoined) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'Already joined this match'
+      });
+    }
+
+    if (match.current_participants >= match.max_participants) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: 'No spots left in this match'
+      });
+    }
+
+    // ✅ Check wallet balance and deduct entry fee
+    const entryFee = match.entry_fee || 0;
+    
+    if (entryFee > 0) {
+      // Get user's wallet
+      const wallet = await Wallet.findOrCreate(userId);
+      
+      // Check if user has sufficient balance
+      if (wallet.balance < entryFee) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.balance}`,
+          required: entryFee,
+          available: wallet.balance
+        });
+      }
+
+      // ✅ Deduct entry fee from wallet
+      const debitResult = await wallet.debit(
+        entryFee,
+        `Match Entry Fee: ${match.title}`,
+        {
+          method: 'match_entry',
+          reference_id: match._id.toString(),
+          match_id: match._id,
+          match_title: match.title
+        }
+      );
+
+      console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${debitResult.wallet.balance}`);
+    }
+
+    // ✅ Add user to match participants
+    match.participants.push({
+      user: userId,
+      status: 'joined',
+      joined_at: new Date(),
+      payment_status: 'paid',
+      amount_paid: entryFee
+    });
+
+    match.current_participants += 1;
+    await match.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Populate data for response
+    await match.populate('participants.user', 'username');
+    await match.populate('created_by', 'username');
+
+    console.log(`✅ User ${userId} joined match ${match._id} with payment`);
+
+    res.json({
+      success: true,
+      message: entryFee > 0 
+        ? `Successfully joined match! ৳${entryFee} deducted from your wallet.` 
+        : 'Successfully joined match!',
+      data: {
+        match,
+        payment: {
+          amount: entryFee,
+          status: 'deducted',
+          transaction_id: entryFee > 0 ? 'generated_in_wallet' : null
+        },
+        spots_left: match.max_participants - match.current_participants
+      }
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ JOIN WITH PAYMENT error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to join match with payment',
       error: error.message
     });
   }
