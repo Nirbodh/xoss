@@ -1,11 +1,11 @@
-// routes/matches.js - COMPLETELY FIXED WITH userId SUPPORT + PAYMENT JOIN
+// routes/matches.js - COMPLETELY FIXED VERSION
 const express = require('express');
 const Match = require('../models/Match');
-const { Wallet, Transaction } = require('../models/Wallet'); // ✅ Wallet model import
+const { Wallet, Transaction } = require('../models/Wallet');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// ✅ FIXED: Data mapping function with userId support
+// ✅ DATA MAPPING FUNCTION
 const mapMatchData = (reqBody, userId, userRole) => {
   console.log('🔄 Mapping match data:', reqBody);
   
@@ -41,12 +41,12 @@ const mapMatchData = (reqBody, userId, userRole) => {
     end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
     schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
 
-    // ✅ FIXED: Role-based approval
+    // Role-based approval
     status: isAdmin ? 'upcoming' : 'pending',
     approval_status: isAdmin ? 'approved' : 'pending',
     created_by: userId,
     
-    // ✅ Auto-set approval fields only for admin
+    // Auto-set approval fields only for admin
     ...(isAdmin && {
       approved_by: userId,
       approved_at: new Date()
@@ -54,7 +54,7 @@ const mapMatchData = (reqBody, userId, userRole) => {
   };
 };
 
-// ✅ GET all matches - FIXED ADMIN FILTER
+// ✅ GET all matches
 router.get('/', async (req, res) => {
   try {
     console.log('🔍 Fetching matches...');
@@ -70,21 +70,17 @@ router.get('/', async (req, res) => {
 
     let filter = {};
     
-    // ✅ FIXED: Check if user is admin via query param or auth
     const isAdmin = req.query.admin === 'true' || 
                    (req.user && req.user.role === 'admin');
     
     if (isAdmin) {
       console.log('👑 Admin: No default filters');
-      // Admin sees everything - no default filters
     } else {
-      // Non-admin users see only approved and upcoming/live matches
       filter.approval_status = 'approved';
       filter.status = { $in: ['upcoming', 'live'] };
       console.log('👤 Non-admin filter applied:', filter);
     }
 
-    // Additional filters
     if (status && status !== 'all') {
       filter.status = status;
     }
@@ -133,14 +129,13 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ FIXED: CREATE match - WITH userId SUPPORT
+// ✅ CREATE match
 router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 CREATE match request:', req.body);
     console.log('👤 User creating match:', req.user);
     console.log('👑 User role:', req.user.role);
 
-    // ✅ FIXED: Use req.user.userId if req.user._id is undefined
     const userId = req.user._id || req.user.userId;
     
     if (!userId) {
@@ -153,10 +148,7 @@ router.post('/', auth, async (req, res) => {
     const matchData = mapMatchData(req.body, userId, req.user.role);
 
     console.log('✅ Processed match data:', matchData);
-    console.log('🎯 Approval status:', matchData.approval_status);
-    console.log('👤 Created by:', matchData.created_by);
 
-    // Validation
     if (!matchData.title || !matchData.game) {
       return res.status(400).json({
         success: false,
@@ -226,7 +218,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ✅ FIXED: UPDATE match - WITH userId SUPPORT
+// ✅ UPDATE match
 router.put('/:id', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -247,7 +239,6 @@ router.put('/:id', auth, async (req, res) => {
       });
     }
     
-    // Check if user is owner or admin
     if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -257,7 +248,6 @@ router.put('/:id', auth, async (req, res) => {
     
     const updateData = mapMatchData(req.body, userId, req.user.role);
     
-    // Don't update approval status if user is not admin
     if (req.user.role !== 'admin') {
       delete updateData.approval_status;
       delete updateData.status;
@@ -286,7 +276,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: DELETE match - WITH userId SUPPORT
+// ✅ DELETE match
 router.delete('/:id', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -307,7 +297,6 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
     
-    // Check if user is owner or admin
     if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -372,7 +361,7 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: JOIN match - WITH userId SUPPORT
+// ✅ JOIN match (without payment)
 router.post('/:id/join', auth, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -393,7 +382,6 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
-    // Check if match is approved
     if (match.approval_status !== 'approved') {
       return res.status(400).json({
         success: false,
@@ -408,8 +396,8 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
-    const alreadyJoined = match.participants.some(
-      participant => participant.user.toString() === userId.toString()
+    const alreadyJoined = match.participants && match.participants.some(
+      participant => participant.user && participant.user.toString() === userId.toString()
     );
 
     if (alreadyJoined) {
@@ -424,6 +412,10 @@ router.post('/:id/join', auth, async (req, res) => {
         success: false,
         message: 'No spots left in this match'
       });
+    }
+
+    if (!match.participants) {
+      match.participants = [];
     }
 
     match.participants.push({
@@ -451,9 +443,9 @@ router.post('/:id/join', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: JOIN match WITH PAYMENT - AUTO DEDUCT FROM WALLET
+// ✅ JOIN match WITH PAYMENT
 router.post('/:id/join-with-payment', auth, async (req, res) => {
-  const session = await Match.startSession(); // Start a MongoDB session for transaction
+  const session = await Match.startSession();
   session.startTransaction();
   
   try {
@@ -483,7 +475,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       });
     }
 
-    // Check if match is approved
     if (match.approval_status !== 'approved') {
       await session.abortTransaction();
       session.endSession();
@@ -524,18 +515,15 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       });
     }
 
-    // ✅ Check wallet balance and deduct entry fee
     const entryFee = match.entry_fee || 0;
     
     console.log(`💰 Entry Fee: ${entryFee}, User ID: ${userId}`);
     
     if (entryFee > 0) {
       try {
-        // Get user's wallet using the correct field name
         const wallet = await Wallet.findOne({ user_id: userId }).session(session);
         
         if (!wallet) {
-          // Create wallet if doesn't exist
           const newWallet = new Wallet({ user_id: userId, balance: 0 });
           await newWallet.save({ session });
           
@@ -552,7 +540,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
             });
           }
         } else {
-          // Check if user has sufficient balance
           console.log(`💰 Wallet Balance: ${wallet.balance}, Required: ${entryFee}`);
           
           if (wallet.balance < entryFee) {
@@ -566,13 +553,11 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
             });
           }
 
-          // ✅ Deduct entry fee from wallet
           wallet.balance -= entryFee;
           wallet.total_spent += entryFee;
           wallet.last_activity = new Date();
           await wallet.save({ session });
 
-          // Create transaction record
           await Transaction.create([{
             user_id: userId,
             type: 'debit',
@@ -602,7 +587,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       }
     }
 
-    // ✅ Add user to match participants
     const participantData = {
       user: userId,
       status: 'joined',
@@ -611,7 +595,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       amount_paid: entryFee
     };
 
-    // Add game details if provided
     if (req.body.game_uid || req.body.gameUID) {
       participantData.game_uid = req.body.game_uid || req.body.gameUID;
     }
@@ -619,7 +602,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       participantData.game_name = req.body.game_name || req.body.gameName;
     }
 
-    // Initialize participants array if doesn't exist
     if (!match.participants) {
       match.participants = [];
     }
@@ -669,94 +651,10 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
   }
 });
 
-    // ✅ Check wallet balance and deduct entry fee
-    const entryFee = match.entry_fee || 0;
-    
-    if (entryFee > 0) {
-      // Get user's wallet
-      const wallet = await Wallet.findOrCreate(userId);
-      
-      // Check if user has sufficient balance
-      if (wallet.balance < entryFee) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.balance}`,
-          required: entryFee,
-          available: wallet.balance
-        });
-      }
-
-      // ✅ Deduct entry fee from wallet
-      const debitResult = await wallet.debit(
-        entryFee,
-        `Match Entry Fee: ${match.title}`,
-        {
-          method: 'match_entry',
-          reference_id: match._id.toString(),
-          match_id: match._id,
-          match_title: match.title
-        }
-      );
-
-      console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${debitResult.wallet.balance}`);
-    }
-
-    // ✅ Add user to match participants
-    match.participants.push({
-      user: userId,
-      status: 'joined',
-      joined_at: new Date(),
-      payment_status: 'paid',
-      amount_paid: entryFee
-    });
-
-    match.current_participants += 1;
-    await match.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    // Populate data for response
-    await match.populate('participants.user', 'username');
-    await match.populate('created_by', 'username');
-
-    console.log(`✅ User ${userId} joined match ${match._id} with payment`);
-
-    res.json({
-      success: true,
-      message: entryFee > 0 
-        ? `Successfully joined match! ৳${entryFee} deducted from your wallet.` 
-        : 'Successfully joined match!',
-      data: {
-        match,
-        payment: {
-          amount: entryFee,
-          status: 'deducted',
-          transaction_id: entryFee > 0 ? 'generated_in_wallet' : null
-        },
-        spots_left: match.max_participants - match.current_participants
-      }
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    
-    console.error('❌ JOIN WITH PAYMENT error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to join match with payment',
-      error: error.message
-    });
-  }
-});
-
-// ✅ ADMIN: Get all matches (including pending) - FIXED
+// ✅ ADMIN: Get all matches
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
-    console.log('👑 ADMIN: Fetching ALL matches (including pending)...');
+    console.log('👑 ADMIN: Fetching ALL matches...');
     
     const { 
       limit = 100, 
@@ -768,8 +666,6 @@ router.get('/admin/all', adminAuth, async (req, res) => {
     } = req.query;
 
     let filter = {};
-    
-    // Admin can see everything - no default filters
     
     if (status && status !== 'all') {
       filter.status = status;
@@ -799,7 +695,6 @@ router.get('/admin/all', adminAuth, async (req, res) => {
 
     console.log(`👑 ADMIN: Found ${matches.length} matches (all statuses)`);
 
-    // Get counts for dashboard
     const pendingCount = await Match.countDocuments({ approval_status: 'pending' });
     const approvedCount = await Match.countDocuments({ approval_status: 'approved' });
     const rejectedCount = await Match.countDocuments({ approval_status: 'rejected' });
@@ -869,7 +764,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: ADMIN: Approve match - WITH userId SUPPORT
+// ✅ ADMIN: Approve match
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
     const userId = req.user._id || req.user.userId;
@@ -919,7 +814,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: ADMIN: Reject match - WITH userId SUPPORT
+// ✅ ADMIN: Reject match
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
     const userId = req.user._id || req.user.userId;
