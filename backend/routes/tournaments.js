@@ -1,6 +1,7 @@
-// routes/tournaments.js - COMPLETELY FIXED WITH userId
+// routes/tournaments.js - COMPLETELY FIXED WITH userId + PAYMENT JOIN
 const express = require('express');
 const Tournament = require('../models/Tournament');
+const { Wallet, Transaction } = require('../models/Wallet'); // ✅ Wallet model import
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
@@ -222,10 +223,10 @@ router.post('/', auth, async (req, res) => {
       game: req.body.game,
       description: req.body.description || '',
       rules: req.body.rules || '',
-      entry_fee: Number(req.body.entryFee) || 0,
-      total_prize: Number(req.body.prizePool) || 0,
-      per_kill: Number(req.body.perKill) || 0,
-      max_participants: Number(req.body.maxPlayers) || 50,
+      entry_fee: Number(reqBody.entryFee) || 0,
+      total_prize: Number(reqBody.prizePool) || 0,
+      per_kill: Number(reqBody.perKill) || 0,
+      max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 50,
       current_participants: 0,
       type: req.body.type || 'Squad',
       map: req.body.map || 'Bermuda',
@@ -491,6 +492,161 @@ router.post('/:id/join', auth, async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: 'Failed to join tournament',
+      error: error.message 
+    });
+  }
+});
+
+// ✅ NEW: JOIN tournament WITH PAYMENT - AUTO DEDUCT FROM WALLET
+router.post('/:id/join-with-payment', auth, async (req, res) => {
+  const session = await Tournament.startSession(); // Start a MongoDB session for transaction
+  session.startTransaction();
+  
+  try {
+    console.log('💳 JOIN tournament WITH PAYMENT request:', req.params.id);
+    
+    const tournament = await Tournament.findById(req.params.id).session(session);
+
+    if (!tournament) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Tournament not found' 
+      });
+    }
+
+    const userId = req.user._id || req.user.userId;
+    
+    if (!userId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User ID not found. Please login again.' 
+      });
+    }
+
+    // Check if tournament is approved
+    if (tournament.approval_status !== 'approved') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'This tournament is not approved yet' 
+      });
+    }
+
+    if (tournament.status !== 'upcoming') {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Tournament is not joinable' 
+      });
+    }
+
+    const alreadyJoined = tournament.participants.some(
+      participant => participant.user.toString() === userId.toString()
+    );
+
+    if (alreadyJoined) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Already joined this tournament' 
+      });
+    }
+
+    if (tournament.current_participants >= tournament.max_participants) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No spots left in this tournament' 
+      });
+    }
+
+    // ✅ Check wallet balance and deduct entry fee
+    const entryFee = tournament.entry_fee || 0;
+    
+    if (entryFee > 0) {
+      // Get user's wallet
+      const wallet = await Wallet.findOrCreate(userId);
+      
+      // Check if user has sufficient balance
+      if (wallet.balance < entryFee) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ 
+          success: false, 
+          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.balance}`,
+          required: entryFee,
+          available: wallet.balance
+        });
+      }
+
+      // ✅ Deduct entry fee from wallet
+      const debitResult = await wallet.debit(
+        entryFee,
+        `Tournament Entry Fee: ${tournament.title}`,
+        {
+          method: 'tournament_entry',
+          reference_id: tournament._id.toString(),
+          tournament_id: tournament._id,
+          tournament_title: tournament.title
+        }
+      );
+
+      console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${debitResult.wallet.balance}`);
+    }
+
+    // ✅ Add user to tournament participants
+    tournament.participants.push({
+      user: userId,
+      status: 'joined',
+      joined_at: new Date(),
+      payment_status: 'paid',
+      amount_paid: entryFee
+    });
+
+    tournament.current_participants += 1;
+    await tournament.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    // Populate data for response
+    await tournament.populate('participants.user', 'username');
+    await tournament.populate('created_by', 'username');
+
+    console.log(`✅ User ${userId} joined tournament ${tournament._id} with payment`);
+
+    res.json({ 
+      success: true, 
+      message: entryFee > 0 
+        ? `Successfully joined tournament! ৳${entryFee} deducted from your wallet.` 
+        : 'Successfully joined tournament!',
+      data: {
+        tournament,
+        payment: {
+          amount: entryFee,
+          status: 'deducted',
+          transaction_id: entryFee > 0 ? 'generated_in_wallet' : null
+        },
+        spots_left: tournament.max_participants - tournament.current_participants
+      }
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ JOIN WITH PAYMENT error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to join tournament with payment',
       error: error.message 
     });
   }
