@@ -1,13 +1,13 @@
-// routes/tournaments.js - COMPLETELY FIXED WITH userId + PAYMENT JOIN
+// routes/tournaments.js - COMPLETELY FIXED VERSION
 const express = require('express');
 const Tournament = require('../models/Tournament');
-const { Wallet, Transaction } = require('../models/Wallet'); // ✅ Wallet model import
+const { Wallet, Transaction } = require('../models/Wallet');
 const { auth, adminAuth } = require('../middleware/auth');
 const router = express.Router();
 
-// ✅ FIXED DATA MAPPING FUNCTION - WITH userId SUPPORT
+// ✅ FIXED DATA MAPPING FUNCTION
 const mapTournamentData = (reqBody, userId, userRole) => {
-  console.log('🔄 Mapping tournament data (BOTH FORMATS):', reqBody);
+  console.log('🔄 Mapping tournament data:', reqBody);
   
   const isAdmin = userRole === 'admin';
   
@@ -18,12 +18,12 @@ const mapTournamentData = (reqBody, userId, userRole) => {
     description: reqBody.description || '',
     rules: reqBody.rules || '',
     
-    // Financial - ✅ ACCEPT BOTH FORMATS
+    // Financial
     entry_fee: Number(reqBody.entry_fee) || Number(reqBody.entryFee) || 0,
     total_prize: Number(reqBody.total_prize) || Number(reqBody.prizePool) || 0,
     per_kill: Number(reqBody.per_kill) || Number(reqBody.perKill) || 0,
     
-    // Participants - ✅ ACCEPT BOTH FORMATS
+    // Participants
     max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 50,
     current_participants: Number(reqBody.current_participants) || Number(reqBody.currentPlayers) || 0,
     
@@ -36,17 +36,17 @@ const mapTournamentData = (reqBody, userId, userRole) => {
     room_id: reqBody.room_id || reqBody.roomId || '',
     room_password: reqBody.room_password || reqBody.password || '',
     
-    // Timing - ✅ FIXED: Handle missing dates properly
+    // Timing
     start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
     schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
     
-    // ✅ FIXED: Role-based approval
+    // Role-based approval
     status: isAdmin ? 'upcoming' : 'pending',
     approval_status: isAdmin ? 'approved' : 'pending',
     created_by: userId,
     
-    // ✅ Auto-set approval fields only for admin
+    // Auto-set approval fields only for admin
     ...(isAdmin && {
       approved_by: userId,
       approved_at: new Date()
@@ -54,28 +54,24 @@ const mapTournamentData = (reqBody, userId, userRole) => {
   };
 };
 
-// ✅ FIXED: GET all tournaments - SHOW BASED ON USER ROLE
+// ✅ GET all tournaments
 router.get('/', async (req, res) => {
   try {
     console.log('🔍 Fetching tournaments...');
     
     let filter = {};
     
-    // ✅ FIXED: Check if user is admin via query param or auth
     const isAdmin = req.query.admin === 'true' || 
                    (req.user && req.user.role === 'admin');
     
     if (isAdmin) {
       console.log('👑 Admin: No default filters');
-      // Admin sees everything - no default filters
     } else {
-      // Non-admin users see only approved and upcoming/live tournaments
       filter.approval_status = 'approved';
       filter.status = { $in: ['upcoming', 'live'] };
       console.log('👤 Non-admin filter applied:', filter);
     }
 
-    // Additional filters
     if (req.query.status && req.query.status !== 'all') {
       filter.status = req.query.status;
     }
@@ -95,7 +91,6 @@ router.get('/', async (req, res) => {
     
     console.log(`✅ Found ${tournaments.length} tournaments`);
     
-    // Count by status for debugging
     const approvedCount = tournaments.filter(t => t.approval_status === 'approved').length;
     const pendingCount = tournaments.filter(t => t.approval_status === 'pending').length;
     const rejectedCount = tournaments.filter(t => t.approval_status === 'rejected').length;
@@ -118,14 +113,13 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ✅ FIXED: CREATE tournament - WITH userId SUPPORT
-router.post('/create', auth, async (req, res) => {
+// ✅ CREATE tournament
+router.post('/', auth, async (req, res) => {
   try {
     console.log('📥 Received tournament creation request:', req.body);
     console.log('👤 User creating tournament:', req.user);
     console.log('👑 User role:', req.user.role);
     
-    // ✅ FIXED: Use req.user.userId if req.user._id is undefined
     const userId = req.user._id || req.user.userId;
     
     if (!userId) {
@@ -138,13 +132,7 @@ router.post('/create', auth, async (req, res) => {
     const tournamentData = mapTournamentData(req.body, userId, req.user.role);
 
     console.log('🔄 Mapped tournament data:', tournamentData);
-    console.log('✅ Tournament will be created with status:', {
-      status: tournamentData.status,
-      approval_status: tournamentData.approval_status,
-      created_by: tournamentData.created_by
-    });
 
-    // ✅ FIXED: Better validation with specific messages
     const requiredFields = ['title', 'game', 'max_participants'];
     const missingFields = [];
     
@@ -162,7 +150,6 @@ router.post('/create', auth, async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Validate schedule_time
     if (!tournamentData.schedule_time || isNaN(tournamentData.schedule_time.getTime())) {
       return res.status(400).json({ 
         success: false, 
@@ -178,11 +165,6 @@ router.post('/create', auth, async (req, res) => {
     }
     
     console.log('✅ Tournament created successfully:', tournament._id);
-    console.log('📊 Tournament details:', {
-      status: tournament.status,
-      approval_status: tournament.approval_status,
-      created_by: tournament.created_by
-    });
     
     res.json({ 
       success: true, 
@@ -201,93 +183,7 @@ router.post('/create', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: SIMPLIFIED CREATE endpoint - WITH userId SUPPORT
-router.post('/', auth, async (req, res) => {
-  try {
-    console.log('📥 SIMPLE CREATE tournament request:', req.body);
-    console.log('👤 User role:', req.user.role);
-    
-    const isAdmin = req.user.role === 'admin';
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-    
-    // ✅ SIMPLE DATA MAPPING - ROLE-BASED APPROVAL
-    const tournamentData = {
-      title: req.body.title,
-      game: req.body.game,
-      description: req.body.description || '',
-      rules: req.body.rules || '',
-      entry_fee: Number(reqBody.entryFee) || 0,
-      total_prize: Number(reqBody.prizePool) || 0,
-      per_kill: Number(reqBody.perKill) || 0,
-      max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 50,
-      current_participants: 0,
-      type: req.body.type || 'Squad',
-      map: req.body.map || 'Bermuda',
-      match_type: 'tournament',
-      room_id: req.body.roomId || '',
-      room_password: req.body.password || '',
-      start_time: new Date(req.body.startTime || req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-      end_time: new Date(req.body.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
-      schedule_time: new Date(req.body.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-      
-      // ✅ FIXED: Role-based approval
-      status: isAdmin ? 'upcoming' : 'pending',
-      approval_status: isAdmin ? 'approved' : 'pending',
-      created_by: userId,
-      
-      // ✅ Auto-set approval fields only for admin
-      ...(isAdmin && {
-        approved_by: userId,
-        approved_at: new Date()
-      })
-    };
-
-    console.log('🔄 Simple tournament data:', tournamentData);
-    console.log('✅ Tournament will be created with status:', {
-      status: tournamentData.status,
-      approval_status: tournamentData.approval_status,
-      created_by: tournamentData.created_by
-    });
-
-    // Basic validation
-    if (!tournamentData.title || !tournamentData.game) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and game are required'
-      });
-    }
-
-    const tournament = await Tournament.create(tournamentData);
-    await tournament.populate('created_by', 'username');
-    
-    if (tournamentData.approval_status === 'approved') {
-      await tournament.populate('approved_by', 'username');
-    }
-
-    res.json({
-      success: true,
-      tournament,
-      message: isAdmin
-        ? 'Tournament created successfully and is now live! (Auto-approved)'
-        : 'Tournament created successfully! Waiting for admin approval.'
-    });
-  } catch (err) {
-    console.error('❌ Simple create tournament error:', err);
-    res.status(400).json({
-      success: false,
-      message: err.message
-    });
-  }
-});
-
-// ✅ FIXED: GET tournament by ID
+// ✅ GET tournament by ID
 router.get('/:id', async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id)
@@ -315,7 +211,7 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ✅ FIXED: UPDATE tournament - WITH userId SUPPORT
+// ✅ UPDATE tournament
 router.put('/:id', auth, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -336,7 +232,6 @@ router.put('/:id', auth, async (req, res) => {
       });
     }
     
-    // Check if user is owner or admin
     if (tournament.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -346,7 +241,6 @@ router.put('/:id', auth, async (req, res) => {
     
     const updateData = mapTournamentData(req.body, userId, req.user.role);
     
-    // Don't update approval status if user is not admin
     if (req.user.role !== 'admin') {
       delete updateData.approval_status;
       delete updateData.status;
@@ -374,7 +268,7 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: DELETE tournament - WITH userId SUPPORT
+// ✅ DELETE tournament
 router.delete('/:id', auth, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -395,7 +289,6 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
     
-    // Check if user is owner or admin
     if (tournament.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -418,7 +311,7 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: JOIN tournament - WITH userId SUPPORT
+// ✅ JOIN tournament (without payment)
 router.post('/:id/join', auth, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -439,7 +332,6 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
-    // Check if tournament is approved
     if (tournament.approval_status !== 'approved') {
       return res.status(400).json({ 
         success: false, 
@@ -454,8 +346,8 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
-    const alreadyJoined = tournament.participants.some(
-      participant => participant.user.toString() === userId.toString()
+    const alreadyJoined = tournament.participants && tournament.participants.some(
+      participant => participant.user && participant.user.toString() === userId.toString()
     );
 
     if (alreadyJoined) {
@@ -470,6 +362,10 @@ router.post('/:id/join', auth, async (req, res) => {
         success: false, 
         message: 'No spots left in this tournament' 
       });
+    }
+
+    if (!tournament.participants) {
+      tournament.participants = [];
     }
 
     tournament.participants.push({
@@ -497,7 +393,7 @@ router.post('/:id/join', auth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: JOIN tournament WITH PAYMENT - AUTO DEDUCT FROM WALLET
+// ✅ JOIN tournament WITH PAYMENT
 router.post('/:id/join-with-payment', auth, async (req, res) => {
   const session = await Tournament.startSession();
   session.startTransaction();
@@ -529,7 +425,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       });
     }
 
-    // Check if tournament is approved
     if (tournament.approval_status !== 'approved') {
       await session.abortTransaction();
       session.endSession();
@@ -570,18 +465,15 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       });
     }
 
-    // ✅ Check wallet balance and deduct entry fee
     const entryFee = tournament.entry_fee || 0;
     
     console.log(`💰 Entry Fee: ${entryFee}, User ID: ${userId}`);
     
     if (entryFee > 0) {
       try {
-        // Get user's wallet
         const wallet = await Wallet.findOne({ user_id: userId }).session(session);
         
         if (!wallet) {
-          // Create wallet if doesn't exist
           const newWallet = new Wallet({ user_id: userId, balance: 0 });
           await newWallet.save({ session });
           
@@ -598,7 +490,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
             });
           }
         } else {
-          // Check if user has sufficient balance
           console.log(`💰 Wallet Balance: ${wallet.balance}, Required: ${entryFee}`);
           
           if (wallet.balance < entryFee) {
@@ -612,13 +503,11 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
             });
           }
 
-          // ✅ Deduct entry fee from wallet
           wallet.balance -= entryFee;
           wallet.total_spent += entryFee;
           wallet.last_activity = new Date();
           await wallet.save({ session });
 
-          // Create transaction record
           await Transaction.create([{
             user_id: userId,
             type: 'debit',
@@ -648,7 +537,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       }
     }
 
-    // ✅ Add user to tournament participants
     const participantData = {
       user: userId,
       status: 'joined',
@@ -657,7 +545,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       amount_paid: entryFee
     };
 
-    // Add game details if provided
     if (req.body.game_uid || req.body.gameUID) {
       participantData.game_uid = req.body.game_uid || req.body.gameUID;
     }
@@ -665,7 +552,6 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       participantData.game_name = req.body.game_name || req.body.gameName;
     }
 
-    // Initialize participants array if doesn't exist
     if (!tournament.participants) {
       tournament.participants = [];
     }
@@ -715,103 +601,18 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
   }
 });
 
-    // ✅ Check wallet balance and deduct entry fee
-    const entryFee = tournament.entry_fee || 0;
-    
-    if (entryFee > 0) {
-      // Get user's wallet
-      const wallet = await Wallet.findOrCreate(userId);
-      
-      // Check if user has sufficient balance
-      if (wallet.balance < entryFee) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ 
-          success: false, 
-          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.balance}`,
-          required: entryFee,
-          available: wallet.balance
-        });
-      }
-
-      // ✅ Deduct entry fee from wallet
-      const debitResult = await wallet.debit(
-        entryFee,
-        `Tournament Entry Fee: ${tournament.title}`,
-        {
-          method: 'tournament_entry',
-          reference_id: tournament._id.toString(),
-          tournament_id: tournament._id,
-          tournament_title: tournament.title
-        }
-      );
-
-      console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${debitResult.wallet.balance}`);
-    }
-
-    // ✅ Add user to tournament participants
-    tournament.participants.push({
-      user: userId,
-      status: 'joined',
-      joined_at: new Date(),
-      payment_status: 'paid',
-      amount_paid: entryFee
-    });
-
-    tournament.current_participants += 1;
-    await tournament.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    // Populate data for response
-    await tournament.populate('participants.user', 'username');
-    await tournament.populate('created_by', 'username');
-
-    console.log(`✅ User ${userId} joined tournament ${tournament._id} with payment`);
-
-    res.json({ 
-      success: true, 
-      message: entryFee > 0 
-        ? `Successfully joined tournament! ৳${entryFee} deducted from your wallet.` 
-        : 'Successfully joined tournament!',
-      data: {
-        tournament,
-        payment: {
-          amount: entryFee,
-          status: 'deducted',
-          transaction_id: entryFee > 0 ? 'generated_in_wallet' : null
-        },
-        spots_left: tournament.max_participants - tournament.current_participants
-      }
-    });
-
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    
-    console.error('❌ JOIN WITH PAYMENT error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to join tournament with payment',
-      error: error.message 
-    });
-  }
-});
-
-// ✅ ADMIN: Get all tournaments (including pending) - FIXED
+// ✅ ADMIN: Get all tournaments
 router.get('/admin/all', adminAuth, async (req, res) => {
   try {
-    console.log('👑 ADMIN: Fetching ALL tournaments (including pending)...');
+    console.log('👑 ADMIN: Fetching ALL tournaments...');
     
     const tournaments = await Tournament.find({})
       .populate('created_by', 'username email')
       .populate('approved_by', 'username')
       .sort({ createdAt: -1 });
     
-    console.log(`👑 ADMIN: Found ${tournaments.length} tournaments (all statuses)`);
+    console.log(`👑 ADMIN: Found ${tournaments.length} tournaments`);
     
-    // Count by status for dashboard
     const approvedCount = tournaments.filter(t => t.approval_status === 'approved').length;
     const pendingCount = tournaments.filter(t => t.approval_status === 'pending').length;
     const rejectedCount = tournaments.filter(t => t.approval_status === 'rejected').length;
@@ -863,7 +664,7 @@ router.get('/admin/pending', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: ADMIN: Approve tournament - WITH userId SUPPORT
+// ✅ ADMIN: Approve tournament
 router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   try {
     const userId = req.user._id || req.user.userId;
@@ -912,7 +713,7 @@ router.post('/admin/approve/:id', adminAuth, async (req, res) => {
   }
 });
 
-// ✅ FIXED: ADMIN: Reject tournament - WITH userId SUPPORT
+// ✅ ADMIN: Reject tournament
 router.post('/admin/reject/:id', adminAuth, async (req, res) => {
   try {
     const userId = req.user._id || req.user.userId;
