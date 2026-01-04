@@ -1,4 +1,4 @@
-// models/Match.js - COMPLETE FIXED VERSION
+// models/Match.js - FIXED WITHOUT DB CHANGES
 const mongoose = require('mongoose');
 
 const matchSchema = new mongoose.Schema({
@@ -13,9 +13,21 @@ const matchSchema = new mongoose.Schema({
   total_prize: { type: Number, default: 0 },
   per_kill: { type: Number, default: 0 },
 
-  // Participants
+  // Participants - ✅ ইতিমধ্যে ডাটাবেজে থাকলে ঠিক আছে, না থাকলে মডেল থেকে ডিফল্ট নিবে
   max_participants: { type: Number, required: true },
   current_participants: { type: Number, default: 0 },
+  participants: { 
+    type: [{
+      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      game_uid: String,
+      game_name: String,
+      joined_at: { type: Date, default: Date.now },
+      status: { type: String, default: 'joined' },
+      payment_status: { type: String, default: 'pending' },
+      amount_paid: { type: Number, default: 0 }
+    }], 
+    default: [] 
+  },
 
   // Game Settings
   type: { type: String, default: 'Solo' },
@@ -118,10 +130,10 @@ const matchSchema = new mongoose.Schema({
   distributedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
 }, { 
   timestamps: true,
-  collection: 'matches'  // ✅ ADD THIS LINE - Use the correct collection
+  collection: 'matches'
 });
 
-// Virtual Fields (Frontend)
+// ✅ Virtual Fields (Frontend) - শুধু ভিউ এর জন্য, ডাটাবেজে সেভ হয় না
 matchSchema.virtual('prizePool').get(function() { return this.total_prize; });
 matchSchema.virtual('entryFee').get(function() { return this.entry_fee; });
 matchSchema.virtual('perKill').get(function() { return this.per_kill; });
@@ -133,7 +145,25 @@ matchSchema.virtual('scheduleTime').get(function() { return this.schedule_time; 
 matchSchema.virtual('matchType').get(function() { return this.match_type; });
 matchSchema.virtual('approvalStatus').get(function() { return this.approval_status; });
 
-matchSchema.set('toJSON', { virtuals: true });
-matchSchema.set('toObject', { virtuals: true });
+matchSchema.set('toJSON', { 
+  virtuals: true,
+  transform: function(doc, ret) {
+    // ✅ participants না থাকলে ডিফল্ট খালি array রিটার্ন করবে
+    if (!ret.participants) {
+      ret.participants = [];
+    }
+    return ret;
+  }
+});
+
+matchSchema.set('toObject', { 
+  virtuals: true,
+  transform: function(doc, ret) {
+    if (!ret.participants) {
+      ret.participants = [];
+    }
+    return ret;
+  }
+});
 
 module.exports = mongoose.model('Match', matchSchema);
