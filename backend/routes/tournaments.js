@@ -1,5 +1,6 @@
-// routes/tournaments.js - COMPLETELY FIXED VERSION
+// routes/tournaments.js - COMPLETE FIXED VERSION
 const express = require('express');
+const mongoose = require('mongoose');
 const Tournament = require('../models/Tournament');
 const { Wallet, Transaction } = require('../models/Wallet');
 const { auth, adminAuth } = require('../middleware/auth');
@@ -311,7 +312,7 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// ✅ JOIN tournament (without payment)
+// ✅ JOIN tournament (without payment) - FIXED
 router.post('/:id/join', auth, async (req, res) => {
   try {
     const tournament = await Tournament.findById(req.params.id);
@@ -346,7 +347,9 @@ router.post('/:id/join', auth, async (req, res) => {
       });
     }
 
-    const alreadyJoined = tournament.participants && tournament.participants.some(
+    // ✅ FIXED: Check participants safely
+    const participantsArray = tournament.participants || [];
+    const alreadyJoined = participantsArray.some(
       participant => participant.user && participant.user.toString() === userId.toString()
     );
 
@@ -393,9 +396,9 @@ router.post('/:id/join', auth, async (req, res) => {
   }
 });
 
-// ✅ JOIN tournament WITH PAYMENT
+// ✅ JOIN tournament WITH PAYMENT - COMPLETELY FIXED
 router.post('/:id/join-with-payment', auth, async (req, res) => {
-  const session = await Tournament.startSession();
+  const session = await mongoose.startSession();
   session.startTransaction();
   
   try {
@@ -443,7 +446,9 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
       });
     }
 
-    const alreadyJoined = tournament.participants && tournament.participants.some(
+    // ✅ FIXED: Check participants safely
+    const participantsArray = tournament.participants || [];
+    const alreadyJoined = participantsArray.some(
       participant => participant.user && participant.user.toString() === userId.toString()
     );
 
@@ -474,21 +479,41 @@ router.post('/:id/join-with-payment', auth, async (req, res) => {
         const wallet = await Wallet.findOne({ user_id: userId }).session(session);
         
         if (!wallet) {
-          const newWallet = new Wallet({ user_id: userId, balance: 0 });
-          await newWallet.save({ session });
-          
+          const newWallet = await Wallet.findOrCreate(userId);
           console.log('🆕 New wallet created for user:', userId);
           
-          if (0 < entryFee) {
+          if (newWallet.balance < entryFee) {
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({ 
               success: false, 
-              message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳0`,
+              message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${newWallet.balance}`,
               required: entryFee,
-              available: 0
+              available: newWallet.balance
             });
           }
+          
+          newWallet.balance -= entryFee;
+          newWallet.total_spent += entryFee;
+          newWallet.last_activity = new Date();
+          await newWallet.save({ session });
+
+          await Transaction.create([{
+            user_id: userId,
+            type: 'debit',
+            amount: entryFee,
+            description: `Tournament Entry Fee: ${tournament.title}`,
+            status: 'completed',
+            method: 'tournament_entry',
+            reference_id: tournament._id.toString(),
+            metadata: {
+              tournament_id: tournament._id,
+              tournament_title: tournament.title,
+              match_type: 'tournament'
+            }
+          }], { session });
+
+          console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${newWallet.balance}`);
         } else {
           console.log(`💰 Wallet Balance: ${wallet.balance}, Required: ${entryFee}`);
           
