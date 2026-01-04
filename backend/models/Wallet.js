@@ -1,9 +1,6 @@
-// models/Wallet.js - COMPLETELY FIXED VERSION
+// models/Wallet.js - DATABASE SAFE FIX
 const mongoose = require('mongoose');
 
-/* ============================
-   TRANSACTION SCHEMA
-============================ */
 const transactionSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -42,15 +39,8 @@ const transactionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for better performance
-transactionSchema.index({ user_id: 1, createdAt: -1 });
-transactionSchema.index({ reference_id: 1 });
-
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
-/* ============================
-   WALLET SCHEMA
-============================ */
 const walletSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -79,15 +69,41 @@ const walletSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for better performance
-walletSchema.index({ user_id: 1 });
-walletSchema.index({ balance: -1 });
+// ✅ FIXED: findOrCreate method - DATABASE SAFE
+walletSchema.statics.findOrCreate = async function(userId) {
+  try {
+    console.log('🔄 Wallet findOrCreate called with userId:', userId);
+    
+    let wallet = await this.findOne({ user_id: userId });
+    
+    if (!wallet) {
+      console.log('🆕 Creating new wallet for user:', userId);
+      wallet = new this({ 
+        user_id: userId,
+        balance: 0,
+        total_earned: 0,
+        total_spent: 0,
+        last_activity: new Date()
+      });
+      await wallet.save();
+      console.log(`✅ New wallet created for user: ${userId}`);
+    } else {
+      console.log(`✅ Found existing wallet for user: ${userId}, Balance: ${wallet.balance}`);
+      
+      // ✅ Ensure all required fields exist (for old documents)
+      if (!wallet.total_earned) wallet.total_earned = 0;
+      if (!wallet.total_spent) wallet.total_spent = 0;
+      if (!wallet.last_activity) wallet.last_activity = new Date();
+    }
+    
+    return wallet;
+  } catch (error) {
+    console.error('❌ Wallet findOrCreate error:', error);
+    throw new Error(`Failed to find or create wallet: ${error.message}`);
+  }
+};
 
-/* ============================
-   WALLET METHODS
-============================ */
-
-// Add money to wallet
+// ✅ FIXED: Add money to wallet
 walletSchema.methods.credit = async function(amount, description = '', metadata = {}) {
   if (amount <= 0) {
     throw new Error('Credit amount must be positive');
@@ -99,7 +115,6 @@ walletSchema.methods.credit = async function(amount, description = '', metadata 
   
   await this.save();
 
-  // Create transaction record
   const transaction = await Transaction.create({
     user_id: this.user_id,
     type: 'credit',
@@ -116,7 +131,7 @@ walletSchema.methods.credit = async function(amount, description = '', metadata 
   return { wallet: this, transaction };
 };
 
-// Remove money from wallet
+// ✅ FIXED: Remove money from wallet
 walletSchema.methods.debit = async function(amount, description = '', metadata = {}) {
   if (amount <= 0) {
     throw new Error('Debit amount must be positive');
@@ -132,7 +147,6 @@ walletSchema.methods.debit = async function(amount, description = '', metadata =
   
   await this.save();
 
-  // Create transaction record
   const transaction = await Transaction.create({
     user_id: this.user_id,
     type: 'debit',
@@ -147,59 +161,6 @@ walletSchema.methods.debit = async function(amount, description = '', metadata =
   console.log(`✅ Wallet debited: User ${this.user_id}, Amount: ${amount}, New Balance: ${this.balance}`);
 
   return { wallet: this, transaction };
-};
-
-// Check if user has sufficient balance
-walletSchema.methods.hasSufficientBalance = function(amount) {
-  return this.balance >= amount;
-};
-
-// Get transaction history
-walletSchema.methods.getTransactionHistory = async function(limit = 50, page = 1) {
-  const transactions = await Transaction.find({ user_id: this.user_id })
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .skip((page - 1) * limit);
-
-  const total = await Transaction.countDocuments({ user_id: this.user_id });
-
-  return {
-    transactions,
-    pagination: {
-      current: page,
-      pages: Math.ceil(total / limit),
-      total,
-      limit
-    }
-  };
-};
-
-// ✅ FIXED: Static method to find or create wallet
-walletSchema.statics.findOrCreate = async function(userId) {
-  try {
-    console.log('🔄 Wallet findOrCreate called with userId:', userId);
-    
-    let wallet = await this.findOne({ user_id: userId });
-    
-    if (!wallet) {
-      console.log('🆕 Creating new wallet for user:', userId);
-      wallet = new this({ 
-        user_id: userId,
-        balance: 0,
-        total_earned: 0,
-        total_spent: 0
-      });
-      await wallet.save();
-      console.log(`✅ New wallet created for user: ${userId}`);
-    } else {
-      console.log(`✅ Found existing wallet for user: ${userId}, Balance: ${wallet.balance}`);
-    }
-    
-    return wallet;
-  } catch (error) {
-    console.error('❌ Wallet findOrCreate error:', error);
-    throw new Error(`Failed to find or create wallet: ${error.message}`);
-  }
 };
 
 module.exports = {
