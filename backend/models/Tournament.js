@@ -1,4 +1,4 @@
-// models/Tournament.js
+// models/Tournament.js - FIXED WITHOUT DB CHANGES
 const mongoose = require('mongoose');
 
 const tournamentSchema = new mongoose.Schema({
@@ -13,9 +13,21 @@ const tournamentSchema = new mongoose.Schema({
   total_prize: { type: Number, default: 0 },
   per_kill: { type: Number, default: 0 },
 
-  // Participants
+  // Participants - ✅ ইতিমধ্যে ডাটাবেজে থাকলে ঠিক আছে, না থাকলে মডেল থেকে ডিফল্ট নিবে
   max_participants: { type: Number, required: true },
   current_participants: { type: Number, default: 0 },
+  participants: { 
+    type: [{
+      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      game_uid: String,
+      game_name: String,
+      joined_at: { type: Date, default: Date.now },
+      status: { type: String, default: 'joined' },
+      payment_status: { type: String, default: 'pending' },
+      amount_paid: { type: Number, default: 0 }
+    }], 
+    default: [] 
+  },
 
   // Game Settings
   type: { type: String, default: 'Solo' },
@@ -50,9 +62,7 @@ const tournamentSchema = new mongoose.Schema({
   rejection_reason: { type: String, default: '' },
   admin_notes: { type: String, default: '' },
 
-  // ----------------------------------------------------
-  // ✅ PRIZE DISTRIBUTION SYSTEM (Merged like Match.js)
-  // ----------------------------------------------------
+  // Prize Distribution System
   winners: [{
     rank: Number,
     playerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -66,7 +76,7 @@ const tournamentSchema = new mongoose.Schema({
       enum: ['pending', 'paid', 'failed'], 
       default: 'pending' 
     },
-    paymentMethod: String,     // bkash, nagad, rocket etc.
+    paymentMethod: String,
     transactionId: String,
     paidAt: Date,
     phoneNumber: String
@@ -85,9 +95,7 @@ const tournamentSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-// ----------------------------------------------------
-// Virtual Fields for Frontend
-// ----------------------------------------------------
+// ✅ Virtual Fields for Frontend - শুধু ভিউ এর জন্য
 tournamentSchema.virtual('prizePool').get(function() { return this.total_prize; });
 tournamentSchema.virtual('entryFee').get(function() { return this.entry_fee; });
 tournamentSchema.virtual('perKill').get(function() { return this.per_kill; });
@@ -99,7 +107,25 @@ tournamentSchema.virtual('scheduleTime').get(function() { return this.schedule_t
 tournamentSchema.virtual('matchType').get(function() { return this.match_type; });
 tournamentSchema.virtual('approvalStatus').get(function() { return this.approval_status; });
 
-tournamentSchema.set('toJSON', { virtuals: true });
-tournamentSchema.set('toObject', { virtuals: true });
+tournamentSchema.set('toJSON', { 
+  virtuals: true,
+  transform: function(doc, ret) {
+    // ✅ participants না থাকলে ডিফল্ট খালি array রিটার্ন করবে
+    if (!ret.participants) {
+      ret.participants = [];
+    }
+    return ret;
+  }
+});
+
+tournamentSchema.set('toObject', { 
+  virtuals: true,
+  transform: function(doc, ret) {
+    if (!ret.participants) {
+      ret.participants = [];
+    }
+    return ret;
+  }
+});
 
 module.exports = mongoose.model('Tournament', tournamentSchema);
