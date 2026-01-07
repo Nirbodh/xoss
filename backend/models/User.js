@@ -3,19 +3,14 @@ const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
 
-  // 🔥 UNIVERSAL UNIQUE ID (optional external ID)
-  id: {
-    type: String,
-    unique: true,
-    sparse: true
-  },
-
   // 🔥 BASIC USER INFO
   username: {
     type: String,
+    required: true,
     trim: true,
     minlength: 3,
-    maxlength: 30
+    maxlength: 30,
+    unique: true
   },
 
   name: {
@@ -25,8 +20,10 @@ const userSchema = new mongoose.Schema({
 
   email: {
     type: String,
+    required: true,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    unique: true
   },
 
   phone: {
@@ -42,6 +39,7 @@ const userSchema = new mongoose.Schema({
   // 🔥 AUTHENTICATION
   password: {
     type: String,
+    required: true,
     minlength: 6
   },
 
@@ -52,15 +50,11 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
 
-  // 🔥 WALLET SYSTEM
+  // 🔥 WALLET SYSTEM - শুধু একটি balance ফিল্ড রাখছি
   wallet_balance: {
     type: Number,
-    default: 0
-  },
-
-  balance: {       // OLD SYSTEM → kept for backwards compatibility
-    type: Number,
-    default: 0
+    default: 0,
+    min: 0
   },
 
   // 🔥 GAMING / STATISTICS
@@ -123,17 +117,15 @@ const userSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-
-// 🔥 PASSWORD HASH (only if password exists)
+// 🔥 PASSWORD HASH
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password') || !this.password) return next();
+  if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 // 🔥 PASSWORD COMPARE
 userSchema.methods.comparePassword = async function(candidatePassword) {
-  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -143,5 +135,14 @@ userSchema.methods.toJSON = function() {
   delete user.password;
   return user;
 };
+
+// 🔥 VIRTUAL: Wallet balance sync (optional)
+userSchema.virtual('balance').get(function() {
+  return this.wallet_balance;
+});
+
+userSchema.virtual('balance').set(function(value) {
+  this.wallet_balance = value;
+});
 
 module.exports = mongoose.model('User', userSchema);
