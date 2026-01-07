@@ -1,25 +1,51 @@
-// routes/wallet.js - COMPLETELY FIXED WITH JWT AUTH
+// routes/wallet.js - UPDATED VERSION
 const express = require('express');
 const router = express.Router();
-const { auth } = require('../middleware/auth'); // ✅ JWT auth ব্যবহার করুন
 const { Wallet } = require('../models/Wallet');
+const User = require('../models/User');
+const { auth } = require('../middleware/auth');
 
-// ✅ GET WALLET BALANCE (USING JWT AUTH)
+// ✅ GET WALLET BALANCE (with user sync)
 router.get('/', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    console.log(`💰 Fetching wallet for user ID: ${userId}`);
+    console.log(`💰 Fetching wallet for user: ${userId}`);
     
-    const wallet = await Wallet.findOrCreate(userId);
+    // Get both wallet and user data
+    const [wallet, user] = await Promise.all([
+      Wallet.findOrCreate(userId),
+      User.findById(userId).select('username email wallet_balance total_earnings')
+    ]);
+    
+    // ✅ Ensure sync between wallet and user
+    if (Math.abs(wallet.balance - (user?.wallet_balance || 0)) > 1) {
+      console.warn(`⚠️ Balance mismatch detected for user ${userId}: Wallet=${wallet.balance}, User=${user?.wallet_balance}`);
+      
+      // Sync them
+      await User.findByIdAndUpdate(userId, {
+        wallet_balance: wallet.balance,
+        total_earnings: wallet.total_earned
+      });
+      
+      console.log(`✅ Balance synced for user ${userId}: ${wallet.balance}`);
+    }
     
     res.json({
       success: true,
       data: {
-        balance: wallet.balance,
-        total_earned: wallet.total_earned,
-        total_spent: wallet.total_spent,
-        last_activity: wallet.last_activity
+        user: {
+          username: user?.username,
+          email: user?.email,
+          wallet_balance: wallet.balance, // Use wallet balance as source of truth
+          total_earnings: wallet.total_earned
+        },
+        wallet: {
+          balance: wallet.balance,
+          total_earned: wallet.total_earned,
+          total_spent: wallet.total_spent,
+          last_activity: wallet.last_activity
+        }
       },
       message: 'Wallet fetched successfully'
     });
@@ -57,7 +83,7 @@ router.get('/transactions', auth, async (req, res) => {
   }
 });
 
-// ✅ CREDIT WALLET
+// ✅ CREDIT WALLET (with user sync)
 router.post('/credit', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -78,7 +104,14 @@ router.post('/credit', auth, async (req, res) => {
     res.json({
       success: true,
       data: {
-        new_balance: result.wallet.balance,
+        user: {
+          wallet_balance: result.wallet.balance
+        },
+        wallet: {
+          balance: result.wallet.balance,
+          total_earned: result.wallet.total_earned,
+          total_spent: result.wallet.total_spent
+        },
         transaction: result.transaction
       },
       message: 'Wallet credited successfully'
@@ -93,72 +126,78 @@ router.post('/credit', auth, async (req, res) => {
   }
 });
 
-// ✅ TRANSFER MONEY TO ANOTHER USER
-router.post('/transfer', auth, async (req, res) => {
+// ✅ DEBIT WALLET (with user sync)
+router.post('/debit', auth, async (req, res) => {
   try {
-    const senderId = req.user.userId;
-    const { recipientId, amount, description = '' } = req.body;
+    const userId = req.user.userId;
+    const { amount, description, metadata = {} } = req.body;
     
-    if (!recipientId || !amount || amount <= 0) {
+    if (!amount || amount <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Recipient ID and valid amount required'
+        message: 'Valid amount is required'
       });
     }
     
-    console.log(`💸 Transfer request: ${senderId} -> ${recipientId}, Amount: ${amount}`);
+    console.log(`💰 Debiting wallet for user: ${userId}, Amount: ${amount}`);
     
-    // Get sender's wallet
-    const senderWallet = await Wallet.findOrCreate(senderId);
-    
-    // Check if sender has sufficient balance
-    if (!senderWallet.hasSufficientBalance(amount)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Insufficient balance'
-      });
-    }
-    
-    // Get recipient's wallet
-    const recipientWallet = await Wallet.findOrCreate(recipientId);
-    
-    // Perform transfer
-    const debitResult = await senderWallet.debit(
-      amount, 
-      `Transfer to user ${recipientId}${description ? ': ' + description : ''}`,
-      { 
-        type: 'transfer', 
-        recipientId, 
-        transactionType: 'outgoing' 
-      }
-    );
-    
-    const creditResult = await recipientWallet.credit(
-      amount,
-      `Transfer from user ${senderId}${description ? ': ' + description : ''}`,
-      { 
-        type: 'transfer', 
-        senderId, 
-        transactionType: 'incoming' 
-      }
-    );
+    const wallet = await Wallet.findOrCreate(userId);
+    const result = await wallet.debit(amount, description, metadata);
     
     res.json({
       success: true,
-      message: 'Transfer successful',
       data: {
-        sender_new_balance: debitResult.wallet.balance,
-        recipient_new_balance: creditResult.wallet.balance,
-        sender_transaction: debitResult.transaction,
-        recipient_transaction: creditResult.transaction
-      }
+        user: {
+          wallet_balance: result.wallet.balance
+        },
+        wallet: {
+          balance: result.wallet.balance,
+          total_earned: result.wallet.total_earned,
+          total_spent: result.wallet.total_spent
+        },
+        transaction: result.transaction
+      },
+      message: 'Wallet debited successfully'
     });
-    
   } catch (error) {
-    console.error('❌ Transfer error:', error);
+    console.error('❌ Debit wallet error:', error);
     res.status(500).json({
       success: false,
-      message: 'Transfer failed',
+      message: 'Failed to debit wallet',
+      error: error.message
+    });
+  }
+});
+
+// ✅ GET BALANCE HISTORY (for charts)
+router.get('/history', auth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { days = 30 } = req.query;
+    
+    const wallet = await Wallet.findOrCreate(userId);
+    
+    // Get transactions for the last X days
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
+    const transactions = await wallet.getTransactionHistory(100, 1);
+    
+    res.json({
+      success: true,
+      data: {
+        current_balance: wallet.balance,
+        total_earned: wallet.total_earned,
+        total_spent: wallet.total_spent,
+        recent_transactions: transactions.transactions.slice(0, 10)
+      },
+      message: 'Wallet history fetched successfully'
+    });
+  } catch (error) {
+    console.error('❌ Get wallet history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch wallet history',
       error: error.message
     });
   }
