@@ -588,13 +588,24 @@ exports.joinTournamentWithPayment = async (req, res) => {
 
     console.log(`✅ User ${userId} joined tournament ${tournament._id} with payment`);
 
+    // ✅ ✅ ✅ ✅ ✅ ✅ FIXED SECTION ✅ ✅ ✅ ✅ ✅ ✅
+    // Get room details from the tournament
+    const roomId = tournament.room_id || 'WAITING';
+    const roomPassword = tournament.room_password || 'WAITING';
+
     res.json({ 
       success: true, 
       message: entryFee > 0 
         ? `Successfully joined tournament! ৳${entryFee} deducted from your wallet.` 
         : 'Successfully joined tournament!',
       data: {
-        tournament,
+        tournament_id: tournament._id,
+        tournament_title: tournament.title,
+        room_id: roomId,                    // ✅ ADDED: Real Room ID
+        room_password: roomPassword,        // ✅ ADDED: Real Room Password
+        entry_fee: entryFee,
+        game_uid: req.body.game_uid || req.body.gameUID,
+        game_name: req.body.game_name || req.body.gameName,
         payment: {
           amount: entryFee,
           status: 'deducted',
