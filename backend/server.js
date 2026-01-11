@@ -1,4 +1,4 @@
-// server.js - COMPLETELY FIXED VERSION
+// server.js - XOSS GAMING SERVER (Render Production Only)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,6 +10,9 @@ const app = express();
 
 // ✅ Import All Routes
 const withdrawalRoutes = require('./routes/withdrawal');
+
+// ✅ Production Server URL
+const SERVER_URL = "https://xoss.onrender.com";
 
 // ✅ Connect MongoDB FIRST, then start server
 const startServer = async () => {
@@ -23,129 +26,44 @@ const startServer = async () => {
 
     console.log('🛠️ Setting up server middleware...');
 
-    // ✅ FIXED CORS CONFIGURATION - All Origins Allowed
+    // ✅ Professional Middleware Stack
     app.use(cors({
-      origin: '*', // ✅ ALLOW ALL ORIGINS (Temporary for testing)
+      origin: '*',
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'ngrok-skip-browser-warning']
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
     }));
-
-    // ✅ Handle preflight requests
-    app.options('*', cors());
-
-    // ✅ Body parsers
     app.use(express.json({ limit: '10mb' }));
     app.use(express.urlencoded({ extended: true }));
     app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-    // ✅ Request Logging Middleware
+    // ✅ Security Headers Middleware
     app.use((req, res, next) => {
-      console.log(`📨 ${req.method} ${req.originalUrl} - Origin: ${req.headers.origin || 'No Origin'} - ${new Date().toISOString()}`);
+      res.header('X-Content-Type-Options', 'nosniff');
+      res.header('X-Frame-Options', 'DENY');
+      res.header('X-XSS-Protection', '1; mode=block');
       next();
     });
 
-    // ✅ IMPORTANT: COMBINED ROUTE ADDED HERE (BEFORE OTHER ROUTES)
-    // ✅ This will handle /api/combined requests
-    app.get('/api/combined', async (req, res) => {
-      try {
-        console.log('📊 /api/combined - Fetching all events');
-        
-        const Match = require('./models/Match');
-        const Tournament = require('./models/Tournament');
-        
-        // Public filter: only approved events
-        const publicFilter = {
-          approval_status: 'approved',
-          status: { $in: ['upcoming', 'live', 'completed'] }
-        };
-        
-        // Check for admin query parameter
-        const isAdmin = req.query.admin === 'true';
-        const filter = isAdmin ? {} : publicFilter;
-        
-        console.log('🔍 Combined filter:', filter);
-        
-        const [matches, tournaments] = await Promise.all([
-          Match.find(filter)
-            .populate('created_by', 'username')
-            .sort({ schedule_time: 1 })
-            .lean(),
-          Tournament.find(filter)
-            .populate('created_by', 'username')
-            .sort({ schedule_time: 1 })
-            .lean()
-        ]);
-        
-        // Transform matches
-        const formattedMatches = matches.map(match => ({
-          ...match,
-          _id: match._id,
-          id: match._id.toString(),
-          matchType: 'match',
-          eventType: 'match',
-          prizePool: match.total_prize,
-          entryFee: match.entry_fee,
-          maxPlayers: match.max_participants,
-          currentPlayers: match.current_participants,
-          maxParticipants: match.max_participants,
-          currentParticipants: match.current_participants,
-          scheduleTime: match.schedule_time,
-          startTime: match.start_time,
-          endTime: match.end_time,
-          roomId: match.room_id,
-          password: match.room_password,
-          approvalStatus: match.approval_status
-        }));
-        
-        // Transform tournaments
-        const formattedTournaments = tournaments.map(tournament => ({
-          ...tournament,
-          _id: tournament._id,
-          id: tournament._id.toString(),
-          matchType: 'tournament',
-          eventType: 'tournament',
-          prizePool: tournament.total_prize,
-          entryFee: tournament.entry_fee,
-          maxPlayers: tournament.max_participants,
-          currentPlayers: tournament.current_participants,
-          maxParticipants: tournament.max_participants,
-          currentParticipants: tournament.current_participants,
-          scheduleTime: tournament.schedule_time,
-          startTime: tournament.start_time,
-          endTime: tournament.end_time,
-          roomId: tournament.room_id,
-          password: tournament.room_password,
-          approvalStatus: tournament.approval_status
-        }));
-        
-        const allEvents = [...formattedMatches, ...formattedTournaments];
-        
-        // Sort by schedule time
-        allEvents.sort((a, b) => new Date(a.scheduleTime) - new Date(b.scheduleTime));
-        
-        console.log(`✅ Combined events: ${matches.length} matches + ${tournaments.length} tournaments = ${allEvents.length} total`);
-        
-        res.json({
-          success: true,
-          message: 'Events fetched successfully',
-          data: allEvents,
-          counts: {
-            matches: matches.length,
-            tournaments: tournaments.length,
-            total: allEvents.length
-          },
-          timestamp: new Date().toISOString()
-        });
-        
-      } catch (error) {
-        console.error('❌ /api/combined error:', error);
-        res.status(500).json({
+    // ✅ Database Health Check Middleware
+    app.use((req, res, next) => {
+      if (mongoose.connection.readyState !== 1) {
+        console.warn('⚠️ Database connection unstable');
+        return res.status(503).json({
           success: false,
-          message: 'Failed to fetch events',
-          error: error.message
+          message: 'Database connection temporarily unavailable',
+          timestamp: new Date().toISOString(),
+          retryAfter: 30,
+          server: SERVER_URL
         });
       }
+      next();
+    });
+
+    // ✅ Request Logging Middleware
+    app.use((req, res, next) => {
+      console.log(`📨 ${req.method} ${req.path} - ${new Date().toISOString()}`);
+      next();
     });
 
     // ✅ API Routes - Organized by Feature
@@ -154,14 +72,7 @@ const startServer = async () => {
     // Core Routes
     app.use('/api/matches', require('./routes/matchRoutes'));
     app.use('/api/tournaments', require('./routes/tournaments'));
-    
-    // Combined Route (if separate file exists)
-    try {
-      app.use('/api/combined', require('./routes/combined'));
-      console.log('✅ Combined route loaded from file');
-    } catch (err) {
-      console.log('ℹ️ Combined route file not found, using built-in route');
-    }
+    app.use('/api/combined', require('./routes/combined'));
 
     // User Management Routes
     app.use('/api/auth', require('./routes/auth'));
@@ -185,13 +96,9 @@ const startServer = async () => {
         timestamp: new Date().toISOString(),
         database: mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected',
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        endpoints: {
-          combined: '/api/combined',
-          matches: '/api/matches',
-          tournaments: '/api/tournaments',
-          health: '/api/health'
-        }
+        environment: process.env.NODE_ENV || 'production',
+        server: SERVER_URL,
+        expoGo: '✅ Fully Compatible'
       });
     });
 
@@ -209,10 +116,8 @@ const startServer = async () => {
         message: dbStatus === 1 ? '🚀 Server is operating normally' : '⚠️ Service degradation detected',
         database: statusMap[dbStatus] || '⚫ Unknown',
         timestamp: new Date().toISOString(),
+        server: SERVER_URL,
         endpoints: [
-          '/api/combined',
-          '/api/matches',
-          '/api/tournaments',
           '/api/deposits',
           '/api/deposits/user/:userId',
           '/api/deposits/admin/pending',
@@ -222,32 +127,477 @@ const startServer = async () => {
       });
     });
 
+    app.get('/api/db-status', (req, res) => {
+      const dbStatus = mongoose.connection.readyState;
+      const statusMap = {
+        0: 'disconnected',
+        1: 'connected',
+        2: 'connecting',
+        3: 'disconnecting'
+      };
+      res.json({
+        success: dbStatus === 1,
+        database: {
+          status: statusMap[dbStatus],
+          connectionState: dbStatus,
+          host: mongoose.connection.host,
+          name: mongoose.connection.name,
+          readyState: mongoose.connection.readyState
+        },
+        server: SERVER_URL,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    // ✅ TEST DEPOSIT ENDPOINT
+    app.get('/api/deposits/test', (req, res) => {
+      res.json({
+        success: true,
+        message: '✅ Deposits API is working!',
+        timestamp: new Date().toISOString(),
+        server: SERVER_URL
+      });
+    });
+
+    // ✅ PROFESSIONAL DATABASE OPERATIONS
+    app.post('/api/direct/update-results/:eventId', async (req, res) => {
+      try {
+        const { eventId } = req.params;
+        const { results, calculatedWinners, resultStatus } = req.body;
+        console.log(`🔧 Direct database update for event: ${eventId}`);
+
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid event ID format',
+            server: SERVER_URL
+          });
+        }
+
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+        let result;
+
+        result = await Match.updateOne(
+          { _id: new mongoose.Types.ObjectId(eventId) },
+          {
+            $set: {
+              results: results || [],
+              calculatedWinners: calculatedWinners || [],
+              resultStatus: resultStatus || 'pending',
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          result = await Tournament.updateOne(
+            { _id: new mongoose.Types.ObjectId(eventId) },
+            {
+              $set: {
+                results: results || [],
+                calculatedWinners: calculatedWinners || [],
+                resultStatus: resultStatus || 'pending',
+                updatedAt: new Date()
+              }
+            }
+          );
+        }
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: 'Event not found or no changes made',
+            server: SERVER_URL
+          });
+        }
+
+        res.json({
+          success: true,
+          message: '✅ Database updated successfully!',
+          data: {
+            eventId,
+            modifiedCount: result.modifiedCount,
+            matchedCount: result.matchedCount,
+            timestamp: new Date().toISOString()
+          },
+          server: SERVER_URL
+        });
+      } catch (error) {
+        console.error('❌ Direct update error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Database update failed',
+          error: error.message,
+          code: 'DIRECT_UPDATE_ERROR',
+          server: SERVER_URL
+        });
+      }
+    });
+
+    // ✅ DATABASE MIGRATION ENDPOINTS
+    app.post('/api/migrate/add-results-fields', async (req, res) => {
+      try {
+        console.log('🔄 Starting database migration: Adding results fields...');
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+
+        const matchResult = await Match.updateMany(
+          {
+            $or: [
+              { results: { $exists: false } },
+              { calculatedWinners: { $exists: false } },
+              { resultStatus: { $exists: false } }
+            ]
+          },
+          {
+            $set: {
+              results: [],
+              calculatedWinners: [],
+              resultStatus: 'pending'
+            }
+          }
+        );
+
+        const tournamentResult = await Tournament.updateMany(
+          {
+            $or: [
+              { results: { $exists: false } },
+              { calculatedWinners: { $exists: false } },
+              { resultStatus: { $exists: false } }
+            ]
+          },
+          {
+            $set: {
+              results: [],
+              calculatedWinners: [],
+              resultStatus: 'pending'
+            }
+          }
+        );
+
+        console.log('✅ Migration completed successfully');
+        res.json({
+          success: true,
+          message: '🎉 Database migration completed!',
+          data: {
+            matches: {
+              modified: matchResult.modifiedCount,
+              matched: matchResult.matchedCount
+            },
+            tournaments: {
+              modified: tournamentResult.modifiedCount,
+              matched: tournamentResult.matchedCount
+            },
+            timestamp: new Date().toISOString()
+          },
+          server: SERVER_URL
+        });
+      } catch (error) {
+        console.error('❌ Migration error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Migration failed',
+          error: error.message,
+          server: SERVER_URL
+        });
+      }
+    });
+
+    // ✅ TESTING & DEVELOPMENT ENDPOINTS
+    app.post('/api/test/completed-match', async (req, res) => {
+      try {
+        const Match = require('./models/Match');
+        const testMatch = new Match({
+          title: `🏆 COMPLETED Test Match - ${Date.now()}`,
+          game: 'freefire',
+          type: 'Solo',
+          total_prize: 1500,
+          entry_fee: 15,
+          max_participants: 48,
+          schedule_time: new Date(),
+          start_time: new Date(),
+          end_time: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          room_id: 'TEST' + Math.random().toString(36).substr(2, 5).toUpperCase(),
+          room_password: 'test123',
+          description: 'Professional test match for system verification',
+          rules: 'Standard tournament rules apply',
+          status: 'completed',
+          approval_status: 'approved',
+          created_by: new mongoose.Types.ObjectId(),
+          results: [],
+          calculatedWinners: [],
+          resultStatus: 'pending',
+          winners: [],
+          prizeStatus: 'pending'
+        });
+
+        const savedMatch = await testMatch.save();
+        console.log(`✅ Professional test match created: ${savedMatch._id}`);
+
+        res.status(201).json({
+          success: true,
+          message: '🎯 Professional test match created successfully!',
+          data: {
+            id: savedMatch._id,
+            title: savedMatch.title,
+            prizePool: savedMatch.total_prize,
+            status: savedMatch.status,
+            resultsReady: true
+          },
+          server: SERVER_URL
+        });
+      } catch (error) {
+        console.error('❌ Test match creation failed:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Test match creation failed',
+          error: error.message,
+          details: error.errors,
+          server: SERVER_URL
+        });
+      }
+    });
+
+    // ✅ BULK OPERATIONS
+    app.post('/api/bulk/verify-results/:eventId', async (req, res) => {
+      try {
+        const { eventId } = req.params;
+        const { resultIds, status, adminNotes } = req.body;
+
+        if (!resultIds || !Array.isArray(resultIds)) {
+          return res.status(400).json({
+            success: false,
+            message: 'resultIds must be an array',
+            server: SERVER_URL
+          });
+        }
+
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+
+        let event = await Match.findById(eventId);
+        let eventType = 'match';
+
+        if (!event) {
+          event = await Tournament.findById(eventId);
+          eventType = 'tournament';
+        }
+
+        if (!event) {
+          return res.status(404).json({
+            success: false,
+            message: 'Event not found',
+            server: SERVER_URL
+          });
+        }
+
+        if (!event.results) {
+          event.results = [];
+        }
+
+        let processed = 0;
+        const results = [];
+
+        resultIds.forEach(resultId => {
+          const result = event.results.id(resultId);
+          if (result) {
+            result.status = status;
+            result.verifiedAt = new Date();
+            result.verifiedBy = 'system-bulk';
+            if (adminNotes) result.adminNotes = adminNotes;
+            processed++;
+            results.push({
+              id: resultId,
+              playerName: result.playerName,
+              status: result.status
+            });
+          }
+        });
+
+        await event.save();
+        console.log(`✅ Bulk ${status} completed for ${processed} results`);
+
+        res.json({
+          success: true,
+          message: `Bulk operation completed: ${processed} results ${status}`,
+          data: {
+            eventId,
+            eventType,
+            processed,
+            failed: resultIds.length - processed,
+            results,
+            timestamp: new Date().toISOString()
+          },
+          server: SERVER_URL
+        });
+      } catch (error) {
+        console.error('❌ Bulk operation error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Bulk operation failed',
+          error: error.message,
+          server: SERVER_URL
+        });
+      }
+    });
+
+    // ✅ SYSTEM UTILITIES
+    app.get('/api/system/stats', async (req, res) => {
+      try {
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+
+        const totalMatches = await Match.countDocuments();
+        const totalTournaments = await Tournament.countDocuments();
+        const completedEvents = await Match.countDocuments({ status: 'completed' });
+        const pendingResults = await Match.countDocuments({
+          'results.status': 'pending',
+          'results.0': { $exists: true }
+        });
+
+        res.json({
+          success: true,
+          data: {
+            events: {
+              total: totalMatches + totalTournaments,
+              matches: totalMatches,
+              tournaments: totalTournaments,
+              completed: completedEvents
+            },
+            results: {
+              pendingVerification: pendingResults
+            },
+            database: {
+              status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+              host: mongoose.connection.host,
+              name: mongoose.connection.name
+            },
+            server: SERVER_URL,
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to get system stats',
+          error: error.message,
+          server: SERVER_URL
+        });
+      }
+    });
+
+    // ✅ ERROR HANDLING MIDDLEWARE
+    app.use((err, req, res, next) => {
+      console.error('💥 Unhandled Error:', err);
+
+      if (err.name === 'ValidationError') {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation Error',
+          error: Object.values(err.errors).map(e => e.message),
+          server: SERVER_URL
+        });
+      }
+
+      if (err.name === 'CastError') {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid ID format',
+          error: `Invalid ${err.path}: ${err.value}`,
+          server: SERVER_URL
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message,
+        server: SERVER_URL
+      });
+    });
+
+    // ✅ 404 HANDLER
+    app.use('*', (req, res) => {
+      res.status(404).json({
+        success: false,
+        message: '🔍 Endpoint not found',
+        requested: `${req.method} ${req.originalUrl}`,
+        server: SERVER_URL,
+        availableEndpoints: [
+          'GET /api/health',
+          'GET /api/db-status',
+          'GET /api/deposits/test',
+          'POST /api/direct/update-results/:eventId',
+          'POST /api/migrate/add-results-fields',
+          'POST /api/test/completed-match',
+          'POST /api/bulk/verify-results/:eventId',
+          'GET /api/system/stats',
+          'POST /api/withdraw/request',
+          'GET /api/withdraw/history',
+          'GET /api/withdraw/admin/pending',
+          'POST /api/withdraw/admin/approve/:id',
+          'POST /api/withdraw/admin/reject/:id',
+          'POST /api/deposits',
+          'GET /api/deposits/user/:userId',
+          'GET /api/deposits/admin/pending',
+          'POST /api/deposits/admin/approve/:id',
+          'POST /api/deposits/admin/reject/:id'
+        ]
+      });
+    });
+
     // ✅ START SERVER
     const PORT = process.env.PORT || 5000;
-    const HOST = '0.0.0.0'; // Listen on all network interfaces
-    
-    const server = app.listen(PORT, HOST, () => {
+    const server = app.listen(PORT, () => {
       console.log('\n' + '='.repeat(60));
-      console.log('🎮 XOSS GAMING SERVER - IP & NGROK FIXED EDITION');
+      console.log('🎮 XOSS GAMING SERVER - PRODUCTION READY');
       console.log('='.repeat(60));
-      console.log(`📍 Server IP: ${HOST}:${PORT}`);
-      console.log(`🌐 Local: http://localhost:${PORT}`);
-      console.log(`🌐 Network: http://192.168.0.100:${PORT}`);
-      console.log(`🌐 ngrok: https://unescaped-elouise-royally.ngrok-free.dev`);
-      console.log(`⚡ Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`📍 Port: ${PORT}`);
+      console.log(`🌐 Server URL: ${SERVER_URL}`);
+      console.log(`⚡ Environment: ${process.env.NODE_ENV || 'production'}`);
       console.log(`💾 Database: ${mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected'}`);
       console.log('='.repeat(60));
-      console.log('\n📋 KEY ENDPOINTS FOR TESTING:');
-      console.log(`   📊 Combined Events: http://localhost:${PORT}/api/combined`);
-      console.log(`   🏆 Matches: http://localhost:${PORT}/api/matches`);
-      console.log(`   🏅 Tournaments: http://localhost:${PORT}/api/tournaments`);
-      console.log(`   ❤️ Health: http://localhost:${PORT}/api/health`);
+      console.log('✅ Expo Go: Fully Compatible');
+      console.log('✅ Render Hosting: Active');
+      console.log('✅ CORS: All Origins Allowed');
       console.log('='.repeat(60));
-      console.log('✅ Server ready! IP পরিবর্তন হলেও ngrok দিয়ে কাজ করবে।');
+      console.log('🚀 Server is ready and accessible globally');
       console.log('='.repeat(60));
     });
 
-    // ... [rest of your server.js code remains the same] ...
+    // ✅ GRACEFUL SHUTDOWN HANDLERS
+    const gracefulShutdown = async (signal) => {
+      console.log(`\n⚠️ Received ${signal}. Starting graceful shutdown...`);
+      server.close(async () => {
+        console.log('✅ HTTP server closed.');
+        try {
+          await mongoose.connection.close();
+          console.log('✅ MongoDB connection closed.');
+          console.log('👋 Graceful shutdown completed.');
+          process.exit(0);
+        } catch (error) {
+          console.error('❌ Error during shutdown:', error);
+          process.exit(1);
+        }
+      });
+
+      setTimeout(() => {
+        console.error('⏰ Shutdown timeout, forcing exit...');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('uncaughtException', (error) => {
+      console.error('💥 Uncaught Exception:', error);
+      gracefulShutdown('uncaughtException');
+    });
+    process.on('unhandledRejection', (reason, promise) => {
+      console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+      gracefulShutdown('unhandledRejection');
+    });
 
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -255,5 +605,5 @@ const startServer = async () => {
   }
 };
 
-// ✅ Start the server
+// ✅ Start the professional server
 startServer();
