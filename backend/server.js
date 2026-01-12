@@ -1,4 +1,4 @@
-// server.js - XOSS GAMING SERVER (Render Production Only)
+// server.js - XOSS GAMING PROFESSIONAL SERVER (Production API Only)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,9 +10,6 @@ const app = express();
 
 // ✅ Import All Routes
 const withdrawalRoutes = require('./routes/withdrawal');
-
-// ✅ Production Server URL
-const SERVER_URL = "https://xoss.onrender.com";
 
 // ✅ Connect MongoDB FIRST, then start server
 const startServer = async () => {
@@ -26,9 +23,9 @@ const startServer = async () => {
 
     console.log('🛠️ Setting up server middleware...');
 
-    // ✅ Professional Middleware Stack
+    // ✅ Professional Middleware Stack with CORS FIXED
     app.use(cors({
-      origin: '*',
+      origin: '*', // ✅ ALLOW ALL ORIGINS
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -53,8 +50,7 @@ const startServer = async () => {
           success: false,
           message: 'Database connection temporarily unavailable',
           timestamp: new Date().toISOString(),
-          retryAfter: 30,
-          server: SERVER_URL
+          retryAfter: 30
         });
       }
       next();
@@ -96,9 +92,9 @@ const startServer = async () => {
         timestamp: new Date().toISOString(),
         database: mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected',
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'production',
-        server: SERVER_URL,
-        expoGo: '✅ Fully Compatible'
+        environment: process.env.NODE_ENV || 'development',
+        client_api_url: 'https://xoss.onrender.com/api',
+        note: 'React Native app uses production API directly'
       });
     });
 
@@ -116,14 +112,11 @@ const startServer = async () => {
         message: dbStatus === 1 ? '🚀 Server is operating normally' : '⚠️ Service degradation detected',
         database: statusMap[dbStatus] || '⚫ Unknown',
         timestamp: new Date().toISOString(),
-        server: SERVER_URL,
-        endpoints: [
-          '/api/deposits',
-          '/api/deposits/user/:userId',
-          '/api/deposits/admin/pending',
-          '/api/withdraw/request',
-          '/api/wallet'
-        ]
+        client_configuration: {
+          base_url: 'https://xoss.onrender.com',
+          api_url: 'https://xoss.onrender.com/api',
+          note: 'React Native app uses this production URL directly'
+        }
       });
     });
 
@@ -144,7 +137,6 @@ const startServer = async () => {
           name: mongoose.connection.name,
           readyState: mongoose.connection.readyState
         },
-        server: SERVER_URL,
         timestamp: new Date().toISOString()
       });
     });
@@ -155,7 +147,7 @@ const startServer = async () => {
         success: true,
         message: '✅ Deposits API is working!',
         timestamp: new Date().toISOString(),
-        server: SERVER_URL
+        note: 'Production API: https://xoss.onrender.com/api/deposits/test'
       });
     });
 
@@ -169,8 +161,7 @@ const startServer = async () => {
         if (!mongoose.Types.ObjectId.isValid(eventId)) {
           return res.status(400).json({
             success: false,
-            message: 'Invalid event ID format',
-            server: SERVER_URL
+            message: 'Invalid event ID format'
           });
         }
 
@@ -207,8 +198,7 @@ const startServer = async () => {
         if (result.modifiedCount === 0) {
           return res.status(404).json({
             success: false,
-            message: 'Event not found or no changes made',
-            server: SERVER_URL
+            message: 'Event not found or no changes made'
           });
         }
 
@@ -220,8 +210,7 @@ const startServer = async () => {
             modifiedCount: result.modifiedCount,
             matchedCount: result.matchedCount,
             timestamp: new Date().toISOString()
-          },
-          server: SERVER_URL
+          }
         });
       } catch (error) {
         console.error('❌ Direct update error:', error);
@@ -229,8 +218,7 @@ const startServer = async () => {
           success: false,
           message: 'Database update failed',
           error: error.message,
-          code: 'DIRECT_UPDATE_ERROR',
-          server: SERVER_URL
+          code: 'DIRECT_UPDATE_ERROR'
         });
       }
     });
@@ -290,16 +278,14 @@ const startServer = async () => {
               matched: tournamentResult.matchedCount
             },
             timestamp: new Date().toISOString()
-          },
-          server: SERVER_URL
+          }
         });
       } catch (error) {
         console.error('❌ Migration error:', error);
         res.status(500).json({
           success: false,
           message: 'Migration failed',
-          error: error.message,
-          server: SERVER_URL
+          error: error.message
         });
       }
     });
@@ -344,8 +330,7 @@ const startServer = async () => {
             prizePool: savedMatch.total_prize,
             status: savedMatch.status,
             resultsReady: true
-          },
-          server: SERVER_URL
+          }
         });
       } catch (error) {
         console.error('❌ Test match creation failed:', error);
@@ -353,8 +338,7 @@ const startServer = async () => {
           success: false,
           message: 'Test match creation failed',
           error: error.message,
-          details: error.errors,
-          server: SERVER_URL
+          details: error.errors
         });
       }
     });
@@ -368,8 +352,7 @@ const startServer = async () => {
         if (!resultIds || !Array.isArray(resultIds)) {
           return res.status(400).json({
             success: false,
-            message: 'resultIds must be an array',
-            server: SERVER_URL
+            message: 'resultIds must be an array'
           });
         }
 
@@ -387,8 +370,7 @@ const startServer = async () => {
         if (!event) {
           return res.status(404).json({
             success: false,
-            message: 'Event not found',
-            server: SERVER_URL
+            message: 'Event not found'
           });
         }
 
@@ -428,16 +410,14 @@ const startServer = async () => {
             failed: resultIds.length - processed,
             results,
             timestamp: new Date().toISOString()
-          },
-          server: SERVER_URL
+          }
         });
       } catch (error) {
         console.error('❌ Bulk operation error:', error);
         res.status(500).json({
           success: false,
           message: 'Bulk operation failed',
-          error: error.message,
-          server: SERVER_URL
+          error: error.message
         });
       }
     });
@@ -473,7 +453,10 @@ const startServer = async () => {
               host: mongoose.connection.host,
               name: mongoose.connection.name
             },
-            server: SERVER_URL,
+            client_config: {
+              api_url: 'https://xoss.onrender.com/api',
+              note: 'React Native app uses production API directly'
+            },
             timestamp: new Date().toISOString()
           }
         });
@@ -481,8 +464,7 @@ const startServer = async () => {
         res.status(500).json({
           success: false,
           message: 'Failed to get system stats',
-          error: error.message,
-          server: SERVER_URL
+          error: error.message
         });
       }
     });
@@ -495,8 +477,7 @@ const startServer = async () => {
         return res.status(400).json({
           success: false,
           message: 'Validation Error',
-          error: Object.values(err.errors).map(e => e.message),
-          server: SERVER_URL
+          error: Object.values(err.errors).map(e => e.message)
         });
       }
 
@@ -504,16 +485,14 @@ const startServer = async () => {
         return res.status(400).json({
           success: false,
           message: 'Invalid ID format',
-          error: `Invalid ${err.path}: ${err.value}`,
-          server: SERVER_URL
+          error: `Invalid ${err.path}: ${err.value}`
         });
       }
 
       res.status(500).json({
         success: false,
         message: 'Internal Server Error',
-        error: process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message,
-        server: SERVER_URL
+        error: process.env.NODE_ENV === 'production' ? 'Something went wrong!' : err.message
       });
     });
 
@@ -523,7 +502,8 @@ const startServer = async () => {
         success: false,
         message: '🔍 Endpoint not found',
         requested: `${req.method} ${req.originalUrl}`,
-        server: SERVER_URL,
+        production_api_url: 'https://xoss.onrender.com/api',
+        note: 'React Native app uses production API directly',
         availableEndpoints: [
           'GET /api/health',
           'GET /api/db-status',
@@ -549,21 +529,22 @@ const startServer = async () => {
 
     // ✅ START SERVER
     const PORT = process.env.PORT || 5000;
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('\n' + '='.repeat(60));
-      console.log('🎮 XOSS GAMING SERVER - PRODUCTION READY');
+      console.log('🎮 XOSS GAMING SERVER - DEVELOPMENT MODE');
       console.log('='.repeat(60));
-      console.log(`📍 Port: ${PORT}`);
-      console.log(`🌐 Server URL: ${SERVER_URL}`);
-      console.log(`⚡ Environment: ${process.env.NODE_ENV || 'production'}`);
+      console.log(`📍 Server running on port: ${PORT}`);
+      console.log(`🌐 Local Admin: http://localhost:${PORT}`);
+      console.log(`⚡ Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`💾 Database: ${mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected'}`);
       console.log('='.repeat(60));
-      console.log('✅ Expo Go: Fully Compatible');
-      console.log('✅ Render Hosting: Active');
-      console.log('✅ CORS: All Origins Allowed');
+      console.log('\n📱 REACT NATIVE APP CONFIGURATION:');
+      console.log('✅ Using PRODUCTION API directly:');
+      console.log(`   🌐 Production URL: https://xoss.onrender.com`);
+      console.log(`   🔌 API Endpoint: https://xoss.onrender.com/api`);
       console.log('='.repeat(60));
-      console.log('🚀 Server is ready and accessible globally');
-      console.log('='.repeat(60));
+      console.log('💡 Note: React Native app uses Production API, Server runs locally');
+      console.log('🚀 Server ready for local development!');
     });
 
     // ✅ GRACEFUL SHUTDOWN HANDLERS
@@ -605,5 +586,5 @@ const startServer = async () => {
   }
 };
 
-// ✅ Start the professional server
+// ✅ Start the server
 startServer();
