@@ -793,3 +793,541 @@ exports.rejectWithdrawal = async (req, res) => {
     });
   }
 };
+
+/**
+ * 🔥 USER: CANCEL WITHDRAWAL REQUEST
+ */
+exports.cancelWithdrawal = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const { cancellation_reason } = req.body;
+
+    console.log(`❌ User ${userId} attempting to cancel withdrawal ${id}`);
+
+    // 🔥 FIND WITHDRAWAL
+    const withdrawal = await Withdrawal.findById(id).session(session);
+    
+    if (!withdrawal) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'WITHDRAWAL_NOT_FOUND',
+        message: 'Withdrawal request not found'
+      });
+    }
+
+    // 🔥 CHECK OWNERSHIP
+    if (toObjectIdString(withdrawal.user_id) !== toObjectIdString(userId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({
+        success: false,
+        code: 'UNAUTHORIZED',
+        message: 'You can only cancel your own withdrawal requests'
+      });
+    }
+
+    // 🔥 CHECK IF CANCELLABLE
+    if (!['pending', 'processing'].includes(withdrawal.status)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'CANCELLATION_NOT_ALLOWED',
+        message: `Cannot cancel withdrawal with status: ${withdrawal.status}`,
+        allowed_statuses: ['pending', 'processing']
+      });
+    }
+
+    // 🔥 REFUND AMOUNT TO WALLET
+    const walletUpdate = await Wallet.findOneAndUpdate(
+      { user_id: userId },
+      {
+        $inc: {
+          balance: withdrawal.amount,
+          total_spent: -withdrawal.amount,
+          total_withdrawn: -withdrawal.amount
+        },
+        $set: { last_activity: new Date() }
+      },
+      { new: true, session }
+    );
+
+    if (!walletUpdate) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'WALLET_UPDATE_FAILED',
+        message: 'Failed to refund amount to wallet'
+      });
+    }
+
+    // 🔥 UPDATE USER BALANCE
+    await User.findByIdAndUpdate(
+      userId,
+      { $inc: { wallet_balance: withdrawal.amount } },
+      { session }
+    );
+
+    // 🔥 UPDATE WITHDRAWAL STATUS
+    withdrawal.status = 'cancelled';
+    withdrawal.cancelled_by = userId;
+    withdrawal.cancellation_reason = cancellation_reason || 'User requested cancellation';
+    withdrawal.cancelled_at = new Date();
+    withdrawal.processed_at = new Date();
+
+    await withdrawal.save({ session });
+
+    // 🔥 UPDATE TRANSACTION STATUS
+    await Transaction.findOneAndUpdate(
+      { 'metadata.withdrawalId': toObjectIdString(withdrawal._id) },
+      {
+        status: 'cancelled',
+        description: `Withdrawal cancelled - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
+        'metadata.status': 'cancelled',
+        'metadata.cancellation_reason': cancellation_reason || 'User cancelled'
+      },
+      { session }
+    );
+
+    // 🔥 CREATE REFUND TRANSACTION
+    await createTransaction({
+      session,
+      user_id: userId,
+      type: 'withdrawal_refund',
+      amount: withdrawal.amount,
+      description: `Withdrawal cancellation refund - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
+      metadata: {
+        withdrawalId: String(withdrawal._id),
+        withdrawal_number: withdrawal.withdrawal_number,
+        status: 'refunded',
+        method: withdrawal.payment_method,
+        cancellation_reason: cancellation_reason || 'User requested cancellation',
+        refunded_at: new Date()
+      }
+    });
+
+    // 🔥 COMMIT TRANSACTION
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log(`✅ Withdrawal ${id} cancelled successfully. Amount refunded: ${withdrawal.amount}`);
+
+    // 🔥 GET UPDATED USER INFO
+    const user = await User.findById(userId).select('wallet_balance username email');
+
+    return res.json({
+      success: true,
+      code: 'WITHDRAWAL_CANCELLED',
+      message: 'Withdrawal cancelled successfully. Amount has been refunded to your wallet.',
+      data: {
+        withdrawal: {
+          id: withdrawal._id,
+          withdrawal_number: withdrawal.withdrawal_number,
+          amount: withdrawal.amount,
+          formatted_amount: formatCurrency(withdrawal.amount),
+          status: withdrawal.status,
+          cancelled_at: withdrawal.cancelled_at,
+          cancellation_reason: withdrawal.cancellation_reason
+        },
+        user: {
+          wallet_balance: user?.wallet_balance || 0,
+          formatted_balance: formatCurrency(user?.wallet_balance || 0)
+        },
+        wallet: {
+          balance: walletUpdate.balance,
+          available_balance: walletUpdate.available_balance
+        }
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    // 🔥 ROLLBACK ON ERROR
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ Cancel withdrawal error:', error);
+    
+    return res.status(500).json({
+      success: false,
+      code: 'CANCELLATION_FAILED',
+      message: 'Failed to cancel withdrawal request',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
+
+/**
+ * 🔥 GET WITHDRAWAL DETAILS (ADMIN)
+ */
+exports.getWithdrawalDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const withdrawal = await Withdrawal.findById(id)
+      .populate('user_id', 'username email phone avatar')
+      .populate('approved_by', 'username email')
+      .populate('cancelled_by', 'username email');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        success: false,
+        code: 'WITHDRAWAL_NOT_FOUND',
+        message: 'Withdrawal not found'
+      });
+    }
+
+    return res.json({
+      success: true,
+      code: 'DETAILS_FETCHED',
+      message: 'Withdrawal details fetched successfully',
+      data: withdrawal
+    });
+  } catch (error) {
+    console.error('❌ Get withdrawal details error:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch withdrawal details',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
+
+/**
+ * 🔥 UPDATE WITHDRAWAL STATUS (ADMIN)
+ */
+exports.updateWithdrawalStatus = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    const { status, transaction_id, admin_notes } = req.body;
+    const adminId = req.user.userId;
+
+    const withdrawal = await Withdrawal.findById(id).session(session);
+    
+    if (!withdrawal) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'WITHDRAWAL_NOT_FOUND',
+        message: 'Withdrawal not found'
+      });
+    }
+
+    // Validate status transition
+    const allowedTransitions = {
+      pending: ['processing', 'approved', 'rejected', 'cancelled'],
+      processing: ['approved', 'rejected', 'cancelled'],
+      approved: ['completed'],
+      rejected: [],
+      cancelled: [],
+      completed: [],
+      failed: ['pending', 'processing']
+    };
+
+    const allowed = allowedTransitions[withdrawal.status] || [];
+    
+    if (!allowed.includes(status)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STATUS_TRANSITION',
+        message: `Cannot change status from ${withdrawal.status} to ${status}`,
+        allowed_transitions: allowed
+      });
+    }
+
+    // Handle refund for rejection
+    if (status === 'rejected' && withdrawal.status !== 'rejected') {
+      // Refund to wallet
+      await Wallet.findOneAndUpdate(
+        { user_id: withdrawal.user_id },
+        { $inc: { balance: withdrawal.amount, total_spent: -withdrawal.amount } },
+        { session }
+      );
+
+      // Refund to user balance
+      await User.findByIdAndUpdate(
+        withdrawal.user_id,
+        { $inc: { wallet_balance: withdrawal.amount } },
+        { session }
+      );
+
+      await createTransaction({
+        session,
+        user_id: withdrawal.user_id,
+        type: 'withdrawal_refund',
+        amount: withdrawal.amount,
+        description: `Withdrawal rejected - Refunded`,
+        metadata: {
+          withdrawalId: String(withdrawal._id),
+          status: 'refunded',
+          rejectedBy: adminId,
+          reason: admin_notes || 'Admin rejected'
+        }
+      });
+    }
+
+    // Update withdrawal
+    withdrawal.status = status;
+    if (status === 'approved' || status === 'rejected') {
+      withdrawal.approved_by = adminId;
+      withdrawal.approved_at = new Date();
+    }
+    
+    if (transaction_id) withdrawal.transaction_id = transaction_id;
+    if (admin_notes) withdrawal.admin_notes = admin_notes;
+    
+    withdrawal.processed_at = new Date();
+
+    await withdrawal.save({ session });
+
+    // Update transaction
+    await Transaction.findOneAndUpdate(
+      { 'metadata.withdrawalId': toObjectIdString(withdrawal._id) },
+      {
+        status: status,
+        description: `Withdrawal ${status} - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
+        'metadata.status': status,
+        'metadata.processedBy': adminId
+      },
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    await withdrawal.populate('user_id', 'username email phone');
+
+    return res.json({
+      success: true,
+      code: 'STATUS_UPDATED',
+      message: `Withdrawal status updated to ${status}`,
+      data: withdrawal
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('❌ Update withdrawal status error:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'UPDATE_FAILED',
+      message: 'Failed to update withdrawal status',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
+
+/**
+ * 🔥 GET WITHDRAWAL BY WITHDRAWAL NUMBER
+ */
+exports.getWithdrawalByNumber = async (req, res) => {
+  try {
+    const { withdrawal_number } = req.params;
+    const userId = req.user.userId;
+    const userRole = req.user.role;
+
+    const withdrawal = await Withdrawal.findOne({ withdrawal_number })
+      .populate('user_id', 'username email phone')
+      .populate('approved_by', 'username email')
+      .populate('cancelled_by', 'username email');
+
+    if (!withdrawal) {
+      return res.status(404).json({
+        success: false,
+        code: 'WITHDRAWAL_NOT_FOUND',
+        message: 'Withdrawal not found'
+      });
+    }
+
+    // Check permission
+    const isOwner = toObjectIdString(withdrawal.user_id._id) === toObjectIdString(userId);
+    const isAdmin = userRole === 'admin';
+    
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        code: 'UNAUTHORIZED',
+        message: 'You are not authorized to view this withdrawal'
+      });
+    }
+
+    return res.json({
+      success: true,
+      code: 'WITHDRAWAL_FOUND',
+      message: 'Withdrawal fetched successfully',
+      data: {
+        ...withdrawal.toObject(),
+        formatted_amount: formatCurrency(withdrawal.amount)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get withdrawal by number error:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch withdrawal',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
+
+/**
+ * 🔥 BULK UPDATE WITHDRAWAL STATUS (ADMIN)
+ */
+exports.bulkUpdateWithdrawalStatus = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { withdrawal_ids, status, admin_notes } = req.body;
+    const adminId = req.user.userId;
+
+    if (!Array.isArray(withdrawal_ids) || withdrawal_ids.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Please provide withdrawal IDs'
+      });
+    }
+
+    const withdrawals = await Withdrawal.find({ 
+      _id: { $in: withdrawal_ids },
+      status: { $in: ['pending', 'processing'] }
+    }).session(session);
+
+    if (withdrawals.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'NO_VALID_WITHDRAWALS',
+        message: 'No valid withdrawals found for update'
+      });
+    }
+
+    const updatedWithdrawals = [];
+    
+    for (const withdrawal of withdrawals) {
+      // Update withdrawal
+      withdrawal.status = status;
+      withdrawal.approved_by = adminId;
+      withdrawal.approved_at = new Date();
+      withdrawal.admin_notes = admin_notes || '';
+      withdrawal.processed_at = new Date();
+
+      await withdrawal.save({ session });
+
+      // Update transaction
+      await Transaction.findOneAndUpdate(
+        { 'metadata.withdrawalId': toObjectIdString(withdrawal._id) },
+        {
+          status: status,
+          description: `Withdrawal ${status} - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
+          'metadata.status': status,
+          'metadata.processedBy': adminId
+        },
+        { session }
+      );
+
+      updatedWithdrawals.push(withdrawal);
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      success: true,
+      code: 'BULK_UPDATE_SUCCESS',
+      message: `Successfully updated ${updatedWithdrawals.length} withdrawals to ${status}`,
+      data: {
+        count: updatedWithdrawals.length,
+        status: status
+      }
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('❌ Bulk update withdrawal status error:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'BULK_UPDATE_FAILED',
+      message: 'Failed to bulk update withdrawal status',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
+
+/**
+ * 🔥 EXPORT WITHDRAWALS (ADMIN)
+ */
+exports.exportWithdrawals = async (req, res) => {
+  try {
+    const { start_date, end_date, status } = req.query;
+
+    const filter = {};
+    
+    if (start_date && end_date) {
+      filter.requested_at = {
+        $gte: new Date(start_date),
+        $lte: new Date(end_date)
+      };
+    }
+    
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+
+    const withdrawals = await Withdrawal.find(filter)
+      .populate('user_id', 'username email phone')
+      .populate('approved_by', 'username email')
+      .sort({ requested_at: -1 });
+
+    // Format for CSV/Excel
+    const formattedData = withdrawals.map(wd => ({
+      'Withdrawal Number': wd.withdrawal_number,
+      'User': wd.user_id?.username || 'N/A',
+      'Email': wd.user_id?.email || 'N/A',
+      'Phone': wd.user_id?.phone || 'N/A',
+      'Amount': wd.amount,
+      'Payment Method': wd.payment_method,
+      'Status': wd.status,
+      'Requested At': wd.requested_at.toISOString(),
+      'Processed At': wd.processed_at ? wd.processed_at.toISOString() : 'N/A',
+      'Approved By': wd.approved_by?.username || 'N/A',
+      'Transaction ID': wd.transaction_id || 'N/A'
+    }));
+
+    return res.json({
+      success: true,
+      code: 'EXPORT_SUCCESS',
+      message: 'Withdrawals exported successfully',
+      data: {
+        count: withdrawals.length,
+        withdrawals: formattedData
+      }
+    });
+  } catch (error) {
+    console.error('❌ Export withdrawals error:', error);
+    return res.status(500).json({
+      success: false,
+      code: 'EXPORT_FAILED',
+      message: 'Failed to export withdrawals',
+      error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message
+    });
+  }
+};
