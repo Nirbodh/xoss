@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const Withdrawal = require('../models/Withdrawal');
-const Wallet = require('../models/Wallet');
+const Wallet = require('../models/Wallet').Wallet;
 const Transaction = require('../models/Wallet').Transaction;
 const User = require('../models/User');
 
@@ -143,36 +143,8 @@ exports.requestWithdrawal = async (req, res) => {
       }
     }
 
-    // 🔥 GET USER
-    const user = await User.findById(userId).session(session);
-    if (!user) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ 
-        success: false, 
-        code: 'USER_NOT_FOUND',
-        message: 'User not found' 
-      });
-    }
-
-    console.log(`💰 User ${userId} current wallet_balance: ${user.wallet_balance}`);
-
-    // 🔥 CHECK USER BALANCE
-    if (user.wallet_balance < parsedAmount) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({ 
-        success: false, 
-        code: 'INSUFFICIENT_BALANCE',
-        message: 'Insufficient balance for withdrawal',
-        current_balance: user.wallet_balance,
-        required_amount: parsedAmount,
-        short_by: parsedAmount - user.wallet_balance
-      });
-    }
-
-    // 🔥 GET WALLET
-    const wallet = await Wallet.findOne({ user_id: userId }).session(session);
+    // 🔥 GET WALLET (এখানে User এর থেকে Wallet পাওয়া গুরুত্বপূর্ণ)
+    const wallet = await Wallet.findOrCreate(userId, { session });
     if (!wallet) {
       await session.abortTransaction();
       session.endSession();
@@ -186,14 +158,14 @@ exports.requestWithdrawal = async (req, res) => {
     console.log(`💰 Wallet balance: ${wallet.balance}, Available: ${wallet.available_balance}`);
 
     // 🔥 CHECK WALLET BALANCE
-    if (wallet.balance < parsedAmount) {
+    if (wallet.available_balance < parsedAmount) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ 
         success: false, 
         code: 'INSUFFICIENT_WALLET_BALANCE',
         message: 'Insufficient wallet balance',
-        available_balance: wallet.balance,
+        available_balance: wallet.available_balance,
         required_amount: parsedAmount
       });
     }
@@ -220,37 +192,37 @@ exports.requestWithdrawal = async (req, res) => {
       });
     }
 
-    // 🔥 DEDUCT FROM WALLET
-    const walletUpdate = await Wallet.findOneAndUpdate(
-      { user_id: userId, balance: { $gte: parsedAmount } },
-      { 
-        $inc: { 
-          balance: -parsedAmount, 
-          total_spent: parsedAmount,
-          total_withdrawn: parsedAmount 
-        },
-        $set: { last_activity: new Date(), last_withdrawal: new Date() }
-      },
-      { new: true, session }
-    );
+    // 🔥 USER বেলেন্সও চেক করুন (সিঙ্ক্রোনাইজেশন এর জন্য)
+    const user = await User.findById(userId).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ 
+        success: false, 
+        code: 'USER_NOT_FOUND',
+        message: 'User not found' 
+      });
+    }
 
-    if (!walletUpdate) {
+    console.log(`💰 User ${userId} current wallet_balance: ${user.wallet_balance}`);
+
+    if (user.wallet_balance < parsedAmount) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ 
         success: false, 
-        code: 'WALLET_UPDATE_FAILED',
-        message: 'Failed to update wallet balance' 
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Insufficient balance for withdrawal',
+        current_balance: user.wallet_balance,
+        required_amount: parsedAmount,
+        short_by: parsedAmount - user.wallet_balance
       });
     }
 
-    // 🔥 UPDATE USER BALANCE
-    user.wallet_balance -= parsedAmount;
-    await user.save({ session });
-
-    console.log(`✅ Wallet updated. New balance: ${walletUpdate.balance}, User balance: ${user.wallet_balance}`);
-
-    // 🔥 CREATE WITHDRAWAL RECORD
+    // 🔥 WALLET থেকে টাকা কাটার জন্য wallet.withdraw() মেথড ব্যবহার করুন
+    const previousBalance = wallet.balance;
+    
+    // Create withdrawal record first
     const withdrawalArr = await Withdrawal.create(
       [{
         user_id: userId,
@@ -267,33 +239,38 @@ exports.requestWithdrawal = async (req, res) => {
           ip_address: ipAddress,
           user_agent: userAgent,
           user_role: userRole,
-          previous_balance: user.wallet_balance + parsedAmount,
-          new_balance: user.wallet_balance
+          previous_balance: previousBalance,
+          new_balance: previousBalance - parsedAmount
         }
       }],
       { session }
     );
     const withdrawal = withdrawalArr[0];
 
-    // 🔥 CREATE TRANSACTION RECORD
-    const tx = await createTransaction({
+    // 🔥 WALLET থেকে টাকা কাটুন
+    const walletResult = await wallet.withdraw(parsedAmount, {
       session,
-      user_id: userId,
-      type: 'withdrawal_request',
-      amount: parsedAmount,
       description: `Withdrawal request via ${payment_method.toUpperCase()}`,
       metadata: {
         withdrawalId: String(withdrawal._id),
         withdrawal_number: withdrawal.withdrawal_number,
         status: 'pending',
+        payment_method: payment_method,
         account: account_details.phone || account_details.account_number || null,
         method: payment_method,
-        previous_balance: user.wallet_balance + parsedAmount,
-        new_balance: user.wallet_balance,
-        ip_address: ipAddress
-      },
-      status: 'pending'
+        previous_balance: previousBalance,
+        new_balance: previousBalance - parsedAmount,
+        ip_address: ipAddress,
+        user_agent: userAgent,
+        user_role: userRole
+      }
     });
+
+    // 🔥 USER এর বেলেন্সও আপডেট করুন
+    user.wallet_balance -= parsedAmount;
+    await user.save({ session });
+
+    console.log(`✅ Wallet updated. New balance: ${walletResult.wallet.balance}, User balance: ${user.wallet_balance}`);
 
     // 🔥 COMMIT TRANSACTION
     await session.commitTransaction();
@@ -324,14 +301,16 @@ exports.requestWithdrawal = async (req, res) => {
           formatted_balance: formatCurrency(user.wallet_balance)
         },
         wallet: {
-          balance: walletUpdate.balance,
-          available_balance: walletUpdate.available_balance,
-          total_withdrawn: walletUpdate.total_withdrawn
+          balance: walletResult.wallet.balance,
+          available_balance: walletResult.wallet.available_balance,
+          total_withdrawn: walletResult.wallet.total_withdrawn,
+          daily_withdrawals: walletResult.wallet.daily_stats.withdrawals_today,
+          daily_withdrawal_amount: walletResult.wallet.daily_stats.withdrawal_amount_today
         },
         transaction: {
-          id: tx._id,
-          transaction_id: tx.transaction_id,
-          status: tx.status
+          id: walletResult.transaction._id,
+          transaction_id: walletResult.transaction.transaction_id,
+          status: walletResult.transaction.status
         },
         limits: {
           min_withdrawal: WITHDRAWAL_LIMITS.MIN,
@@ -720,20 +699,26 @@ exports.rejectWithdrawal = async (req, res) => {
       });
     }
 
-    // 🔥 REFUND TO WALLET
-    const wallet = await Wallet.findOneAndUpdate(
-      { user_id: withdrawal.user_id },
-      { 
-        $inc: { 
-          balance: withdrawal.amount, 
-          total_spent: -withdrawal.amount 
-        }
-      },
-      { new: true, session }
-    );
-
+    // 🔥 GET WALLET
+    const wallet = await Wallet.findOrCreate(withdrawal.user_id, { session });
+    
     if (!wallet) {
       console.warn(`⚠️ Wallet not found for user ${withdrawal.user_id} while refunding withdrawal ${withdrawal._id}`);
+    } else {
+      // 🔥 REFUND TO WALLET USING WALLET METHOD
+      const refundResult = await wallet.refundWithdrawal(withdrawal.amount, {
+        session,
+        description: `Withdrawal rejected - Refunded`,
+        metadata: {
+          withdrawalId: String(withdrawal._id),
+          status: 'refunded',
+          rejectedBy: adminId,
+          reason: admin_notes || 'Admin rejected',
+          previous_balance: wallet.balance - withdrawal.amount,
+          new_balance: wallet.balance,
+          refunded_by: adminId
+        }
+      });
     }
 
     // 🔥 REFUND TO USER BALANCE
@@ -742,20 +727,6 @@ exports.rejectWithdrawal = async (req, res) => {
       { $inc: { wallet_balance: withdrawal.amount } },
       { session }
     );
-
-    await createTransaction({
-      session,
-      user_id: withdrawal.user_id,
-      type: 'withdrawal_refund',
-      amount: withdrawal.amount,
-      description: `Withdrawal refund - ${withdrawal.payment_method?.toUpperCase() || 'BKASH'}`,
-      metadata: {
-        withdrawalId: String(withdrawal._id),
-        status: 'completed',
-        refundedBy: adminId,
-        reason: admin_notes || 'Request rejected'
-      }
-    });
 
     withdrawal.status = 'rejected';
     withdrawal.approved_by = adminId;
@@ -844,29 +815,34 @@ exports.cancelWithdrawal = async (req, res) => {
       });
     }
 
-    // 🔥 REFUND AMOUNT TO WALLET
-    const walletUpdate = await Wallet.findOneAndUpdate(
-      { user_id: userId },
-      {
-        $inc: {
-          balance: withdrawal.amount,
-          total_spent: -withdrawal.amount,
-          total_withdrawn: -withdrawal.amount
-        },
-        $set: { last_activity: new Date() }
-      },
-      { new: true, session }
-    );
-
-    if (!walletUpdate) {
+    // 🔥 GET WALLET
+    const wallet = await Wallet.findOrCreate(userId, { session });
+    
+    if (!wallet) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        code: 'WALLET_UPDATE_FAILED',
-        message: 'Failed to refund amount to wallet'
+        code: 'WALLET_NOT_FOUND',
+        message: 'Wallet not found'
       });
     }
+
+    // 🔥 REFUND TO WALLET USING WALLET METHOD
+    const refundResult = await wallet.refundWithdrawal(withdrawal.amount, {
+      session,
+      description: `Withdrawal cancellation refund - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
+      metadata: {
+        withdrawalId: String(withdrawal._id),
+        withdrawal_number: withdrawal.withdrawal_number,
+        reason: cancellation_reason || 'User requested cancellation',
+        refunded_by: userId,
+        previous_balance: wallet.balance - withdrawal.amount,
+        new_balance: wallet.balance,
+        payment_method: withdrawal.payment_method,
+        status: 'refunded'
+      }
+    });
 
     // 🔥 UPDATE USER BALANCE
     await User.findByIdAndUpdate(
@@ -896,23 +872,6 @@ exports.cancelWithdrawal = async (req, res) => {
       { session }
     );
 
-    // 🔥 CREATE REFUND TRANSACTION
-    await createTransaction({
-      session,
-      user_id: userId,
-      type: 'withdrawal_refund',
-      amount: withdrawal.amount,
-      description: `Withdrawal cancellation refund - ${withdrawal.payment_method?.toUpperCase() || 'N/A'}`,
-      metadata: {
-        withdrawalId: String(withdrawal._id),
-        withdrawal_number: withdrawal.withdrawal_number,
-        status: 'refunded',
-        method: withdrawal.payment_method,
-        cancellation_reason: cancellation_reason || 'User requested cancellation',
-        refunded_at: new Date()
-      }
-    });
-
     // 🔥 COMMIT TRANSACTION
     await session.commitTransaction();
     session.endSession();
@@ -941,8 +900,13 @@ exports.cancelWithdrawal = async (req, res) => {
           formatted_balance: formatCurrency(user?.wallet_balance || 0)
         },
         wallet: {
-          balance: walletUpdate.balance,
-          available_balance: walletUpdate.available_balance
+          balance: refundResult.wallet.balance,
+          available_balance: refundResult.wallet.available_balance,
+          total_withdrawn: refundResult.wallet.total_withdrawn
+        },
+        transaction: {
+          id: refundResult.transaction._id,
+          transaction_id: refundResult.transaction.transaction_id
         }
       },
       timestamp: new Date().toISOString()
@@ -1051,33 +1015,32 @@ exports.updateWithdrawalStatus = async (req, res) => {
 
     // Handle refund for rejection
     if (status === 'rejected' && withdrawal.status !== 'rejected') {
-      // Refund to wallet
-      await Wallet.findOneAndUpdate(
-        { user_id: withdrawal.user_id },
-        { $inc: { balance: withdrawal.amount, total_spent: -withdrawal.amount } },
-        { session }
-      );
+      // GET WALLET
+      const wallet = await Wallet.findOrCreate(withdrawal.user_id, { session });
+      
+      if (wallet) {
+        // REFUND TO WALLET USING WALLET METHOD
+        await wallet.refundWithdrawal(withdrawal.amount, {
+          session,
+          description: `Withdrawal rejected - Refunded`,
+          metadata: {
+            withdrawalId: String(withdrawal._id),
+            status: 'refunded',
+            rejectedBy: adminId,
+            reason: admin_notes || 'Admin rejected',
+            previous_balance: wallet.balance - withdrawal.amount,
+            new_balance: wallet.balance,
+            refunded_by: adminId
+          }
+        });
+      }
 
-      // Refund to user balance
+      // REFUND TO USER BALANCE
       await User.findByIdAndUpdate(
         withdrawal.user_id,
         { $inc: { wallet_balance: withdrawal.amount } },
         { session }
       );
-
-      await createTransaction({
-        session,
-        user_id: withdrawal.user_id,
-        type: 'withdrawal_refund',
-        amount: withdrawal.amount,
-        description: `Withdrawal rejected - Refunded`,
-        metadata: {
-          withdrawalId: String(withdrawal._id),
-          status: 'refunded',
-          rejectedBy: adminId,
-          reason: admin_notes || 'Admin rejected'
-        }
-      });
     }
 
     // Update withdrawal
@@ -1223,6 +1186,32 @@ exports.bulkUpdateWithdrawalStatus = async (req, res) => {
     const updatedWithdrawals = [];
     
     for (const withdrawal of withdrawals) {
+      // Handle refund for rejection
+      if (status === 'rejected') {
+        const wallet = await Wallet.findOrCreate(withdrawal.user_id, { session });
+        if (wallet) {
+          await wallet.refundWithdrawal(withdrawal.amount, {
+            session,
+            description: `Withdrawal rejected - Refunded`,
+            metadata: {
+              withdrawalId: String(withdrawal._id),
+              status: 'refunded',
+              rejectedBy: adminId,
+              reason: admin_notes || 'Bulk rejection',
+              previous_balance: wallet.balance - withdrawal.amount,
+              new_balance: wallet.balance,
+              refunded_by: adminId
+            }
+          });
+        }
+
+        await User.findByIdAndUpdate(
+          withdrawal.user_id,
+          { $inc: { wallet_balance: withdrawal.amount } },
+          { session }
+        );
+      }
+
       // Update withdrawal
       withdrawal.status = status;
       withdrawal.approved_by = adminId;
