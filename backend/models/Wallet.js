@@ -510,6 +510,114 @@ walletSchema.methods.debit = async function(amount, options = {}) {
   };
 };
 
+// 🔥 NEW: WITHDRAW METHOD (For withdrawal requests)
+walletSchema.methods.withdraw = async function(amount, options = {}) {
+  if (amount <= 0) {
+    throw new Error('Withdrawal amount must be positive');
+  }
+  
+  if (this.available_balance < amount) {
+    throw new Error('Insufficient available balance for withdrawal');
+  }
+  
+  const session = options.session;
+  const metadata = options.metadata || {};
+  const description = options.description || 'Withdrawal request';
+  
+  // Update wallet
+  this.balance -= amount;
+  this.total_spent += amount;
+  this.total_withdrawn += amount;
+  this.available_balance -= amount;
+  this.last_activity = new Date();
+  this.last_withdrawal = new Date();
+  
+  // Update daily stats
+  this.daily_stats.withdrawals_today += 1;
+  this.daily_stats.withdrawal_amount_today += amount;
+  
+  await this.save({ session });
+  
+  // Create transaction record
+  const transaction = await Transaction.create([{
+    user_id: this.user_id,
+    type: 'withdrawal_request',
+    amount: amount,
+    description: description,
+    status: 'pending',
+    payment_method: metadata.payment_method || 'system',
+    reference_id: metadata.reference_id,
+    transaction_id: `TXN${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+    metadata: {
+      ...metadata,
+      withdrawal_number: metadata.withdrawal_number,
+      previous_balance: metadata.previous_balance,
+      new_balance: this.balance
+    },
+    ip_address: metadata.ip_address,
+    user_agent: metadata.user_agent
+  }], { session });
+  
+  console.log(`[WALLET WITHDRAW] User ${this.user_id}: -${amount} (withdrawal). New balance: ${this.balance}`);
+  
+  return {
+    wallet: this,
+    transaction: transaction[0]
+  };
+};
+
+// 🔥 NEW: REFUND WITHDRAWAL METHOD (For withdrawal cancellation/rejection)
+walletSchema.methods.refundWithdrawal = async function(amount, options = {}) {
+  if (amount <= 0) {
+    throw new Error('Refund amount must be positive');
+  }
+  
+  const session = options.session;
+  const metadata = options.metadata || {};
+  const description = options.description || 'Withdrawal refund';
+  
+  // Update wallet
+  this.balance += amount;
+  this.total_spent -= amount;
+  this.total_withdrawn -= amount;
+  this.available_balance += amount;
+  this.last_activity = new Date();
+  
+  // Update daily stats
+  this.daily_stats.withdrawals_today = Math.max(0, this.daily_stats.withdrawals_today - 1);
+  this.daily_stats.withdrawal_amount_today = Math.max(0, this.daily_stats.withdrawal_amount_today - amount);
+  
+  await this.save({ session });
+  
+  // Create transaction record for refund
+  const transaction = await Transaction.create([{
+    user_id: this.user_id,
+    type: 'withdrawal_refund',
+    amount: amount,
+    description: description,
+    status: 'completed',
+    payment_method: metadata.payment_method || 'system',
+    reference_id: metadata.reference_id,
+    transaction_id: `REFUND${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+    metadata: {
+      ...metadata,
+      refund_reason: metadata.reason,
+      refunded_by: metadata.refunded_by,
+      previous_balance: metadata.previous_balance,
+      new_balance: this.balance
+    },
+    ip_address: metadata.ip_address,
+    user_agent: metadata.user_agent
+  }], { session });
+  
+  console.log(`[WALLET REFUND] User ${this.user_id}: +${amount} (withdrawal refund). New balance: ${this.balance}`);
+  
+  return {
+    wallet: this,
+    transaction: transaction[0]
+  };
+};
+
 // Lock balance (for pending transactions)
 walletSchema.methods.lockBalance = async function(amount, reason = '') {
   if (amount <= 0) {
