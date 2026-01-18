@@ -1,9 +1,13 @@
-// api/walletAPI.js - COMPLETE FIXED VERSION
+// api/walletAPI.js - COMPLETELY FIXED WITH INTEGRATED FORMATTER
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE_URL } from '../config';
+import { 
+  API_BASE_URL, 
+  extractBalance,
+  formatWithdrawalData 
+} from '../config';
 
-// ✅ Create optimized axios instance
+// Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
@@ -13,221 +17,339 @@ const api = axios.create({
   },
 });
 
-// ✅ Smart Token Manager
+// Token management
 const getToken = async () => {
   try {
-    // First try user token
     const token = await AsyncStorage.getItem('token');
-    if (token) return token;
-    
-    // Try other possible token keys
-    const tokenKeys = ['userToken', 'authToken', 'accessToken'];
-    for (const key of tokenKeys) {
-      const foundToken = await AsyncStorage.getItem(key);
-      if (foundToken) return foundToken;
+    if (!token) {
+      throw new Error('No authentication token found');
     }
-    
-    throw new Error('No token found');
+    return token;
   } catch (error) {
     console.error('🔑 Token error:', error);
     throw error;
   }
 };
 
-export const walletAPI = {
-  // ==============================
-  // ✅ WALLET FUNCTIONS
-  // ==============================
+// Add token to all requests
+api.interceptors.request.use(async (config) => {
+  try {
+    const token = await getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  } catch (error) {
+    return config;
+  }
+});
 
-  // Get wallet balance
+// ✅ INTERNAL FORMATTER FUNCTIONS
+const toBackendFormat = (frontendData) => {
+  console.log('🔄 Converting to backend format:', frontendData);
+  
+  const backendData = {
+    game_uid: frontendData.gameUID || frontendData.game_uid,
+    game_name: frontendData.gameName || frontendData.game_name,
+    player_id: frontendData.playerId || frontendData.player_id,
+    amount: frontendData.amount,
+    payment_method: frontendData.paymentMethod || frontendData.payment_method,
+    account_details: frontendData.accountDetails || frontendData.account_details,
+    user_note: frontendData.userNote || frontendData.user_note
+  };
+  
+  // Remove undefined fields
+  Object.keys(backendData).forEach(key => {
+    if (backendData[key] === undefined) {
+      delete backendData[key];
+    }
+  });
+  
+  console.log('✅ Backend format:', backendData);
+  return backendData;
+};
+
+export const walletAPI = {
+  // ✅ GET WALLET BALANCE
   getBalance: async () => {
     try {
-      const token = await getToken();
+      console.log('💰 Fetching wallet balance...');
       
-      const response = await api.get('/wallet', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await api.get('/api/wallet/balance');
+      console.log('📊 Balance response:', response.data);
+      
+      const balance = extractBalance(response.data);
+      
+      return {
+        success: true,
+        balance: balance,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('❌ Get balance error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
       });
       
-      return response.data;
-    } catch (error) {
-      console.error('Wallet API getBalance error:', error.response?.data || error.message);
-      throw error;
+      return {
+        success: false,
+        balance: 0,
+        message: error.response?.data?.message || 'Failed to fetch balance'
+      };
     }
   },
 
-  // Get transactions
+  // ✅ GET TRANSACTIONS
   getTransactions: async (page = 1, limit = 20) => {
     try {
-      const token = await getToken();
-
-      const response = await api.get('/wallet/transactions', {
-        params: { page, limit },
-        headers: { 'Authorization': `Bearer ${token}` }
+      console.log('📋 Fetching transactions...');
+      
+      const response = await api.get('/api/wallet/transactions', {
+        params: { page, limit }
       });
       
-      return response.data;
+      return {
+        success: true,
+        data: response.data.data || [],
+        pagination: response.data.pagination
+      };
     } catch (error) {
-      console.error('Wallet API transactions error:', error.response?.data || error.message);
-      throw error;
+      console.error('❌ Get transactions error:', error);
+      
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.message || 'Failed to fetch transactions'
+      };
     }
   },
 
-  // ==============================
-  // ✅ WITHDRAWAL FUNCTIONS (USER)
-  // ==============================
-
-  // Withdrawal request
-  withdrawRequest: async (amount, payment_method, account_details, user_note = '') => {
+  // ✅ REQUEST WITHDRAWAL
+  withdrawRequest: async (withdrawalData) => {
     try {
-      const token = await getToken();
-
-      console.log('📤 Sending withdrawal request:', { 
-        amount, 
-        payment_method, 
-        account_details 
-      });
-
-      const response = await api.post('/withdraw/request', {
-        amount: parseFloat(amount),
-        payment_method,
-        account_details,
-        user_note
-      }, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      console.log('💸 Withdrawal request:', withdrawalData);
+      
+      // Format data for backend
+      const formattedData = toBackendFormat(withdrawalData);
+      
+      console.log('📤 Sending withdrawal:', formattedData);
+      
+      const response = await api.post('/api/withdrawal/request', formattedData);
+      console.log('✅ Withdrawal response:', response.data);
+      
+      return {
+        success: true,
+        data: response.data.data,
+        message: response.data.message
+      };
+    } catch (error) {
+      console.error('❌ Withdrawal error:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
       });
       
-      console.log('✅ Withdrawal response:', response.data);
-      return response.data;
-    } catch (error) {
-      console.error('❌ Withdrawal request error:', error.response?.data || error.message);
-      throw error;
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Withdrawal request failed',
+        error: error.response?.data
+      };
     }
   },
 
-  // Get withdrawal history
+  // ✅ GET WITHDRAWAL HISTORY
   getWithdrawalHistory: async (page = 1, limit = 20) => {
     try {
-      const token = await getToken();
-
-      const response = await api.get('/withdraw/history', {
-        params: { page, limit },
-        headers: { 'Authorization': `Bearer ${token}` }
+      console.log('📜 Fetching withdrawal history...');
+      
+      const response = await api.get('/api/withdrawal/history', {
+        params: { page, limit }
       });
       
-      return response.data;
+      return {
+        success: true,
+        data: response.data.data?.withdrawals || [],
+        pagination: response.data.data?.pagination
+      };
     } catch (error) {
-      console.error('Withdrawal history error:', error.response?.data || error.message);
-      throw error;
+      console.error('❌ Withdrawal history error:', error);
+      
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.message || 'Failed to fetch withdrawal history'
+      };
     }
   },
 
-  // Get withdrawal stats
+  // ✅ GET WITHDRAWAL STATS
   getWithdrawalStats: async () => {
     try {
-      const token = await getToken();
+      console.log('📊 Fetching withdrawal stats...');
+      
+      const response = await api.get('/api/withdrawal/stats');
+      
+      return {
+        success: true,
+        data: response.data.data
+      };
+    } catch (error) {
+      console.error('❌ Withdrawal stats error:', error);
+      
+      return {
+        success: false,
+        data: {},
+        message: error.response?.data?.message || 'Failed to fetch withdrawal stats'
+      };
+    }
+  },
 
-      const response = await api.get('/withdraw/stats', {
-        headers: { 'Authorization': `Bearer ${token}` }
+  // ✅ DEPOSIT MONEY
+  deposit: async (amount, method) => {
+    try {
+      console.log('💰 Deposit request:', { amount, method });
+      
+      const response = await api.post('/api/wallet/deposit', {
+        amount: parseFloat(amount),
+        method: method
       });
       
-      return response.data;
+      return {
+        success: true,
+        data: response.data.data,
+        message: response.data.message
+      };
     } catch (error) {
-      console.error('Withdrawal stats error:', error.response?.data || error.message);
-      throw error;
+      console.error('❌ Deposit error:', error);
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Deposit failed'
+      };
     }
   },
 
-  // ==============================
-  // ✅ ELIGIBILITY CHECK
-  // ==============================
+  // ✅ TRANSFER MONEY
+  transfer: async (recipientId, amount, description = '') => {
+    try {
+      console.log('💸 Transfer request:', { recipientId, amount });
+      
+      const response = await api.post('/api/wallet/transfer', {
+        recipient_id: recipientId,
+        amount: parseFloat(amount),
+        description: description
+      });
+      
+      return {
+        success: true,
+        data: response.data.data,
+        message: response.data.message
+      };
+    } catch (error) {
+      console.error('❌ Transfer error:', error);
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Transfer failed'
+      };
+    }
+  },
 
+  // ✅ CHECK ELIGIBILITY FOR WITHDRAWAL
   checkEligibility: async (amount) => {
     try {
-      const token = await getToken();
-      if (!token) {
-        return {
-          eligible: false,
-          errors: ['Please login first'],
-          currentBalance: 0
-        };
-      }
-
-      // First get balance
-      let balance = 0;
-      try {
-        const balanceResponse = await walletAPI.getBalance();
-        balance = balanceResponse.data?.balance || 0;
-      } catch (error) {
-        console.error('Balance check failed:', error);
-        balance = 0;
-      }
-
-      const minAmount = 100;
-      const maxAmount = 25000;
-
+      console.log('🔍 Checking eligibility for:', amount);
+      
+      const balanceResponse = await walletAPI.getBalance();
+      const currentBalance = balanceResponse.balance || 0;
+      const parsedAmount = parseFloat(amount);
+      
       const errors = [];
-
-      if (!amount || isNaN(amount)) {
+      const minAmount = 100;
+      const maxAmount = 50000;
+      
+      if (!amount || isNaN(parsedAmount)) {
         errors.push('Please enter a valid amount');
-      } else if (amount < minAmount) {
-        errors.push(`Minimum withdrawal amount is ৳${minAmount}`);
-      } else if (amount > maxAmount) {
-        errors.push(`Maximum withdrawal amount is ৳${maxAmount}`);
+      } else if (parsedAmount < minAmount) {
+        errors.push(`Minimum withdrawal is ৳${minAmount}`);
+      } else if (parsedAmount > maxAmount) {
+        errors.push(`Maximum withdrawal is ৳${maxAmount}`);
       }
-
-      if (amount > balance) {
-        errors.push(`Insufficient balance. Available: ৳${balance}`);
+      
+      if (parsedAmount > currentBalance) {
+        errors.push(`Insufficient balance. Available: ৳${currentBalance.toFixed(2)}`);
       }
-
+      
       return {
         eligible: errors.length === 0,
-        errors,
-        minAmount,
-        maxAmount,
-        currentBalance: balance,
-        canProceed: amount >= minAmount && amount <= maxAmount && amount <= balance
+        errors: errors,
+        currentBalance: currentBalance,
+        minAmount: minAmount,
+        maxAmount: maxAmount
       };
     } catch (error) {
-      console.error('Eligibility check error:', error);
+      console.error('❌ Eligibility check error:', error);
+      
       return {
         eligible: false,
-        errors: ['Unable to check eligibility. Please try again.'],
-        currentBalance: 0
+        errors: ['Eligibility check failed'],
+        currentBalance: 0,
+        minAmount: 100,
+        maxAmount: 50000
       };
     }
   },
 
-  // ==============================
-  // ✅ TEST CONNECTION
-  // ==============================
-
+  // ✅ TEST API CONNECTION
   testConnection: async () => {
     try {
-      const response = await api.get('/withdraw/test');
-      return response.data;
+      console.log('🔌 Testing API connection...');
+      
+      const response = await api.get('/api/health');
+      
+      return {
+        success: true,
+        message: 'API connected successfully',
+        data: response.data
+      };
     } catch (error) {
-      console.error('API connection test failed:', error);
+      console.error('❌ API test failed:', error);
       
-      // Try alternative endpoints
-      const endpoints = ['/health', '/api/health', '/'];
-      
-      for (const endpoint of endpoints) {
-        try {
-          const response = await api.get(endpoint);
-          return {
-            success: true,
-            message: `Connected via ${endpoint}`,
-            data: response.data
-          };
-        } catch (e) {
-          continue;
-        }
-      }
-      
-      throw new Error('Cannot connect to server');
+      return {
+        success: false,
+        message: 'Cannot connect to server'
+      };
     }
+  },
+
+  // ✅ CLEAR CACHE
+  clearCache: async () => {
+    try {
+      await AsyncStorage.removeItem('wallet_balance');
+      await AsyncStorage.removeItem('wallet_transactions');
+      await AsyncStorage.removeItem('wallet_last_updated');
+      
+      return {
+        success: true,
+        message: 'Cache cleared'
+      };
+    } catch (error) {
+      console.error('❌ Clear cache error:', error);
+      
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  },
+
+  // ✅ FORMAT JOIN DATA (for matches/tournaments)
+  formatJoinData: (gameUID, gameName, playerId) => {
+    return toBackendFormat({
+      gameUID,
+      gameName,
+      playerId
+    });
   }
 };
