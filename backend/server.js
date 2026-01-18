@@ -14,6 +14,10 @@ const startServer = async () => {
     console.log('🚀 Starting XOSS Gaming Server...');
     console.log('🔗 Connecting to MongoDB...');
 
+    // ✅ Mongoose warnings suppress
+    mongoose.set('debug', false);
+    mongoose.set('autoIndex', true);
+
     // Connect to database
     await connectDB();
     console.log('✅ Database connected successfully!');
@@ -59,46 +63,78 @@ const startServer = async () => {
       next();
     });
 
-    // ✅ API Routes - Organized by Feature
+    // ============================================
+    // ✅ API ROUTES - ORGANIZED BY FEATURE
+    // ============================================
     console.log('🔄 Loading API routes...');
 
-    // Core Routes
-    app.use('/api/matches', require('./routes/matchRoutes'));
+    // ======================
+    // 🎮 GAMING ROUTES
+    // ======================
+
+    // ✅ USER GAMING ROUTES
+    app.use('/api/matches', require('./routes/matches'));  // ইউজারের জন্য
     app.use('/api/tournaments', require('./routes/tournaments'));
     app.use('/api/combined', require('./routes/combined'));
+    app.use('/api/events', require('./routes/events'));
 
-    // User Management Routes
+    // ✅ ADMIN GAMING ROUTES
+    app.use('/api/admin/matches', require('./routes/matchRoutes'));  // এডমিনের জন্য
+    app.use('/api/admin/tournaments', require('./routes/tournaments')); // একই ফাইল, আলাদা পাথ
+
+    // ======================
+    // 👤 USER MANAGEMENT
+    // ======================
     app.use('/api/auth', require('./routes/auth'));
     app.use('/api/users', require('./routes/users'));
     app.use('/api/wallet', require('./routes/wallet'));
 
-    // ✅ Payment System Routes
+    // ======================
+    // 💰 PAYMENT SYSTEM
+    // ======================
     app.use('/api/deposits', require('./routes/deposits'));
     app.use('/api/withdraw', require('./routes/withdrawal'));
+    app.use('/api/transactions', require('./routes/transactions'));
 
-    // Prize & Result System Routes
+    // ======================
+    // 📊 NEW FEATURES
+    // ======================
+    app.use('/api/notifications', require('./routes/notifications'));
+    app.use('/api/leaderboard', require('./routes/leaderboard'));
+    app.use('/api/referrals', require('./routes/referrals'));
+
+    // ======================
+    // 🏆 PRIZE & RESULTS
+    // ======================
     app.use('/api/prize', require('./routes/prizeRoutes'));
     app.use('/api/results', require('./routes/resultRoutes'));
 
+    // ======================
+    // 👑 ADMIN PANEL
+    // ======================
+    app.use('/api/admin/dashboard', require('./routes/adminDashboard'));
+    app.use('/api/admin/support', require('./routes/support'));
+
+    // ============================================
     // ✅ HEALTH & STATUS ENDPOINTS
+    // ============================================
+    
     app.get('/', (req, res) => {
       res.json({
         success: true,
         message: '🎮 XOSS Gaming API Server',
-        version: '3.0.0',
+        version: '4.0.0',
         timestamp: new Date().toISOString(),
         database: mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected',
         uptime: process.uptime(),
-        environment: process.env.NODE_ENV || 'development',
-        endpoints: [
-          '/api/health',
-          '/api/events',
-          '/api/matches',
-          '/api/tournaments',
-          '/api/auth/login',
-          '/api/withdraw/request',
-          '/api/deposits'
-        ]
+        environment: process.env.NODE_ENV || 'production',
+        endpoints: {
+          auth: ['POST /api/auth/login', 'POST /api/auth/register', 'GET /api/auth/me'],
+          gaming: ['GET /api/matches', 'GET /api/tournaments', 'GET /api/events', 'GET /api/combined'],
+          payment: ['POST /api/deposits', 'POST /api/withdraw/request', 'GET /api/wallet/balance'],
+          user: ['GET /api/users/:id', 'GET /api/users/:id/dashboard'],
+          admin: ['GET /api/admin/matches', 'GET /api/admin/dashboard']
+        }
       });
     });
 
@@ -116,13 +152,12 @@ const startServer = async () => {
         message: dbStatus === 1 ? '🚀 Server is operating normally' : '⚠️ Service degradation detected',
         database: statusMap[dbStatus] || '⚫ Unknown',
         timestamp: new Date().toISOString(),
-        endpoints: [
-          '/api/deposits',
-          '/api/deposits/user/:userId',
-          '/api/deposits/admin/pending',
-          '/api/withdraw/request',
-          '/api/wallet'
-        ]
+        apiEndpoints: {
+          user: 'https://xoss.onrender.com/api/matches',
+          admin: 'https://xoss.onrender.com/api/admin/matches',
+          auth: 'https://xoss.onrender.com/api/auth/login',
+          payment: 'https://xoss.onrender.com/api/withdraw/request'
+        }
       });
     });
 
@@ -160,56 +195,6 @@ const startServer = async () => {
     // ✅ NEW ENDPOINTS SECTION
     // ============================================
     console.log('🆕 Loading new endpoints...');
-
-    // ✅ EVENTS ENDPOINT (Combined Matches + Tournaments)
-    app.get('/api/events', async (req, res) => {
-      try {
-        const { type, status, game, page = 1, limit = 20 } = req.query;
-        const skip = (page - 1) * limit;
-        
-        let matchQuery = {};
-        let tournamentQuery = {};
-        
-        if (status) {
-          matchQuery.status = status;
-          tournamentQuery.status = status;
-        }
-        if (game) {
-          matchQuery.game = game;
-          tournamentQuery.game = game;
-        }
-        
-        const [matches, tournaments] = await Promise.all([
-          require('./models/Match').find(matchQuery)
-            .skip(skip)
-            .limit(limit)
-            .sort({ createdAt: -1 }),
-          require('./models/Tournament').find(tournamentQuery)
-            .skip(skip)
-            .limit(limit)
-            .sort({ createdAt: -1 })
-        ]);
-        
-        const events = [...matches, ...tournaments]
-          .sort((a, b) => b.createdAt - a.createdAt)
-          .map(event => ({
-            ...event.toObject(),
-            eventType: event.__t || 'match'
-          }));
-        
-        res.json({
-          success: true,
-          data: events,
-          pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total: matches.length + tournaments.length
-          }
-        });
-      } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
 
     // ✅ USER DASHBOARD ENDPOINT
     app.get('/api/users/:userId/dashboard', async (req, res) => {
@@ -327,55 +312,38 @@ const startServer = async () => {
       }
     });
 
-    // ✅ NOTIFICATIONS ENDPOINTS
-    app.get('/api/notifications/:userId', async (req, res) => {
+    // ✅ GAME STATISTICS
+    app.get('/api/games/stats', async (req, res) => {
       try {
-        const { userId } = req.params;
-        const { unreadOnly = false } = req.query;
+        const games = ['freefire', 'pubg', 'cod', 'valorant', 'bgmi'];
+        const stats = {};
         
-        try {
-          const Notification = require('./models/Notification');
-          let query = { userId };
-          if (unreadOnly) {
-            query.read = false;
-          }
+        for (const game of games) {
+          const [matches, tournaments, totalPrize] = await Promise.all([
+            require('./models/Match').countDocuments({ game }),
+            require('./models/Tournament').countDocuments({ game }),
+            require('./models/Match').aggregate([
+              { $match: { game, status: 'completed' } },
+              { $group: { _id: null, total: { $sum: '$total_prize' } } }
+            ])
+          ]);
           
-          const notifications = await Notification.find(query)
-            .sort({ createdAt: -1 })
-            .limit(50);
-          
-          const unreadCount = await Notification.countDocuments({ userId, read: false });
-          
-          res.json({
-            success: true,
-            data: notifications,
-            unreadCount
-          });
-        } catch (error) {
-          // Return sample notifications if model doesn't exist
-          res.json({
-            success: true,
-            data: [
-              {
-                id: '1',
-                title: 'Welcome to XOSS Gaming',
-                message: 'Start playing and win real money!',
-                type: 'system',
-                read: false,
-                createdAt: new Date()
-              },
-              {
-                id: '2',
-                title: 'Deposit Successful',
-                message: 'Your deposit of ৳500 has been approved',
-                type: 'payment',
-                read: true,
-                createdAt: new Date(Date.now() - 3600000)
-              }
-            ],
-            unreadCount: 1
-          });
+          stats[game] = {
+            totalMatches: matches,
+            totalTournaments: tournaments,
+            totalPrizePool: totalPrize[0]?.total || 0,
+            activeEvents: await require('./models/Match').countDocuments({ 
+              game, 
+              status: { $in: ['active', 'upcoming'] } 
+            })
+          };
         }
+        
+        res.json({
+          success: true,
+          data: stats,
+          timestamp: new Date().toISOString()
+        });
       } catch (error) {
         res.status(500).json({ success: false, message: error.message });
       }
@@ -495,102 +463,6 @@ const startServer = async () => {
       }
     });
 
-    // ✅ GAME STATISTICS
-    app.get('/api/games/stats', async (req, res) => {
-      try {
-        const games = ['freefire', 'pubg', 'cod', 'valorant', 'bgmi'];
-        const stats = {};
-        
-        for (const game of games) {
-          const [matches, tournaments, totalPrize] = await Promise.all([
-            require('./models/Match').countDocuments({ game }),
-            require('./models/Tournament').countDocuments({ game }),
-            require('./models/Match').aggregate([
-              { $match: { game, status: 'completed' } },
-              { $group: { _id: null, total: { $sum: '$total_prize' } } }
-            ])
-          ]);
-          
-          stats[game] = {
-            totalMatches: matches,
-            totalTournaments: tournaments,
-            totalPrizePool: totalPrize[0]?.total || 0,
-            activeEvents: await require('./models/Match').countDocuments({ 
-              game, 
-              status: { $in: ['active', 'upcoming'] } 
-            })
-          };
-        }
-        
-        res.json({
-          success: true,
-          data: stats,
-          timestamp: new Date().toISOString()
-        });
-      } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
-
-    // ✅ TRANSACTION HISTORY
-    app.get('/api/transactions/:userId', async (req, res) => {
-      try {
-        const { userId } = req.params;
-        const { type, startDate, endDate, page = 1, limit = 20 } = req.query;
-        const skip = (page - 1) * limit;
-        
-        let query = { user: userId };
-        if (type) query.type = type;
-        
-        if (startDate || endDate) {
-          query.createdAt = {};
-          if (startDate) query.createdAt.$gte = new Date(startDate);
-          if (endDate) query.createdAt.$lte = new Date(endDate);
-        }
-        
-        try {
-          const Transaction = require('./models/Transaction');
-          const transactions = await Transaction.find(query)
-            .skip(skip)
-            .limit(limit)
-            .sort({ createdAt: -1 });
-          
-          const total = await Transaction.countDocuments(query);
-          
-          res.json({
-            success: true,
-            data: transactions,
-            pagination: {
-              page: parseInt(page),
-              limit: parseInt(limit),
-              total,
-              totalPages: Math.ceil(total / limit)
-            }
-          });
-        } catch (error) {
-          const Deposit = require('./models/Deposit');
-          const Withdrawal = require('./models/Withdrawal');
-          
-          const [deposits, withdrawals] = await Promise.all([
-            Deposit.find({ user: userId }).sort({ createdAt: -1 }),
-            Withdrawal.find({ user: userId }).sort({ createdAt: -1 })
-          ]);
-          
-          const combined = [
-            ...deposits.map(d => ({ ...d.toObject(), type: 'deposit' })),
-            ...withdrawals.map(w => ({ ...w.toObject(), type: 'withdrawal' }))
-          ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-          
-          res.json({
-            success: true,
-            data: combined.slice(0, 20)
-          });
-        }
-      } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
-
     // ✅ REFERRAL SYSTEM
     app.get('/api/referrals/:userId', async (req, res) => {
       try {
@@ -630,6 +502,188 @@ const startServer = async () => {
         });
       } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+      }
+    });
+
+    // ✅ PROFESSIONAL DATABASE OPERATIONS
+    app.post('/api/direct/update-results/:eventId', async (req, res) => {
+      try {
+        const { eventId } = req.params;
+        const { results, calculatedWinners, resultStatus } = req.body;
+        console.log(`🔧 Direct database update for event: ${eventId}`);
+
+        if (!mongoose.Types.ObjectId.isValid(eventId)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid event ID format'
+          });
+        }
+
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+        let result;
+
+        result = await Match.updateOne(
+          { _id: new mongoose.Types.ObjectId(eventId) },
+          {
+            $set: {
+              results: results || [],
+              calculatedWinners: calculatedWinners || [],
+              resultStatus: resultStatus || 'pending',
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          result = await Tournament.updateOne(
+            { _id: new mongoose.Types.ObjectId(eventId) },
+            {
+              $set: {
+                results: results || [],
+                calculatedWinners: calculatedWinners || [],
+                resultStatus: resultStatus || 'pending',
+                updatedAt: new Date()
+              }
+            }
+          );
+        }
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: 'Event not found or no changes made'
+          });
+        }
+
+        res.json({
+          success: true,
+          message: '✅ Database updated successfully!',
+          data: {
+            eventId,
+            modifiedCount: result.modifiedCount,
+            matchedCount: result.matchedCount,
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        console.error('❌ Direct update error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Database update failed',
+          error: error.message,
+          code: 'DIRECT_UPDATE_ERROR'
+        });
+      }
+    });
+
+    // ✅ DATABASE MIGRATION ENDPOINTS
+    app.post('/api/migrate/add-results-fields', async (req, res) => {
+      try {
+        console.log('🔄 Starting database migration: Adding results fields...');
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+
+        const matchResult = await Match.updateMany(
+          {
+            $or: [
+              { results: { $exists: false } },
+              { calculatedWinners: { $exists: false } },
+              { resultStatus: { $exists: false } }
+            ]
+          },
+          {
+            $set: {
+              results: [],
+              calculatedWinners: [],
+              resultStatus: 'pending'
+            }
+          }
+        );
+
+        const tournamentResult = await Tournament.updateMany(
+          {
+            $or: [
+              { results: { $exists: false } },
+              { calculatedWinners: { $exists: false } },
+              { resultStatus: { $exists: false } }
+            ]
+          },
+          {
+            $set: {
+              results: [],
+              calculatedWinners: [],
+              resultStatus: 'pending'
+            }
+          }
+        );
+
+        console.log('✅ Migration completed successfully');
+        res.json({
+          success: true,
+          message: '🎉 Database migration completed!',
+          data: {
+            matches: {
+              modified: matchResult.modifiedCount,
+              matched: matchResult.matchedCount
+            },
+            tournaments: {
+              modified: tournamentResult.modifiedCount,
+              matched: tournamentResult.matchedCount
+            },
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        console.error('❌ Migration error:', error);
+        res.status(500).json({
+          success: false,
+          message: 'Migration failed',
+          error: error.message
+        });
+      }
+    });
+
+    // ✅ SYSTEM UTILITIES
+    app.get('/api/system/stats', async (req, res) => {
+      try {
+        const Match = require('./models/Match');
+        const Tournament = require('./models/Tournament');
+
+        const totalMatches = await Match.countDocuments();
+        const totalTournaments = await Tournament.countDocuments();
+        const completedEvents = await Match.countDocuments({ status: 'completed' });
+        const pendingResults = await Match.countDocuments({
+          'results.status': 'pending',
+          'results.0': { $exists: true }
+        });
+
+        res.json({
+          success: true,
+          data: {
+            events: {
+              total: totalMatches + totalTournaments,
+              matches: totalMatches,
+              tournaments: totalTournaments,
+              completed: completedEvents
+            },
+            results: {
+              pendingVerification: pendingResults
+            },
+            database: {
+              status: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+              host: mongoose.connection.host,
+              name: mongoose.connection.name
+            },
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to get system stats',
+          error: error.message
+        });
       }
     });
 
@@ -722,60 +776,63 @@ const startServer = async () => {
         success: false,
         message: '🔍 Endpoint not found',
         requested: `${req.method} ${req.originalUrl}`,
-        availableEndpoints: [
+        availableEndpoints: {
           // 🔐 Authentication
-          'POST /api/auth/login',
-          'POST /api/auth/register',
-          'POST /api/auth/logout',
+          auth: [
+            'POST /api/auth/login',
+            'POST /api/auth/register',
+            'GET /api/auth/me'
+          ],
+          
+          // 🎮 Gaming (User)
+          gaming: [
+            'GET /api/matches',
+            'GET /api/matches/:id',
+            'POST /api/matches/:id/join',
+            'GET /api/tournaments',
+            'GET /api/events',
+            'GET /api/combined'
+          ],
           
           // 👤 User Management
-          'GET /api/users/:userId/dashboard',
-          'PUT /api/users/:userId',
-          
-          // 🎮 Events & Gaming
-          'GET /api/events',
-          'GET /api/matches',
-          'GET /api/matches/active',
-          'GET /api/tournaments',
-          'GET /api/tournaments/active',
+          user: [
+            'GET /api/users/:id',
+            'GET /api/users/:id/dashboard',
+            'GET /api/wallet/balance/:userId'
+          ],
           
           // 💰 Payments
-          'POST /api/deposits',
-          'GET /api/deposits/user/:userId',
-          'POST /api/withdraw/request',
-          'GET /api/withdraw/history',
+          payment: [
+            'POST /api/deposits',
+            'POST /api/withdraw/request',
+            'GET /api/withdraw/history',
+            'GET /api/transactions/:userId'
+          ],
           
-          // 💳 Wallet
-          'GET /api/wallet/balance/:userId',
-          'POST /api/wallet/transfer',
+          // 🏆 Leaderboard & Stats
+          stats: [
+            'GET /api/leaderboard',
+            'GET /api/games/stats',
+            'GET /api/referrals/:userId'
+          ],
           
-          // 🏆 Leaderboard
-          'GET /api/leaderboard',
-          'GET /api/leaderboard?type=weekly',
-          'GET /api/leaderboard?type=global',
-          
-          // 📊 Analytics
-          'GET /api/admin/dashboard',
-          'GET /api/games/stats',
-          'GET /api/system/stats',
-          
-          // 📝 Transactions
-          'GET /api/transactions/:userId',
-          
-          // 🔔 Notifications
-          'GET /api/notifications/:userId',
-          
-          // 🤝 Referrals
-          'GET /api/referrals/:userId',
-          
-          // 🆘 Support
-          'POST /api/support/ticket',
+          // 👑 Admin
+          admin: [
+            'GET /api/admin/matches',
+            'GET /api/admin/matches/pending',
+            'POST /api/admin/matches/approve/:id',
+            'GET /api/admin/dashboard',
+            'GET /api/admin/tournaments'
+          ],
           
           // ⚙️ System
-          'GET /api/health',
-          'GET /api/db-status',
-          'GET /api/deposits/test'
-        ]
+          system: [
+            'GET /api/health',
+            'GET /api/db-status',
+            'GET /api/system/stats',
+            'POST /api/support/ticket'
+          ]
+        }
       });
     });
 
@@ -786,31 +843,23 @@ const startServer = async () => {
       console.log('🎮 XOSS GAMING SERVER - FINAL PRODUCTION READY');
       console.log('='.repeat(60));
       console.log(`📍 Server running on port: ${PORT}`);
-      console.log(`🌐 URL: http://localhost:${PORT}`);
+      console.log(`🌐 URL: https://xoss.onrender.com`);
       console.log(`⚡ Environment: ${process.env.NODE_ENV || 'production'}`);
       console.log(`💾 Database: ${mongoose.connection.readyState === 1 ? '🟢 Connected' : '🔴 Disconnected'}`);
       console.log('='.repeat(60));
-      console.log('\n📋 AVAILABLE ENDPOINTS:');
-      console.log('🔐 Authentication:');
+      console.log('\n📋 IMPORTANT ENDPOINTS:');
+      console.log('\n👤 USER ENDPOINTS:');
       console.log('   POST /api/auth/login');
-      console.log('   POST /api/auth/register');
-      console.log('   GET /api/auth/me');
-      console.log('\n🎮 Gaming:');
-      console.log('   GET /api/events');
-      console.log('   GET /api/matches');
-      console.log('   GET /api/tournaments');
-      console.log('   GET /api/leaderboard');
-      console.log('\n💰 Payments:');
-      console.log('   POST /api/deposits');
+      console.log('   GET  /api/matches');
+      console.log('   POST /api/matches/:id/join');
       console.log('   POST /api/withdraw/request');
-      console.log('   GET /api/wallet/balance/:userId');
-      console.log('\n📊 Analytics:');
-      console.log('   GET /api/admin/dashboard');
-      console.log('   GET /api/games/stats');
-      console.log('   GET /api/system/stats');
-      console.log('\n🔧 System:');
-      console.log('   GET /api/health');
-      console.log('   GET /api/db-status');
+      console.log('\n👑 ADMIN ENDPOINTS:');
+      console.log('   GET  /api/admin/matches');
+      console.log('   GET  /api/admin/matches/pending');
+      console.log('   GET  /api/admin/dashboard');
+      console.log('\n🔧 SYSTEM ENDPOINTS:');
+      console.log('   GET  /api/health');
+      console.log('   GET  /api/db-status');
       console.log('='.repeat(60));
       console.log('🚀 Server ready to handle requests!');
     });
