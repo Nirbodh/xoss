@@ -4,13 +4,14 @@ const router = express.Router();
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const bcrypt = require('bcryptjs');
-const authMiddleware = require('../middleware/auth');
-// TODO: Create admin middleware file or use auth.js
-// const adminMiddleware = require('../middleware/admin');
+
+// ✅ CORRECT AUTH MIDDLEWARE IMPORT
+const { auth } = require('../middleware/auth'); // Change this line
+const { adminAuth } = require('../middleware/admin'); // Change this line
 const upload = require('../middleware/upload');
 
 // ✅ ALL ROUTES ARE PROTECTED (REQUIRE AUTHENTICATION)
-router.use(authMiddleware);
+router.use(auth); // Change this line
 
 // ====================
 // ✅ USER PROFILE ENDPOINTS
@@ -118,13 +119,19 @@ router.put('/update', async (req, res) => {
 });
 
 // ✅ UPLOAD PROFILE PICTURE
-router.post('/upload-avatar', upload.single('avatar'), async (req, res) => {
+router.post('/upload-avatar', upload.uploadConfigs.avatar, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
       });
+    }
+
+    // Delete old avatar if exists
+    const oldUser = await User.findById(req.user.id);
+    if (oldUser && oldUser.avatar) {
+      upload.deleteFile(oldUser.avatar);
     }
 
     const user = await User.findByIdAndUpdate(
@@ -143,6 +150,12 @@ router.post('/upload-avatar', upload.single('avatar'), async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Upload avatar error:', error);
+    
+    // Delete uploaded file if error occurred
+    if (req.file) {
+      upload.deleteFile(`/uploads/${req.file.filename}`);
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to upload profile picture'
@@ -347,9 +360,7 @@ router.get('/stats', async (req, res) => {
 // ====================
 
 // ✅ GET ALL USERS (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.get('/admin/users', adminMiddleware, async (req, res) => {
+router.get('/admin/users', adminAuth, async (req, res) => {
   try {
     const { page = 1, limit = 20, search = '', status = '', role = '' } = req.query;
     
@@ -393,12 +404,9 @@ router.get('/admin/users', adminMiddleware, async (req, res) => {
     });
   }
 });
-*/
 
 // ✅ GET USER BY ID (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.get('/admin/users/:id', adminMiddleware, async (req, res) => {
+router.get('/admin/users/:id', adminAuth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
       .select('-password')
@@ -464,427 +472,6 @@ router.get('/admin/users/:id', adminMiddleware, async (req, res) => {
     });
   }
 });
-*/
-
-// ✅ UPDATE USER (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.put('/admin/users/:id', adminMiddleware, async (req, res) => {
-  try {
-    const { name, email, phone, role, status, balance } = req.body;
-    
-    const updateData = {};
-    const allowedUpdates = ['name', 'email', 'phone', 'role', 'status', 'isVerified', 'preferences'];
-    
-    allowedUpdates.forEach(field => {
-      if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
-      }
-    });
-
-    // Check if email already exists
-    if (email) {
-      const existingUser = await User.findOne({ email });
-      if (existingUser && existingUser._id.toString() !== req.params.id) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email already exists'
-        });
-      }
-    }
-
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    // Update wallet balance if provided
-    if (balance !== undefined) {
-      await Wallet.findOneAndUpdate(
-        { user: req.params.id },
-        { balance: parseFloat(balance) },
-        { new: true }
-      );
-    }
-
-    res.json({
-      success: true,
-      message: 'User updated successfully',
-      data: user
-    });
-  } catch (error) {
-    console.error('❌ Admin update user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update user'
-    });
-  }
-});
-*/
-
-// ✅ DELETE USER (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.delete('/admin/users/:id', adminMiddleware, async (req, res) => {
-  try {
-    const userId = req.params.id;
-    
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // Prevent deleting admin accounts
-    if (user.role === 'admin') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete admin accounts'
-      });
-    }
-
-    // Delete related data (optional - based on your requirement)
-    const Match = require('../models/Match');
-    const Tournament = require('../models/Tournament');
-    const Transaction = require('../models/Transaction');
-    const Wallet = require('../models/Wallet');
-
-    await Promise.all([
-      Match.updateMany(
-        { participants: userId },
-        { $pull: { participants: userId } }
-      ),
-      Tournament.updateMany(
-        { participants: userId },
-        { $pull: { participants: userId } }
-      ),
-      Transaction.deleteMany({ user: userId }),
-      Wallet.deleteOne({ user: userId })
-    ]);
-
-    // Delete user
-    await User.findByIdAndDelete(userId);
-
-    res.json({
-      success: true,
-      message: 'User deleted successfully'
-    });
-  } catch (error) {
-    console.error('❌ Delete user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete user'
-    });
-  }
-});
-*/
-
-// ✅ UPDATE USER WALLET BALANCE (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.post('/admin/users/:id/wallet', adminMiddleware, async (req, res) => {
-  try {
-    const { amount, type, description } = req.body;
-    
-    if (!amount || !type) {
-      return res.status(400).json({
-        success: false,
-        message: 'Amount and type are required'
-      });
-    }
-
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    let wallet = await Wallet.findOne({ user: req.params.id });
-    
-    if (!wallet) {
-      // Create wallet if doesn't exist
-      wallet = new Wallet({
-        user: req.params.id,
-        balance: 0
-      });
-    }
-
-    // Update balance based on type
-    if (type === 'add') {
-      wallet.balance += parseFloat(amount);
-    } else if (type === 'subtract') {
-      if (wallet.balance < parseFloat(amount)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Insufficient balance'
-        });
-      }
-      wallet.balance -= parseFloat(amount);
-    } else if (type === 'set') {
-      wallet.balance = parseFloat(amount);
-    }
-
-    await wallet.save();
-
-    // Create transaction record
-    const Transaction = require('../models/Transaction');
-    const transaction = new Transaction({
-      user: req.params.id,
-      type: type === 'add' ? 'admin_credit' : 'admin_debit',
-      amount: parseFloat(amount),
-      description: description || `Admin ${type === 'add' ? 'added' : 'deducted'} balance`,
-      status: 'completed',
-      admin: req.user.id,
-      adminNote: `Balance ${type} by admin`
-    });
-    await transaction.save();
-
-    res.json({
-      success: true,
-      message: `Balance ${type} successfully`,
-      data: {
-        newBalance: wallet.balance,
-        transaction: transaction
-      }
-    });
-  } catch (error) {
-    console.error('❌ Update wallet error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update wallet balance'
-    });
-  }
-});
-*/
-
-// ✅ GET USER TRANSACTIONS (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.get('/admin/users/:id/transactions', adminMiddleware, async (req, res) => {
-  try {
-    const { page = 1, limit = 20, type = '' } = req.query;
-    
-    const query = { user: req.params.id };
-    if (type) query.type = type;
-
-    const Transaction = require('../models/Transaction');
-    const transactions = await Transaction.find(query)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit))
-      .populate('admin', 'name email');
-
-    const total = await Transaction.countDocuments(query);
-
-    res.json({
-      success: true,
-      data: transactions,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('❌ Get transactions error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch transactions'
-    });
-  }
-});
-*/
-
-// ✅ VERIFY USER (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.post('/admin/users/:id/verify', adminMiddleware, async (req, res) => {
-  try {
-    const { isVerified, verificationNote } = req.body;
-    
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      {
-        isVerified: isVerified !== undefined ? isVerified : true,
-        verificationDate: isVerified ? new Date() : null,
-        verificationNote
-      },
-      { new: true }
-    ).select('-password');
-
-    // Send notification to user
-    const Notification = require('../models/Notification');
-    const notification = new Notification({
-      user: req.params.id,
-      title: 'Account Verification',
-      message: isVerified ? 
-        'Your account has been verified successfully!' :
-        'Your account verification has been revoked.',
-      type: 'system'
-    });
-    await notification.save();
-
-    res.json({
-      success: true,
-      message: isVerified ? 'User verified successfully' : 'User verification revoked',
-      data: user
-    });
-  } catch (error) {
-    console.error('❌ Verify user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to verify user'
-    });
-  }
-});
-*/
-
-// ✅ BAN/UNBAN USER (ADMIN ONLY)
-// TODO: Uncomment when admin middleware is created
-/*
-router.post('/admin/users/:id/ban', adminMiddleware, async (req, res) => {
-  try {
-    const { status, banReason, banDuration } = req.body;
-    
-    if (!status || !['active', 'banned', 'suspended'].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Valid status is required'
-      });
-    }
-
-    const updateData = {
-      status,
-      banReason: status !== 'active' ? banReason : null,
-      banDate: status !== 'active' ? new Date() : null,
-      banDuration: status !== 'active' ? banDuration : null,
-      banLiftedDate: status === 'active' ? new Date() : null
-    };
-
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    ).select('-password');
-
-    // Send notification
-    const Notification = require('../models/Notification');
-    const notification = new Notification({
-      user: req.params.id,
-      title: status !== 'active' ? 'Account Suspended' : 'Account Reactivated',
-      message: status !== 'active' ?
-        `Your account has been ${status}. Reason: ${banReason}` :
-        'Your account has been reactivated.',
-      type: 'system'
-    });
-    await notification.save();
-
-    res.json({
-      success: true,
-      message: `User ${status} successfully`,
-      data: user
-    });
-  } catch (error) {
-    console.error('❌ Ban user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update user status'
-    });
-  }
-});
-*/
-
-// ✅ ADMIN STATISTICS DASHBOARD
-// TODO: Uncomment when admin middleware is created
-/*
-router.get('/admin/stats', adminMiddleware, async (req, res) => {
-  try {
-    const User = require('../models/User');
-    const Match = require('../models/Match');
-    const Tournament = require('../models/Tournament');
-    const Transaction = require('../models/Transaction');
-    const Withdrawal = require('../models/Withdrawal');
-
-    const [
-      totalUsers,
-      newUsersToday,
-      activeUsers,
-      bannedUsers,
-      totalMatches,
-      totalTournaments,
-      pendingMatches,
-      pendingTournaments,
-      totalDeposits,
-      totalWithdrawals,
-      pendingWithdrawals,
-      recentUsers
-    ] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ createdAt: { $gte: new Date().setHours(0, 0, 0, 0) } }),
-      User.countDocuments({ status: 'active', lastLogin: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }),
-      User.countDocuments({ status: 'banned' }),
-      Match.countDocuments(),
-      Tournament.countDocuments(),
-      Match.countDocuments({ approval_status: 'pending' }),
-      Tournament.countDocuments({ approval_status: 'pending' }),
-      Transaction.aggregate([
-        { $match: { type: 'deposit', status: 'completed' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
-      Transaction.aggregate([
-        { $match: { type: 'withdrawal', status: 'completed' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
-      Withdrawal.countDocuments({ status: 'pending' }),
-      User.find().sort({ createdAt: -1 }).limit(10).select('name email role createdAt')
-    ]);
-
-    res.json({
-      success: true,
-      data: {
-        users: {
-          total: totalUsers,
-          newToday: newUsersToday,
-          active: activeUsers,
-          banned: bannedUsers,
-          recent: recentUsers
-        },
-        events: {
-          matches: totalMatches,
-          tournaments: totalTournaments,
-          pendingMatches,
-          pendingTournaments,
-          total: totalMatches + totalTournaments
-        },
-        finance: {
-          totalDeposits: totalDeposits[0]?.total || 0,
-          totalWithdrawals: totalWithdrawals[0]?.total || 0,
-          pendingWithdrawals,
-          netRevenue: (totalDeposits[0]?.total || 0) - (totalWithdrawals[0]?.total || 0)
-        },
-        system: {
-          uptime: process.uptime(),
-          memory: process.memoryUsage(),
-          timestamp: new Date().toISOString()
-        }
-      }
-    });
-  } catch (error) {
-    console.error('❌ Admin stats error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch admin statistics'
-    });
-  }
-});
-*/
 
 // ====================
 // ✅ HELPER FUNCTIONS
