@@ -69,26 +69,26 @@ router.get('/:id/participants/list', auth, matchController.getMatchParticipants)
 // ==============================================
 
 // ✅ SUBMIT match result (router.param('id') will pre-populate req.match)
-router.post('/:id/results/submit', auth, matchController.submitMatchResult);
+// router.post('/:id/results/submit', auth, matchController.submitMatchResult);
 
 // ✅ GET match results (router.param('id') will pre-populate req.match)
-router.get('/:id/results/list', auth, matchController.getMatchResults);
+// router.get('/:id/results/list', auth, matchController.getMatchResults);
 
 // ✅ UPDATE submitted result (router.param('id') will pre-populate req.match)
-router.put('/:id/results/update', auth, matchController.updateMatchResult);
+// router.put('/:id/results/update', auth, matchController.updateMatchResult);
 
 // ✅ GET user's match result (router.param('id') will pre-populate req.match)
-router.get('/:id/results/my', auth, matchController.getMyMatchResult);
+// router.get('/:id/results/my', auth, matchController.getMyMatchResult);
 
 // ==============================================
 // 🔥 DASHBOARD & ANALYTICS ROUTES
 // ==============================================
 
 // ✅ GET dashboard overview
-router.get('/dashboard/overview', auth, matchController.getDashboardOverview);
+// router.get('/dashboard/overview', auth, matchController.getDashboardOverview);
 
 // ✅ GET match analytics
-router.get('/:id/analytics/detailed', auth, matchController.getMatchAnalytics);
+// router.get('/:id/analytics/detailed', auth, matchController.getMatchAnalytics);
 
 // ==============================================
 // 🔥 ADMIN PROTECTED ROUTES (adminAuth middleware)
@@ -142,10 +142,10 @@ router.post('/admin/:id/prizes/distribute', adminAuth, matchController.distribut
 // router.post('/moderator/:id/approve', moderatorAuth, matchController.approveMatchForModerator);
 
 // ✅ MODERATOR: Reject match (router.param('id') will pre-populate req.match)
-router.post('/moderator/:id/reject', moderatorAuth, matchController.rejectMatchForModerator);
+// router.post('/moderator/:id/reject', moderatorAuth, matchController.rejectMatchForModerator);
 
 // ✅ MODERATOR: Verify results (router.param() will pre-populate req.match)
-router.post('/moderator/:matchId/results/:resultId/verify', moderatorAuth, matchController.verifyMatchResultForModerator);
+// router.post('/moderator/:matchId/results/:resultId/verify', moderatorAuth, matchController.verifyMatchResultForModerator);
 
 // ==============================================
 // 🔥 VALIDATION MIDDLEWARE
