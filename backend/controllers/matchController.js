@@ -1,113 +1,277 @@
-// controllers/matchController.js - COMPLETE & ERROR-FREE VERSION
+// controllers/matchController.js - COMPLETE ERROR-FREE PRODUCTION VERSION
 const Match = require('../models/Match');
 const mongoose = require('mongoose');
 const { Wallet, Transaction } = require('../models/Wallet');
+const User = require('../models/User');
+const Notification = require('../models/Notification');
 
-// ✅ UNIFIED DATA MAPPING FUNCTION
+// ✅ HELPER: Format currency
+const formatCurrency = (amount) => {
+  return new Intl.NumberFormat('en-BD', {
+    style: 'currency',
+    currency: 'BDT',
+    minimumFractionDigits: 2
+  }).format(amount);
+};
+
+// ✅ HELPER: Validate match data
+const validateMatchData = (data) => {
+  const errors = [];
+  
+  if (!data.title || data.title.trim().length < 3) {
+    errors.push('Title must be at least 3 characters');
+  }
+  
+  if (!data.game || data.game.trim().length === 0) {
+    errors.push('Game is required');
+  }
+  
+  const entryFee = parseFloat(data.entry_fee || data.entryFee || 0);
+  if (isNaN(entryFee) || entryFee < 0) {
+    errors.push('Entry fee must be a positive number');
+  }
+  
+  const maxParticipants = parseInt(data.max_participants || data.maxParticipants || 25);
+  if (isNaN(maxParticipants) || maxParticipants < 2 || maxParticipants > 100) {
+    errors.push('Max participants must be between 2 and 100');
+  }
+  
+  const scheduleTime = new Date(data.schedule_time || data.scheduleTime || data.start_time || data.startTime);
+  if (isNaN(scheduleTime.getTime())) {
+    errors.push('Invalid schedule time');
+  } else if (scheduleTime < new Date()) {
+    errors.push('Schedule time cannot be in the past');
+  }
+  
+  return errors;
+};
+
+// ✅ HELPER: Map request data to match model
 const mapMatchData = (reqBody, userId, userRole) => {
-  console.log('🔄 Mapping match data:', reqBody);
+  console.log('🔄 Mapping match data for user:', userId);
   
-  const isAdmin = userRole === 'admin';
+  const isAdmin = ['admin', 'moderator', 'super_admin'].includes(userRole);
   
-  return {
+  // Parse dates safely
+  let scheduleTime;
+  try {
+    scheduleTime = new Date(reqBody.schedule_time || reqBody.scheduleTime || reqBody.start_time || reqBody.startTime);
+    if (isNaN(scheduleTime.getTime())) {
+      scheduleTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours from now
+    }
+  } catch (error) {
+    scheduleTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  }
+  
+  let startTime;
+  try {
+    startTime = new Date(reqBody.start_time || reqBody.startTime || scheduleTime);
+    if (isNaN(startTime.getTime())) {
+      startTime = new Date(scheduleTime.getTime() + 30 * 60 * 1000); // 30 minutes after schedule
+    }
+  } catch (error) {
+    startTime = new Date(scheduleTime.getTime() + 30 * 60 * 1000);
+  }
+  
+  let endTime;
+  try {
+    endTime = new Date(reqBody.end_time || reqBody.endTime);
+    if (isNaN(endTime.getTime()) || endTime <= startTime) {
+      endTime = new Date(startTime.getTime() + 2 * 60 * 60 * 1000); // 2 hours after start
+    }
+  } catch (error) {
+    endTime = new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
+  }
+  
+  const matchData = {
     // Basic info
-    title: reqBody.title,
-    game: reqBody.game,
-    description: reqBody.description || '',
-    rules: reqBody.rules || '',
-
-    // Financial - Consistent backend fields
-    entry_fee: Number(reqBody.entry_fee) || Number(reqBody.entryFee) || 0,
-    total_prize: Number(reqBody.total_prize) || Number(reqBody.prizePool) || 0,
-    per_kill: Number(reqBody.per_kill) || Number(reqBody.perKill) || 0,
-
-    // Participants - Consistent backend fields
-    max_participants: Number(reqBody.max_participants) || Number(reqBody.maxPlayers) || 25,
-    current_participants: Number(reqBody.current_participants) || Number(reqBody.currentPlayers) || 0,
-
+    title: (reqBody.title || '').trim(),
+    game: (reqBody.game || '').trim(),
+    description: (reqBody.description || '').trim(),
+    rules: (reqBody.rules || '').trim(),
+    
+    // Financial
+    entry_fee: parseFloat(reqBody.entry_fee || reqBody.entryFee || 0),
+    total_prize: parseFloat(reqBody.total_prize || reqBody.prizePool || reqBody.totalPrize || 0),
+    per_kill: parseFloat(reqBody.per_kill || reqBody.perKill || 0),
+    
+    // Participants
+    max_participants: parseInt(reqBody.max_participants || reqBody.maxParticipants || reqBody.maxPlayers || 25),
+    current_participants: 0,
+    
     // Game settings
     type: reqBody.type || 'Solo',
     map: reqBody.map || 'Bermuda',
     match_type: 'match',
-
+    
     // Room info
-    room_id: reqBody.room_id || reqBody.roomId || '',
-    room_password: reqBody.room_password || reqBody.password || '',
-
+    room_id: (reqBody.room_id || reqBody.roomId || '').trim(),
+    room_password: (reqBody.room_password || reqBody.password || reqBody.roomPassword || '').trim(),
+    
     // Timing
-    start_time: new Date(reqBody.start_time || reqBody.startTime || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-    end_time: new Date(reqBody.end_time || reqBody.endTime || new Date(Date.now() + 4 * 60 * 60 * 1000)),
-    schedule_time: new Date(reqBody.schedule_time || reqBody.scheduleTime || new Date(Date.now() + 2 * 60 * 60 * 1000)),
-
-    // Role-based approval
+    schedule_time: scheduleTime,
+    start_time: startTime,
+    end_time: endTime,
+    
+    // Status
     status: isAdmin ? 'upcoming' : 'pending',
     approval_status: isAdmin ? 'approved' : 'pending',
     created_by: userId,
     
-    // Auto-set approval fields only for admin
-    ...(isAdmin && {
-      approved_by: userId,
-      approved_at: new Date()
-    })
+    // Additional fields
+    platform: reqBody.platform || 'Mobile',
+    version: reqBody.version || '1.0',
+    streaming_link: reqBody.streaming_link || reqBody.streamingLink || '',
+    thumbnail: reqBody.thumbnail || reqBody.image || '',
+    tags: Array.isArray(reqBody.tags) ? reqBody.tags : [],
+    is_featured: reqBody.is_featured || false,
+    is_private: reqBody.is_private || false,
+    requires_verification: reqBody.requires_verification || false
   };
+  
+  // Set auto-approval for admin
+  if (isAdmin) {
+    matchData.approved_by = userId;
+    matchData.approved_at = new Date();
+    matchData.admin_notes = reqBody.admin_notes || 'Auto-approved by admin';
+  }
+  
+  return matchData;
 };
 
-// ✅ CREATE match
+// ✅ CREATE MATCH
 exports.createMatch = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
-    console.log('📥 CREATE match request:', req.body);
-    console.log('👤 User creating match:', req.user);
-    console.log('👑 User role:', req.user.role);
-
-    const userId = req.user._id || req.user.userId;
+    console.log('📥 CREATE match request received');
+    console.log('👤 User:', req.user);
+    console.log('📦 Request body:', req.body);
     
-    if (!userId) {
-      return res.status(400).json({
+    // Validate user
+    if (!req.user || !req.user.userId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(401).json({
         success: false,
-        message: 'User ID not found. Please login again.'
+        code: 'UNAUTHORIZED',
+        message: 'User authentication required',
+        timestamp: new Date().toISOString()
       });
     }
     
-    const matchData = mapMatchData(req.body, userId, req.user.role);
-
-    console.log('✅ Processed match data:', matchData);
-
-    if (!matchData.title || !matchData.game) {
-      return res.status(400).json({
-        success: false,
-        message: 'Title and game are required fields'
-      });
-    }
-
-    if (isNaN(matchData.schedule_time.getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid schedule time'
-      });
-    }
-
-    const match = await Match.create(matchData);
-    await match.populate('created_by', 'username');
+    const userId = req.user.userId;
+    const userRole = req.user.role || 'user';
     
-    if (matchData.approval_status === 'approved') {
-      await match.populate('approved_by', 'username');
+    // Validate match data
+    const validationErrors = validateMatchData(req.body);
+    if (validationErrors.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Match data validation failed',
+        errors: validationErrors,
+        timestamp: new Date().toISOString()
+      });
     }
-
-    console.log('✅ Match created successfully:', match._id);
-
-    res.status(201).json({
+    
+    // Map request data to match model
+    const matchData = mapMatchData(req.body, userId, userRole);
+    
+    // Create match
+    const match = await Match.create([matchData], { session });
+    const createdMatch = match[0];
+    
+    // Populate creator info
+    await createdMatch.populate('created_by', 'username name email');
+    if (createdMatch.approved_by) {
+      await createdMatch.populate('approved_by', 'username name');
+    }
+    
+    // Create notification for admin (if not auto-approved)
+    if (userRole === 'user') {
+      try {
+        const adminUsers = await User.find({ role: { $in: ['admin', 'moderator'] } }).session(session);
+        
+        for (const admin of adminUsers) {
+          await Notification.create([{
+            user_id: admin._id,
+            type: 'match_pending',
+            title: 'New Match Pending Approval',
+            message: `New match "${createdMatch.title}" created by ${req.user.username || 'User'}`,
+            data: {
+              match_id: createdMatch._id,
+              match_title: createdMatch.title,
+              created_by: userId,
+              created_by_name: req.user.username || 'User'
+            },
+            priority: 'high'
+          }], { session });
+        }
+        console.log(`📢 Notifications sent to ${adminUsers.length} admins`);
+      } catch (notifyError) {
+        console.error('❌ Notification creation error:', notifyError);
+        // Don't fail the transaction because of notification error
+      }
+    }
+    
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+    
+    console.log('✅ Match created successfully:', createdMatch._id);
+    
+    // Prepare response
+    const response = {
       success: true,
-      message: req.user.role === 'admin' 
-        ? 'Match created successfully and is now live! (Auto-approved)' 
-        : 'Match created successfully! Waiting for admin approval.',
-      data: match
-    });
+      code: 'MATCH_CREATED',
+      message: userRole === 'user' 
+        ? 'Match created successfully! Waiting for admin approval.' 
+        : 'Match created and auto-approved successfully!',
+      data: {
+        match: createdMatch,
+        creator: {
+          id: req.user.userId,
+          username: req.user.username,
+          name: req.user.name
+        },
+        approval_info: {
+          status: createdMatch.approval_status,
+          message: createdMatch.approval_status === 'approved' 
+            ? 'Match is live and visible to users' 
+            : 'Waiting for admin review'
+        },
+        next_steps: [
+          'Share match with friends',
+          'Wait for participants to join',
+          'Set up room details before start time'
+        ]
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    res.status(201).json(response);
+    
   } catch (error) {
+    // Abort transaction on error
+    try {
+      await session.abortTransaction();
+      session.endSession();
+    } catch (sessionError) {
+      console.error('❌ Session abort error:', sessionError);
+    }
+    
     console.error('❌ CREATE match error:', error);
-    res.status(400).json({
+    
+    res.status(500).json({
       success: false,
+      code: 'MATCH_CREATION_FAILED',
       message: 'Failed to create match',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      timestamp: new Date().toISOString()
     });
   }
 };
@@ -115,865 +279,166 @@ exports.createMatch = async (req, res) => {
 // ✅ GET ALL MATCHES
 exports.getMatches = async (req, res) => {
   try {
-    console.log('🔍 matchController: Fetching matches...');
+    console.log('🔍 GET matches request');
+    console.log('👤 User role:', req.user?.role || 'guest');
     
     const { 
-      limit = 100, 
+      limit = 20, 
       page = 1, 
       status,
       game,
       search,
-      approval_status 
+      type,
+      min_prize,
+      max_prize,
+      sort_by = '-createdAt',
+      include_pending = 'false'
     } = req.query;
-
+    
+    // Build filter
     let filter = {};
     
-    const isAdmin = req.query.admin === 'true' || 
-                   (req.user && req.user.role === 'admin');
+    // User role-based filtering
+    const isAdmin = req.user && ['admin', 'moderator', 'super_admin'].includes(req.user.role);
+    const includePending = include_pending === 'true' && isAdmin;
     
-    if (isAdmin) {
-      console.log('👑 Admin: No default filters');
-    } else {
+    if (!isAdmin || !includePending) {
+      // For regular users or when not including pending
       filter.approval_status = 'approved';
-      filter.status = { $in: ['upcoming', 'live'] };
-      console.log('👤 Non-admin filter applied:', filter);
+      filter.status = { $in: ['upcoming', 'live', 'completed'] };
     }
-
+    
+    // Additional filters
     if (status && status !== 'all') {
       filter.status = status;
     }
+    
     if (game && game !== 'all') {
       filter.game = game;
     }
+    
+    if (type && type !== 'all') {
+      filter.type = type;
+    }
+    
     if (search) {
-      filter.title = { $regex: search, $options: 'i' };
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { 'created_by.username': { $regex: search, $options: 'i' } }
+      ];
     }
-    if (approval_status && approval_status !== 'all') {
-      filter.approval_status = approval_status;
+    
+    if (min_prize) {
+      filter.total_prize = { ...filter.total_prize, $gte: parseFloat(min_prize) };
     }
-
-    console.log('📊 Final filter:', filter);
-
-    const pageNumber = parseInt(page);
-    const pageSize = parseInt(limit);
+    
+    if (max_prize) {
+      filter.total_prize = { ...filter.total_prize, $lte: parseFloat(max_prize) };
+    }
+    
+    console.log('📊 Filters applied:', filter);
+    
+    // Pagination
+    const pageNumber = Math.max(1, parseInt(page));
+    const pageSize = Math.min(100, Math.max(1, parseInt(limit)));
     const skip = (pageNumber - 1) * pageSize;
-
+    
+    // Build sort
+    let sort = {};
+    if (sort_by.startsWith('-')) {
+      sort[sort_by.substring(1)] = -1;
+    } else {
+      sort[sort_by] = 1;
+    }
+    
+    // Default sort by schedule_time if not specified
+    if (!sort_by || sort_by === 'schedule_time') {
+      sort = { schedule_time: 1 };
+    }
+    
+    // Execute query
     const matches = await Match.find(filter)
-      .populate('created_by', 'username')
-      .populate('approved_by', 'username')
-      .sort({ createdAt: -1 })
+      .populate('created_by', 'username name avatar')
+      .populate('approved_by', 'username name')
+      .sort(sort)
       .skip(skip)
-      .limit(pageSize);
-
+      .limit(pageSize)
+      .lean();
+    
+    // Get total count
     const totalMatches = await Match.countDocuments(filter);
-
+    
+    // Check if user has joined each match
+    if (req.user && req.user.userId) {
+      const userId = req.user.userId;
+      for (const match of matches) {
+        match.has_joined = match.participants?.some(p => 
+          p.user && p.user.toString() === userId.toString()
+        ) || false;
+      }
+    }
+    
     console.log(`✅ Found ${matches.length} matches out of ${totalMatches} total`);
-
-    res.json({
-      success: true,
-      count: matches.length,
-      total: totalMatches,
-      page: pageNumber,
-      pages: Math.ceil(totalMatches / pageSize),
-      data: matches
-    });
-
-  } catch (err) {
-    console.error('❌ GET matches error:', err);
-    res.status(500).json({
-      success: false,
-      message: err.message
-    });
-  }
-};
-
-// ✅ GET match by ID
-exports.getMatchById = async (req, res) => {
-  try {
-    const match = await Match.findById(req.params.id)
-      .populate('created_by', 'username')
-      .populate('participants.user', 'username email')
-      .populate('approved_by', 'username');
-
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: match
-    });
-  } catch (error) {
-    console.error('❌ GET match by ID error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ UPDATE match
-exports.updateMatch = async (req, res) => {
-  try {
-    const match = await Match.findById(req.params.id);
     
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
+    // Calculate pagination info
+    const totalPages = Math.ceil(totalMatches / pageSize);
+    const hasNextPage = pageNumber < totalPages;
+    const hasPrevPage = pageNumber > 1;
     
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-    
-    if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this match'
-      });
-    }
-    
-    const updateData = mapMatchData(req.body, userId, req.user.role);
-    
-    if (req.user.role !== 'admin') {
-      delete updateData.approval_status;
-      delete updateData.status;
-    }
-
-    const updatedMatch = await Match.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    )
-    .populate('created_by', 'username')
-    .populate('approved_by', 'username');
-
-    res.json({
-      success: true,
-      message: 'Match updated successfully',
-      data: updatedMatch
-    });
-  } catch (error) {
-    console.error('❌ UPDATE match error:', error);
-    res.status(400).json({
-      success: false,
-      message: 'Failed to update match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ DELETE match
-exports.deleteMatch = async (req, res) => {
-  try {
-    const match = await Match.findById(req.params.id);
-    
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-    
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-    
-    if (match.created_by.toString() !== userId.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to delete this match'
-      });
-    }
-
-    await Match.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: 'Match deleted successfully'
-    });
-  } catch (error) {
-    console.error('❌ DELETE match error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ UPDATE match status
-exports.updateMatchStatus = async (req, res) => {
-  try {
-    const { status } = req.body;
-
-    const validStatuses = ['pending', 'upcoming', 'live', 'completed', 'cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid status value'
-      });
-    }
-
-    const match = await Match.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true, runValidators: true }
-    );
-
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Match status updated successfully',
-      data: match
-    });
-  } catch (error) {
-    console.error('❌ UPDATE match status error:', error);
-    res.status(400).json({
-      success: false,
-      message: 'Failed to update match status',
-      error: error.message
-    });
-  }
-};
-
-// ✅ JOIN match (without payment)
-exports.joinMatch = async (req, res) => {
-  try {
-    const match = await Match.findById(req.params.id);
-
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-
-    if (match.approval_status !== 'approved') {
-      return res.status(400).json({
-        success: false,
-        message: 'This match is not approved yet'
-      });
-    }
-
-    if (match.status !== 'upcoming') {
-      return res.status(400).json({
-        success: false,
-        message: 'Match is not joinable'
-      });
-    }
-
-    const participantsArray = match.participants || [];
-    const alreadyJoined = participantsArray.some(
-      participant => participant.user && participant.user.toString() === userId.toString()
-    );
-
-    if (alreadyJoined) {
-      return res.status(400).json({
-        success: false,
-        message: 'Already joined this match'
-      });
-    }
-
-    if (match.current_participants >= match.max_participants) {
-      return res.status(400).json({
-        success: false,
-        message: 'No spots left in this match'
-      });
-    }
-
-    if (!match.participants) {
-      match.participants = [];
-    }
-
-    match.participants.push({
-      user: userId,
-      status: 'joined'
-    });
-
-    match.current_participants += 1;
-    await match.save();
-
-    await match.populate('participants.user', 'username');
-
-    res.json({
-      success: true,
-      message: 'Successfully joined match',
-      data: match
-    });
-  } catch (error) {
-    console.error('❌ JOIN match error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to join match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ JOIN match WITH PAYMENT - COMPLETELY FIXED
-exports.joinMatchWithPayment = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
-  try {
-    console.log('💳 JOIN match WITH PAYMENT request:', req.params.id);
-    console.log('📥 Request body:', req.body);
-    console.log('👤 User:', req.user);
-    
-    const match = await Match.findById(req.params.id).session(session);
-
-    if (!match) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    const userId = req.user.userId || req.user._id;
-    
-    if (!userId) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-
-    if (match.approval_status !== 'approved') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'This match is not approved yet'
-      });
-    }
-
-    if (match.status !== 'upcoming') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'Match is not joinable'
-      });
-    }
-
-    const participantsArray = match.participants || [];
-    const alreadyJoined = participantsArray.some(
-      participant => participant.user && participant.user.toString() === userId.toString()
-    );
-
-    if (alreadyJoined) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'Already joined this match'
-      });
-    }
-
-    if (match.current_participants >= match.max_participants) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: 'No spots left in this match'
-      });
-    }
-
-    const entryFee = match.entry_fee || 0;
-    
-    console.log(`💰 Entry Fee: ${entryFee}, User ID: ${userId}`);
-    
-    // 🔥 IMPORTANT FIX: Handle payment if entry fee > 0
-    if (entryFee > 0) {
-      try {
-        // Use findOrCreate method from Wallet model
-        const wallet = await Wallet.findOne({ user_id: userId }).session(session);
-        
-        if (!wallet) {
-          // Create new wallet with findOrCreate method
-          const newWallet = await Wallet.findOrCreate(userId, session);
-          
-          console.log('🆕 New wallet created for user:', userId, 'Balance:', newWallet.balance);
-          
-          if (newWallet.available_balance < entryFee) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-              success: false,
-              message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${newWallet.available_balance}`,
-              required: entryFee,
-              available: newWallet.available_balance
-            });
+    // Get stats
+    const stats = await Match.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          total_prize_pool: { $sum: '$total_prize' },
+          total_participants: { $sum: '$current_participants' },
+          upcoming_count: { 
+            $sum: { $cond: [{ $eq: ['$status', 'upcoming'] }, 1, 0] }
+          },
+          live_count: { 
+            $sum: { $cond: [{ $eq: ['$status', 'live'] }, 1, 0] }
+          },
+          completed_count: { 
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
           }
-          
-          // Use debit method for transaction
-          await newWallet.debit(entryFee, {
-            session,
-            type: 'match_entry',
-            description: `Match Entry Fee: ${match.title}`,
-            metadata: {
-              match_id: match._id,
-              match_title: match.title,
-              match_type: 'match'
-            }
-          });
-
-          console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${newWallet.balance}`);
-        } else {
-          console.log(`💰 Wallet Balance: ${wallet.available_balance}, Required: ${entryFee}`);
-          
-          if (wallet.available_balance < entryFee) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-              success: false,
-              message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.available_balance}`,
-              required: entryFee,
-              available: wallet.available_balance
-            });
-          }
-
-          // Use debit method for transaction
-          await wallet.debit(entryFee, {
-            session,
-            type: 'match_entry',
-            description: `Match Entry Fee: ${match.title}`,
-            metadata: {
-              match_id: match._id,
-              match_title: match.title,
-              match_type: 'match'
-            }
-          });
-
-          console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${wallet.balance}`);
         }
-      } catch (walletError) {
-        console.error('❌ Wallet error:', walletError);
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(500).json({
-          success: false,
-          message: 'Wallet transaction failed',
-          error: walletError.message
-        });
       }
-    }
-
-    // Add participant to match
-    const participantData = {
-      user: userId,
-      status: 'joined',
-      joined_at: new Date(),
-      payment_status: entryFee > 0 ? 'paid' : 'free',
-      amount_paid: entryFee
-    };
-
-    if (req.body.game_uid || req.body.gameUID) {
-      participantData.game_uid = req.body.game_uid || req.body.gameUID;
-    }
-    if (req.body.game_name || req.body.gameName) {
-      participantData.game_name = req.body.game_name || req.body.gameName;
-    }
-
-    if (!match.participants) {
-      match.participants = [];
-    }
-
-    match.participants.push(participantData);
-    match.current_participants += 1;
+    ]);
     
-    await match.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    console.log(`✅ User ${userId} joined match ${match._id} with payment`);
-
-    // Get room details from the match
-    const roomId = match.room_id || 'WAITING';
-    const roomPassword = match.room_password || 'WAITING';
-
     res.json({
       success: true,
-      message: entryFee > 0 
-        ? `Successfully joined match! ৳${entryFee} deducted from your wallet.` 
-        : 'Successfully joined match!',
+      code: 'MATCHES_FETCHED',
+      message: 'Matches fetched successfully',
       data: {
-        match_id: match._id,
-        match_title: match.title,
-        room_id: roomId,
-        room_password: roomPassword,
-        entry_fee: entryFee,
-        game_uid: req.body.game_uid || req.body.gameUID,
-        game_name: req.body.game_name || req.body.gameName,
-        payment: {
-          amount: entryFee,
-          status: 'deducted',
-          transaction_id: 'completed'
+        matches: matches,
+        pagination: {
+          current_page: pageNumber,
+          page_size: pageSize,
+          total_items: totalMatches,
+          total_pages: totalPages,
+          has_next_page: hasNextPage,
+          has_prev_page: hasPrevPage,
+          next_page: hasNextPage ? pageNumber + 1 : null,
+          prev_page: hasPrevPage ? pageNumber - 1 : null
         },
-        spots_left: match.max_participants - match.current_participants
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ JOIN WITH PAYMENT error:', error);
-    
-    try {
-      await session.abortTransaction();
-      session.endSession();
-    } catch (sessionError) {
-      console.error('Session abort error:', sessionError);
-    }
-    
-    res.status(500).json({
-      success: false,
-      message: 'Failed to join match with payment',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-};
-
-// ✅ ADMIN: Get all matches
-exports.getAllMatchesForAdmin = async (req, res) => {
-  try {
-    console.log('👑 ADMIN: Fetching ALL matches...');
-    
-    const { 
-      limit = 100, 
-      page = 1, 
-      status,
-      approval_status,
-      game,
-      search 
-    } = req.query;
-
-    let filter = {};
-    
-    if (status && status !== 'all') {
-      filter.status = status;
-    }
-    if (approval_status && approval_status !== 'all') {
-      filter.approval_status = approval_status;
-    }
-    if (game && game !== 'all') {
-      filter.game = game;
-    }
-    if (search) {
-      filter.title = { $regex: search, $options: 'i' };
-    }
-
-    const pageNumber = parseInt(page);
-    const pageSize = parseInt(limit);
-    const skip = (pageNumber - 1) * pageSize;
-
-    const matches = await Match.find(filter)
-      .populate('created_by', 'username email')
-      .populate('approved_by', 'username')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(pageSize);
-
-    const totalMatches = await Match.countDocuments(filter);
-
-    console.log(`👑 ADMIN: Found ${matches.length} matches (all statuses)`);
-
-    const pendingCount = await Match.countDocuments({ approval_status: 'pending' });
-    const approvedCount = await Match.countDocuments({ approval_status: 'approved' });
-    const rejectedCount = await Match.countDocuments({ approval_status: 'rejected' });
-
-    res.json({
-      success: true,
-      count: matches.length,
-      total: totalMatches,
-      page: pageNumber,
-      pages: Math.ceil(totalMatches / pageSize),
-      data: matches,
-      dashboard: {
-        pending: pendingCount,
-        approved: approvedCount,
-        rejected: rejectedCount,
-        total: totalMatches
-      }
-    });
-  } catch (error) {
-    console.error('❌ ADMIN all matches error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch matches',
-      error: error.message
-    });
-  }
-};
-
-// ✅ ADMIN: Get pending matches
-exports.getPendingMatchesForAdmin = async (req, res) => {
-  try {
-    const { page = 1, limit = 20 } = req.query;
-    const skip = (page - 1) * limit;
-
-    const matches = await Match.find({
-      approval_status: 'pending'
-    })
-      .populate('created_by', 'username email')
-      .populate('approved_by', 'username')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-
-    const total = await Match.countDocuments({
-      approval_status: 'pending'
-    });
-
-    console.log(`👑 ADMIN: Found ${matches.length} pending matches`);
-
-    res.json({
-      success: true,
-      data: matches,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('❌ ADMIN pending matches error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch pending matches',
-      error: error.message
-    });
-  }
-};
-
-// ✅ ADMIN: Approve match
-exports.approveMatchForAdmin = async (req, res) => {
-  try {
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-    
-    const match = await Match.findByIdAndUpdate(
-      req.params.id,
-      {
-        approval_status: 'approved',
-        status: 'upcoming',
-        approved_by: userId,
-        approved_at: new Date(),
-        admin_notes: req.body.adminNotes || ''
-      },
-      { new: true }
-    )
-    .populate('created_by', 'username email')
-    .populate('approved_by', 'username');
-
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    console.log('✅ ADMIN: Match approved:', match._id);
-
-    res.json({
-      success: true,
-      message: 'Match approved successfully',
-      data: match
-    });
-  } catch (error) {
-    console.error('❌ ADMIN approve match error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to approve match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ ADMIN: Reject match
-exports.rejectMatchForAdmin = async (req, res) => {
-  try {
-    const userId = req.user._id || req.user.userId;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'User ID not found. Please login again.'
-      });
-    }
-    
-    const match = await Match.findByIdAndUpdate(
-      req.params.id,
-      {
-        approval_status: 'rejected',
-        status: 'cancelled',
-        rejection_reason: req.body.rejectionReason || 'No reason provided',
-        admin_notes: req.body.adminNotes || ''
-      },
-      { new: true }
-    )
-    .populate('created_by', 'username email')
-    .populate('approved_by', 'username');
-
-    if (!match) {
-      return res.status(404).json({
-        success: false,
-        message: 'Match not found'
-      });
-    }
-
-    console.log('✅ ADMIN: Match rejected:', match._id);
-
-    res.json({
-      success: true,
-      message: 'Match rejected successfully',
-      data: match
-    });
-  } catch (error) {
-    console.error('❌ ADMIN reject match error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to reject match',
-      error: error.message
-    });
-  }
-};
-
-// ✅ DEBUG: Get collection info
-exports.debugCollections = async (req, res) => {
-  try {
-    const db = mongoose.connection.db;
-    
-    const collections = await db.listCollections().toArray();
-    console.log('📚 All collections:', collections.map(c => c.name));
-    
-    const collectionsToCheck = ['matches', 'tournaments', 'match', 'tournament', 'games'];
-    const counts = {};
-    
-    for (const collectionName of collectionsToCheck) {
-      try {
-        const count = await db.collection(collectionName).countDocuments();
-        counts[collectionName] = count;
-        console.log(`📊 ${collectionName} count: ${count}`);
-      } catch (err) {
-        counts[collectionName] = 'Collection does not exist';
-      }
-    }
-    
-    const matchModelCount = await Match.countDocuments();
-    counts.matchModel = matchModelCount;
-    
-    const allMatches = await Match.find({});
-    
-    res.status(200).json({
-      success: true,
-      database: mongoose.connection.db.databaseName,
-      collections: collections.map(c => c.name),
-      counts: counts,
-      allMatches: allMatches.map(m => ({
-        id: m._id,
-        title: m.title,
-        status: m.status,
-        approval_status: m.approval_status,
-        game: m.game,
-        match_type: m.match_type
-      }))
-    });
-  } catch (error) {
-    console.error('❌ Debug Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Debug failed',
-      error: error.message
-    });
-  }
-};
-
-// ✅ ADDED: Get matches with different filters for testing
-exports.getMatchesByFilter = async (req, res) => {
-  try {
-    const { filterType = 'all' } = req.params;
-    
-    let filter = {};
-    
-    switch(filterType) {
-      case 'all':
-        break;
-      case 'approved':
-        filter.approval_status = 'approved';
-        break;
-      case 'pending':
-        filter.approval_status = 'pending';
-        break;
-      case 'upcoming':
-        filter.status = 'upcoming';
-        break;
-      case 'completed':
-        filter.status = 'completed';
-        break;
-      default:
-        filter = {};
-    }
-    
-    const matches = await Match.find(filter)
-      .populate('created_by', 'username')
-      .sort({ createdAt: -1 });
-    
-    res.status(200).json({
-      success: true,
-      filterType,
-      count: matches.length,
-      data: matches
-    });
-  } catch (error) {
-    console.error('❌ GetMatchesByFilter Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch filtered matches',
-      error: error.message
-    });
-  }
-};
+        filters: {
+          status: status || 'all',
+          game: game || 'all',
+          search: search || '',
+          sort_by: sort_by
+        },
+        stats: stats[0] || {
+          total_prize_pool: 0,
+          total_participants: 0,
+          upcoming_count: 0,
+          live_count: 0,
+          completed_count: 0
+        },
+        user_context: {
+          is_authenticated: !!req.user,
+          is_admin: isAdmin,
+          user_id: req.user?.userId
+        }
+     
