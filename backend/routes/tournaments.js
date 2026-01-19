@@ -94,13 +94,13 @@ router.put('/admin/:tournamentId/participant/:participantId/status', adminAuth, 
 // ==============================================
 
 // ✅ MODERATOR: Get tournaments for moderation
-router.get('/moderator/pending/review', moderatorAuth, tournamentController.getPendingTournamentsForAdmin);
+// router.get('/moderator/pending/review', moderatorAuth, tournamentController.getPendingTournamentsForAdmin);
 
 // ✅ MODERATOR: Approve tournament
-router.post('/moderator/:id/approve', moderatorAuth, tournamentController.approveTournamentForAdmin);
+// router.post('/moderator/:id/approve', moderatorAuth, tournamentController.approveTournamentForAdmin);
 
 // ✅ MODERATOR: Reject tournament
-router.post('/moderator/:id/reject', moderatorAuth, tournamentController.rejectTournamentForAdmin);
+// router.post('/moderator/:id/reject', moderatorAuth, tournamentController.rejectTournamentForAdmin);
 
 // ==============================================
 // 🔥 VALIDATION MIDDLEWARE
