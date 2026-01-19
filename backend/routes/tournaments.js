@@ -59,10 +59,10 @@ router.get('/:id/participants/list', auth, tournamentController.getTournamentPar
 // ==============================================
 
 // ✅ GET dashboard overview
-router.get('/dashboard/overview', auth, tournamentController.getDashboardOverview);
+// router.get('/dashboard/overview', auth, tournamentController.getDashboardOverview);
 
 // ✅ GET tournament analytics
-router.get('/:id/analytics/detailed', auth, tournamentController.getTournamentAnalytics);
+// router.get('/:id/analytics/detailed', auth, tournamentController.getTournamentAnalytics);
 
 // ==============================================
 // 🔥 ADMIN PROTECTED ROUTES (adminAuth middleware)
