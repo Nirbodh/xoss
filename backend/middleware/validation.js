@@ -150,4 +150,317 @@ const createMatchSchema = Joi.object({
 });
 
 const submitResultSchema = Joi.object({
-  kills: Joi.number().integer().min(0).max(
+  kills: Joi.number().integer().min(0).max(100).required(),
+  damage: Joi.number().min(0).max(10000).required(),
+  survival_time: Joi.number().min(0).max(1800), // seconds
+  placement: Joi.number().integer().min(1).max(100).required(),
+  screenshots: Joi.array().items(Joi.string().uri()).max(5),
+  video_link: Joi.string().uri().allow(''),
+  description: Joi.string().max(500).allow(''),
+  evidence: Joi.object({
+    type: Joi.string().valid('screenshot', 'video', 'stream').required(),
+    url: Joi.string().uri().required()
+  })
+});
+
+// 🔥 WITHDRAWAL VALIDATION SCHEMAS
+const requestWithdrawalSchema = Joi.object({
+  amount: Joi.number().min(100).max(50000).required(),
+  payment_method: Joi.string().valid('bkash', 'nagad', 'rocket', 'bank').required(),
+  account_details: Joi.object({
+    phone: Joi.when('payment_method', {
+      is: Joi.string().valid('bkash', 'nagad', 'rocket'),
+      then: Joi.string().custom(validatePhoneBD, 'Phone validation').required(),
+      otherwise: Joi.forbidden()
+    }),
+    account_number: Joi.when('payment_method', {
+      is: 'bank',
+      then: Joi.string().required(),
+      otherwise: Joi.forbidden()
+    }),
+    account_name: Joi.when('payment_method', {
+      is: 'bank',
+      then: Joi.string().required(),
+      otherwise: Joi.forbidden()
+    }),
+    bank_name: Joi.when('payment_method', {
+      is: 'bank',
+      then: Joi.string().required(),
+      otherwise: Joi.forbidden()
+    }),
+    branch: Joi.string().allow('')
+  }).required(),
+  user_note: Joi.string().max(500).allow('')
+});
+
+const approveWithdrawalSchema = Joi.object({
+  transaction_id: Joi.string().required(),
+  admin_notes: Joi.string().max(500).allow(''),
+  verification_code: Joi.when(Joi.ref('$payment_method'), {
+    is: Joi.string().valid('bkash', 'nagad', 'rocket'),
+    then: Joi.string().length(6).required(),
+    otherwise: Joi.optional()
+  })
+});
+
+// 🔥 POST & CONTENT VALIDATION SCHEMAS
+const createPostSchema = Joi.object({
+  title: Joi.string().min(3).max(200).required(),
+  content: Joi.string().min(10).max(10000).required(),
+  excerpt: Joi.string().max(300).allow(''),
+  category: Joi.string().max(50),
+  tags: Joi.array().items(Joi.string().max(30)).max(10),
+  is_published: Joi.boolean().default(true),
+  allow_comments: Joi.boolean().default(true),
+  featured_image: Joi.string().uri().allow(''),
+  meta_title: Joi.string().max(70).allow(''),
+  meta_description: Joi.string().max(160).allow('')
+});
+
+const createCommentSchema = Joi.object({
+  content: Joi.string().min(1).max(1000).required(),
+  post_id: Joi.string().custom(validateObjectId, 'ObjectId validation').required(),
+  parent_id: Joi.string().custom(validateObjectId, 'ObjectId validation').allow('')
+});
+
+// 🔥 MEDIA VALIDATION SCHEMAS
+const uploadMediaSchema = Joi.object({
+  title: Joi.string().max(200).allow(''),
+  description: Joi.string().max(1000).allow(''),
+  tags: Joi.array().items(Joi.string().max(30)).max(10),
+  is_public: Joi.boolean().default(true),
+  category: Joi.string().max(50).allow('')
+});
+
+// 🔥 USER VALIDATION SCHEMAS
+const updateProfileSchema = Joi.object({
+  name: Joi.string().max(50).allow(''),
+  bio: Joi.string().max(500).allow(''),
+  location: Joi.string().max(100).allow(''),
+  website: Joi.string().uri().allow(''),
+  social_links: Joi.object({
+    facebook: Joi.string().uri().allow(''),
+    youtube: Joi.string().uri().allow(''),
+    twitter: Joi.string().uri().allow(''),
+    instagram: Joi.string().uri().allow(''),
+    discord: Joi.string().allow('')
+  }),
+  gaming_preferences: Joi.object({
+    favorite_game: Joi.string().max(50),
+    play_style: Joi.string().valid('aggressive', 'defensive', 'balanced'),
+    device: Joi.string().valid('mobile', 'pc', 'console')
+  })
+});
+
+// 🔥 SUPPORT VALIDATION SCHEMAS
+const createTicketSchema = Joi.object({
+  subject: Joi.string().min(5).max(200).required(),
+  category: Joi.string().valid('technical', 'billing', 'account', 'tournament', 'other').required(),
+  priority: Joi.string().valid('low', 'medium', 'high', 'urgent').default('medium'),
+  message: Joi.string().min(10).max(5000).required(),
+  order_id: Joi.string().allow(''),
+  screenshot_url: Joi.string().uri().allow('')
+});
+
+// 🔥 ADMIN VALIDATION SCHEMAS
+const updateUserRoleSchema = Joi.object({
+  role: Joi.string().valid('user', 'premium_user', 'moderator', 'admin', 'super_admin').required(),
+  reason: Joi.string().max(500).allow(''),
+  permissions: Joi.array().items(Joi.string()).optional()
+});
+
+const updateSystemSettingsSchema = Joi.object({
+  site_name: Joi.string().max(100),
+  site_url: Joi.string().uri(),
+  contact_email: Joi.string().email(),
+  support_email: Joi.string().email(),
+  currency: Joi.string().length(3),
+  min_withdrawal: Joi.number().min(0),
+  max_withdrawal: Joi.number().min(Joi.ref('min_withdrawal')),
+  withdrawal_fee_percentage: Joi.number().min(0).max(100),
+  tournament_fee_percentage: Joi.number().min(0).max(100),
+  maintenance_mode: Joi.boolean(),
+  registration_enabled: Joi.boolean(),
+  email_verification_required: Joi.boolean()
+});
+
+// 🔥 VALIDATION MIDDLEWARE
+const validate = (schema, property = 'body') => {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req[property], {
+      abortEarly: false,
+      allowUnknown: false,
+      context: req[property] // For conditional validation
+    });
+
+    if (error) {
+      const errors = error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message.replace(/['"]/g, ''),
+        type: detail.type
+      }));
+
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed',
+        errors,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Replace validated data
+    req[property] = value;
+    next();
+  };
+};
+
+// 🔥 FILE VALIDATION MIDDLEWARE
+const validateFile = (options = {}) => {
+  return (req, res, next) => {
+    if (!req.file && !options.optional) {
+      return res.status(400).json({
+        success: false,
+        code: 'FILE_REQUIRED',
+        message: 'File is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (req.file) {
+      const { maxSize, allowedTypes } = options;
+      
+      // Check file size
+      if (maxSize && req.file.size > maxSize) {
+        return res.status(400).json({
+          success: false,
+          code: 'FILE_TOO_LARGE',
+          message: `File size exceeds ${maxSize / (1024 * 1024)}MB limit`,
+          maxSize: maxSize,
+          fileSize: req.file.size,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Check file type
+      if (allowedTypes && allowedTypes.length > 0) {
+        const fileType = req.file.mimetype;
+        const fileExt = req.file.originalname.split('.').pop().toLowerCase();
+        
+        const isValidType = allowedTypes.some(type => {
+          if (type.startsWith('.')) {
+            return fileExt === type.substring(1);
+          }
+          return fileType.startsWith(type);
+        });
+
+        if (!isValidType) {
+          return res.status(400).json({
+            success: false,
+            code: 'INVALID_FILE_TYPE',
+            message: `Allowed file types: ${allowedTypes.join(', ')}`,
+            fileType: fileType,
+            allowedTypes,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    }
+
+    next();
+  };
+};
+
+// 🔥 QUERY PARAMS VALIDATION
+const validateQuery = (schema) => {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: false,
+      allowUnknown: true
+    });
+
+    if (error) {
+      const errors = error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message.replace(/['"]/g, ''),
+        type: detail.type
+      }));
+
+      return res.status(400).json({
+        success: false,
+        code: 'QUERY_VALIDATION_ERROR',
+        message: 'Invalid query parameters',
+        errors,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    req.query = value;
+    next();
+  };
+};
+
+// 🔥 PARAMS VALIDATION
+const validateParams = (schema) => {
+  return (req, res, next) => {
+    const { error, value } = schema.validate(req.params, {
+      abortEarly: false,
+      allowUnknown: false
+    });
+
+    if (error) {
+      const errors = error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message.replace(/['"]/g, ''),
+        type: detail.type
+      }));
+
+      return res.status(400).json({
+        success: false,
+        code: 'PARAMS_VALIDATION_ERROR',
+        message: 'Invalid URL parameters',
+        errors,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    req.params = value;
+    next();
+  };
+};
+
+// 🔥 EXPORT ALL VALIDATORS
+module.exports = {
+  // Schemas
+  registerSchema,
+  loginSchema,
+  changePasswordSchema,
+  resetPasswordSchema,
+  createTournamentSchema,
+  joinTournamentSchema,
+  createMatchSchema,
+  submitResultSchema,
+  requestWithdrawalSchema,
+  approveWithdrawalSchema,
+  createPostSchema,
+  createCommentSchema,
+  uploadMediaSchema,
+  updateProfileSchema,
+  createTicketSchema,
+  updateUserRoleSchema,
+  updateSystemSettingsSchema,
+  paginationSchema,
+  dateRangeSchema,
+  
+  // Validation middleware
+  validate,
+  validateFile,
+  validateQuery,
+  validateParams,
+  
+  // Validation helper functions
+  validateObjectId,
+  validatePhoneBD,
+  validateEmail,
+  validateUsername
+};
