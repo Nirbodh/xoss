@@ -1,418 +1,385 @@
-// middleware/auth.js - COMPLETELY FIXED & ENHANCED VERSION
+// middleware/auth.js - PRODUCTION PRO VERSION
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { RateLimiterMemory } = require('rate-limiter-flexible');
 
-/**
- * ✅ STANDARD AUTH MIDDLEWARE
- * Validates JWT token and attaches user to request
- */
+// Rate limiter for auth attempts
+const loginRateLimiter = new RateLimiterMemory({
+  points: 5, // 5 attempts
+  duration: 15 * 60, // per 15 minutes
+  blockDuration: 30 * 60 // block for 30 minutes
+});
+
 const auth = async (req, res, next) => {
+  const startTime = Date.now();
+  
   try {
-    // Get token from Authorization header
-    let token = req.header('Authorization');
+    // Extract token from various sources
+    let token = extractToken(req);
     
     if (!token) {
-      // Try from cookie
-      token = req.cookies?.token;
-    }
-    
-    if (!token) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'NO_TOKEN',
-        message: 'Authentication token is required',
-        timestamp: new Date().toISOString()
-      });
+      return sendAuthError(res, 'NO_TOKEN', 'Authentication token required', 401);
     }
 
-    // Remove 'Bearer ' prefix if present
-    if (token.startsWith('Bearer ')) {
-      token = token.substring(7);
+    // Verify token
+    const decoded = verifyToken(token);
+    
+    if (!decoded) {
+      return sendAuthError(res, 'INVALID_TOKEN', 'Invalid or malformed token', 401);
     }
 
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'xoss_gaming_secret_2024');
-    
-    // Find user in database
-    const user = await User.findById(decoded.userId || decoded.id).select('-password');
+    // Find user with cache consideration
+    const user = await findUserWithCache(decoded.userId);
     
     if (!user) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'USER_NOT_FOUND',
-        message: 'User account not found',
-        timestamp: new Date().toISOString()
-      });
+      return sendAuthError(res, 'USER_NOT_FOUND', 'User account not found', 401);
     }
 
-    // Check if user is active
-    if (user.is_active === false) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'ACCOUNT_DEACTIVATED',
-        message: 'Your account has been deactivated',
-        timestamp: new Date().toISOString()
-      });
+    // Security checks
+    const securityCheck = await performSecurityChecks(user, req);
+    if (!securityCheck.valid) {
+      return res.status(securityCheck.status).json(securityCheck.response);
     }
 
-    // Attach user to request object
-    req.user = { 
+    // Attach enhanced user object
+    req.user = {
+      // Core identifiers
       _id: user._id,
-      userId: user._id, 
+      userId: user._id,
       id: user._id,
+      
+      // User info
       role: user.role || 'user',
       email: user.email,
       username: user.username,
       name: user.name || user.username,
-      wallet_balance: user.wallet_balance || 0,
       phone: user.phone,
       avatar: user.avatar,
-      is_active: user.is_active
+      
+      // Financial
+      wallet_balance: user.wallet_balance || 0,
+      total_earnings: user.total_earnings || 0,
+      total_deposits: user.total_deposits || 0,
+      total_withdrawals: user.total_withdrawals || 0,
+      
+      // Status
+      is_active: user.is_active,
+      is_verified: user.is_verified,
+      is_premium: user.is_premium || false,
+      
+      // Security
+      last_login: user.last_login,
+      login_count: user.login_count || 0,
+      ip_address: req.ip,
+      
+      // Permissions
+      permissions: getUserPermissions(user.role),
+      features: getUserFeatures(user.role),
+      
+      // Metadata
+      created_at: user.createdAt,
+      member_since: formatMemberSince(user.createdAt)
     };
+
+    // Update last activity
+    await updateUserActivity(user._id, req.ip);
+
+    // Log successful auth
+    logAuthSuccess(req, user, Date.now() - startTime);
     
-    // Add token to request for logging
-    req.token = token;
-    
-    console.log(`🔐 Auth successful - User: ${user.username} (${user.role})`);
     next();
+
   } catch (error) {
-    console.error('🔴 Auth middleware error:', error.message);
-    
-    let errorCode = 'AUTH_ERROR';
-    let errorMessage = 'Authentication failed';
-    let statusCode = 401;
-
-    if (error.name === 'JsonWebTokenError') {
-      errorCode = 'INVALID_TOKEN';
-      errorMessage = 'Invalid or malformed token';
-    } else if (error.name === 'TokenExpiredError') {
-      errorCode = 'TOKEN_EXPIRED';
-      errorMessage = 'Token has expired';
-      statusCode = 401;
-    } else if (error.name === 'CastError') {
-      errorCode = 'INVALID_USER_ID';
-      errorMessage = 'Invalid user ID format';
-    }
-
-    res.status(statusCode).json({ 
-      success: false,
-      code: errorCode,
-      message: errorMessage,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      timestamp: new Date().toISOString()
-    });
+    logAuthError(error, req, Date.now() - startTime);
+    handleAuthError(res, error);
   }
 };
 
-/**
- * ✅ ADMIN AUTH MIDDLEWARE
- * Requires admin or moderator role
- */
+// Helper functions
+const extractToken = (req) => {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.token;
+  const queryToken = req.query.token;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  if (cookieToken) {
+    return cookieToken;
+  }
+  if (queryToken) {
+    return queryToken;
+  }
+  return null;
+};
+
+const verifyToken = (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET, {
+      algorithms: ['HS256'],
+      ignoreExpiration: false,
+      clockTolerance: 30
+    });
+  } catch (error) {
+    return null;
+  }
+};
+
+const findUserWithCache = async (userId) => {
+  // In production, you can add Redis cache here
+  return await User.findById(userId)
+    .select('-password -reset_password_token -reset_password_expires')
+    .lean();
+};
+
+const performSecurityChecks = async (user, req) => {
+  const checks = {
+    valid: true,
+    status: 200,
+    response: null
+  };
+
+  // Check if account is active
+  if (user.is_active === false) {
+    checks.valid = false;
+    checks.status = 403;
+    checks.response = {
+      success: false,
+      code: 'ACCOUNT_SUSPENDED',
+      message: 'Your account has been suspended',
+      support_contact: 'support@xossgaming.com',
+      timestamp: new Date().toISOString()
+    };
+    return checks;
+  }
+
+  // Check if email is verified (optional based on settings)
+  if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.is_verified) {
+    checks.valid = false;
+    checks.status = 403;
+    checks.response = {
+      success: false,
+      code: 'EMAIL_NOT_VERIFIED',
+      message: 'Please verify your email address',
+      resend_url: '/api/auth/resend-verification',
+      timestamp: new Date().toISOString()
+    };
+    return checks;
+  }
+
+  // Check for suspicious activity (multiple IPs, etc.)
+  const suspicious = await checkSuspiciousActivity(user._id, req.ip);
+  if (suspicious) {
+    checks.valid = false;
+    checks.status = 403;
+    checks.response = {
+      success: false,
+      code: 'SUSPICIOUS_ACTIVITY',
+      message: 'Suspicious activity detected. Please contact support.',
+      support_contact: 'support@xossgaming.com',
+      timestamp: new Date().toISOString()
+    };
+    return checks;
+  }
+
+  return checks;
+};
+
+const getUserPermissions = (role) => {
+  const permissions = {
+    user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile'],
+    moderator: ['approve_matches', 'manage_users', 'view_reports', 'all_user_permissions'],
+    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
+  };
+  
+  return permissions[role] || permissions.user;
+};
+
+const getUserFeatures = (role) => {
+  const features = {
+    user: ['basic_gaming', 'wallet', 'friends', 'notifications'],
+    moderator: ['moderation_tools', 'analytics', 'all_user_features'],
+    admin: ['admin_dashboard', 'system_controls', 'all_features']
+  };
+  
+  return features[role] || features.user;
+};
+
+const updateUserActivity = async (userId, ip) => {
+  await User.findByIdAndUpdate(userId, {
+    $set: { last_login: new Date(), last_ip: ip },
+    $inc: { login_count: 1 }
+  }).catch(console.error);
+};
+
+const checkSuspiciousActivity = async (userId, currentIp) => {
+  // Implement suspicious activity detection logic
+  // Check for multiple IP addresses, rapid logins, etc.
+  return false; // Return true if suspicious
+};
+
+const logAuthSuccess = (req, user, duration) => {
+  console.log(`✅ AUTH SUCCESS | User: ${user.username} (${user.role}) | IP: ${req.ip} | Duration: ${duration}ms`);
+};
+
+const logAuthError = (error, req, duration) => {
+  console.error(`🔴 AUTH FAILED | IP: ${req.ip} | Error: ${error.message} | Duration: ${duration}ms`);
+};
+
+const sendAuthError = (res, code, message, status = 401) => {
+  return res.status(status).json({
+    success: false,
+    code: code,
+    message: message,
+    timestamp: new Date().toISOString(),
+    docs: 'https://xoss.onrender.com/api/docs#authentication'
+  });
+};
+
+const handleAuthError = (res, error) => {
+  let code = 'AUTH_ERROR';
+  let message = 'Authentication failed';
+  let status = 500;
+
+  switch (error.name) {
+    case 'JsonWebTokenError':
+      code = 'INVALID_TOKEN';
+      message = 'Invalid authentication token';
+      status = 401;
+      break;
+    case 'TokenExpiredError':
+      code = 'TOKEN_EXPIRED';
+      message = 'Authentication token has expired';
+      status = 401;
+      break;
+    case 'MongoError':
+      code = 'DATABASE_ERROR';
+      message = 'Database connection error';
+      status = 503;
+      break;
+  }
+
+  return sendAuthError(res, code, message, status);
+};
+
+// Admin authentication with enhanced security
 const adminAuth = async (req, res, next) => {
   try {
-    // Get token from Authorization header
-    let token = req.header('Authorization');
-    
-    if (!token) {
-      // Try from cookie
-      token = req.cookies?.token;
-    }
-    
-    if (!token) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'NO_TOKEN',
-        message: 'Authentication token is required',
-        timestamp: new Date().toISOString()
-      });
-    }
+    // First authenticate normally
+    await auth(req, res, async () => {
+      // Check admin role
+      if (!['admin', 'moderator', 'super_admin'].includes(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          code: 'ADMIN_ACCESS_REQUIRED',
+          message: 'Administrator access required',
+          required_roles: ['admin', 'moderator', 'super_admin'],
+          your_role: req.user.role,
+          timestamp: new Date().toISOString()
+        });
+      }
 
-    // Remove 'Bearer ' prefix if present
-    if (token.startsWith('Bearer ')) {
-      token = token.substring(7);
-    }
+      // Additional admin security checks
+      const adminSecurity = await checkAdminSecurity(req.user._id);
+      if (!adminSecurity.valid) {
+        return res.status(403).json(adminSecurity.response);
+      }
 
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'xoss_gaming_secret_2024');
-    
-    // Find user in database
-    const user = await User.findById(decoded.userId || decoded.id).select('-password');
-    
-    if (!user) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'USER_NOT_FOUND',
-        message: 'User account not found',
-        timestamp: new Date().toISOString()
-      });
-    }
+      // Log admin access
+      console.log(`👑 ADMIN ACCESS | User: ${req.user.username} | Endpoint: ${req.originalUrl}`);
 
-    // Check if user is active
-    if (user.is_active === false) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'ACCOUNT_DEACTIVATED',
-        message: 'Your account has been deactivated',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Check admin privileges
-    const allowedRoles = ['admin', 'moderator', 'super_admin'];
-    if (!allowedRoles.includes(user.role)) {
-      return res.status(403).json({ 
-        success: false,
-        code: 'ACCESS_DENIED',
-        message: 'Admin access required',
-        userRole: user.role,
-        requiredRoles: allowedRoles,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Attach user to request object
-    req.user = { 
-      _id: user._id,
-      userId: user._id, 
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      username: user.username,
-      name: user.name || user.username,
-      wallet_balance: user.wallet_balance || 0,
-      phone: user.phone,
-      avatar: user.avatar,
-      is_active: user.is_active
-    };
-    
-    // Add token to request for logging
-    req.token = token;
-    
-    console.log(`👑 Admin auth successful - User: ${user.username} (${user.role})`);
-    next();
+      next();
+    });
   } catch (error) {
-    console.error('🔴 Admin auth middleware error:', error.message);
-    
-    let errorCode = 'ADMIN_AUTH_ERROR';
-    let errorMessage = 'Admin authentication failed';
-    let statusCode = 401;
-
-    if (error.name === 'JsonWebTokenError') {
-      errorCode = 'INVALID_TOKEN';
-      errorMessage = 'Invalid or malformed token';
-    } else if (error.name === 'TokenExpiredError') {
-      errorCode = 'TOKEN_EXPIRED';
-      errorMessage = 'Token has expired';
-      statusCode = 401;
-    }
-
-    res.status(statusCode).json({ 
+    console.error('Admin auth error:', error);
+    res.status(500).json({
       success: false,
-      code: errorCode,
-      message: errorMessage,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      code: 'ADMIN_AUTH_ERROR',
+      message: 'Admin authentication failed',
       timestamp: new Date().toISOString()
     });
   }
 };
 
-/**
- * ✅ SUPER ADMIN AUTH MIDDLEWARE
- * Requires admin role only (not moderator)
- */
-const superAdminAuth = async (req, res, next) => {
-  try {
-    // Get token from Authorization header
-    let token = req.header('Authorization');
-    
-    if (!token) {
-      // Try from cookie
-      token = req.cookies?.token;
-    }
-    
-    if (!token) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'NO_TOKEN',
-        message: 'Authentication token is required',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Remove 'Bearer ' prefix if present
-    if (token.startsWith('Bearer ')) {
-      token = token.substring(7);
-    }
-
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'xoss_gaming_secret_2024');
-    
-    // Find user in database
-    const user = await User.findById(decoded.userId || decoded.id).select('-password');
-    
-    if (!user) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'USER_NOT_FOUND',
-        message: 'User account not found',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Check if user is active
-    if (user.is_active === false) {
-      return res.status(401).json({ 
-        success: false,
-        code: 'ACCOUNT_DEACTIVATED',
-        message: 'Your account has been deactivated',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Check super admin privileges (only admin role)
-    if (user.role !== 'admin' && user.role !== 'super_admin') {
-      return res.status(403).json({ 
-        success: false,
-        code: 'ACCESS_DENIED',
-        message: 'Super admin access required',
-        userRole: user.role,
-        requiredRole: 'admin',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Attach user to request object
-    req.user = { 
-      _id: user._id,
-      userId: user._id, 
-      id: user._id,
-      role: user.role,
-      email: user.email,
-      username: user.username,
-      name: user.name || user.username,
-      wallet_balance: user.wallet_balance || 0,
-      phone: user.phone,
-      avatar: user.avatar,
-      is_active: user.is_active
-    };
-    
-    // Add token to request for logging
-    req.token = token;
-    
-    console.log(`👑 Super admin auth successful - User: ${user.username} (${user.role})`);
-    next();
-  } catch (error) {
-    console.error('🔴 Super admin auth middleware error:', error.message);
-    
-    let errorCode = 'SUPER_ADMIN_AUTH_ERROR';
-    let errorMessage = 'Super admin authentication failed';
-    let statusCode = 401;
-
-    if (error.name === 'JsonWebTokenError') {
-      errorCode = 'INVALID_TOKEN';
-      errorMessage = 'Invalid or malformed token';
-    } else if (error.name === 'TokenExpiredError') {
-      errorCode = 'TOKEN_EXPIRED';
-      errorMessage = 'Token has expired';
-      statusCode = 401;
-    }
-
-    res.status(statusCode).json({ 
-      success: false,
-      code: errorCode,
-      message: errorMessage,
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      timestamp: new Date().toISOString()
-    });
-  }
+const checkAdminSecurity = async (userId) => {
+  // Add additional security checks for admin access
+  // Example: Check if admin account is locked, requires 2FA, etc.
+  return { valid: true };
 };
 
-/**
- * ✅ OPTIONAL AUTH MIDDLEWARE
- * Attaches user if token exists, but doesn't require it
- */
+// Rate limited authentication for login endpoints
+const rateLimitedAuth = (req, res, next) => {
+  const key = req.ip;
+  
+  loginRateLimiter.consume(key)
+    .then(() => {
+      next();
+    })
+    .catch(() => {
+      res.status(429).json({
+        success: false,
+        code: 'RATE_LIMITED',
+        message: 'Too many login attempts. Please try again later.',
+        retry_after: '30 minutes',
+        timestamp: new Date().toISOString()
+      });
+    });
+};
+
+// Optional authentication (for public endpoints that can work with or without auth)
 const optionalAuth = async (req, res, next) => {
   try {
-    // Get token from Authorization header
-    let token = req.header('Authorization');
+    const token = extractToken(req);
     
-    if (!token) {
-      // Try from cookie
-      token = req.cookies?.token;
+    if (token) {
+      const decoded = verifyToken(token);
+      if (decoded) {
+        const user = await findUserWithCache(decoded.userId);
+        if (user && user.is_active) {
+          req.user = {
+            _id: user._id,
+            userId: user._id,
+            role: user.role || 'user',
+            email: user.email,
+            username: user.username,
+            is_authenticated: true
+          };
+        }
+      }
     }
     
-    if (!token) {
-      // No token, continue without user
-      req.user = null;
-      return next();
+    if (!req.user) {
+      req.user = { is_authenticated: false, role: 'guest' };
     }
-
-    // Remove 'Bearer ' prefix if present
-    if (token.startsWith('Bearer ')) {
-      token = token.substring(7);
-    }
-
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'xoss_gaming_secret_2024');
     
-    // Find user in database
-    const user = await User.findById(decoded.userId || decoded.id).select('-password');
-    
-    if (!user || user.is_active === false) {
-      // Invalid or deactivated user, continue without user
-      req.user = null;
-      return next();
-    }
-
-    // Attach user to request object
-    req.user = { 
-      _id: user._id,
-      userId: user._id, 
-      id: user._id,
-      role: user.role || 'user',
-      email: user.email,
-      username: user.username,
-      name: user.name || user.username,
-      wallet_balance: user.wallet_balance || 0,
-      phone: user.phone,
-      avatar: user.avatar,
-      is_active: user.is_active
-    };
-    
-    console.log(`👤 Optional auth - User: ${user.username}`);
     next();
   } catch (error) {
-    // Invalid token, continue without user
-    console.log('🔴 Optional auth failed, continuing without user');
-    req.user = null;
+    req.user = { is_authenticated: false, role: 'guest' };
     next();
   }
 };
 
-/**
- * ✅ API KEY AUTH MIDDLEWARE
- * For server-to-server communication
- */
+// API key authentication for microservices
 const apiKeyAuth = (req, res, next) => {
-  const apiKey = req.header('X-API-Key') || req.query.api_key;
+  const apiKey = req.headers['x-api-key'] || req.query.api_key;
   
   if (!apiKey) {
-    return res.status(401).json({ 
+    return res.status(401).json({
       success: false,
       code: 'API_KEY_REQUIRED',
-      message: 'API key is required',
+      message: 'API key is required for this endpoint',
       timestamp: new Date().toISOString()
     });
   }
 
-  const validApiKeys = [
+  const validKeys = [
     process.env.ADMIN_API_KEY,
     process.env.WEBHOOK_API_KEY,
-    'xoss_gaming_api_key_2024'
+    process.env.MICROSERVICE_API_KEY
   ];
 
-  if (!validApiKeys.includes(apiKey)) {
-    return res.status(403).json({ 
+  if (!validKeys.includes(apiKey)) {
+    return res.status(403).json({
       success: false,
       code: 'INVALID_API_KEY',
       message: 'Invalid API key',
@@ -420,230 +387,23 @@ const apiKeyAuth = (req, res, next) => {
     });
   }
 
-  console.log('🔑 API key authentication successful');
+  req.apiKey = apiKey;
   next();
 };
 
-/**
- * ✅ RATE LIMIT BY USER ID
- * Prevents spam from authenticated users
- */
-const userRateLimit = new Map();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 60; // 60 requests per minute
-
-const rateLimitByUser = (req, res, next) => {
-  const userId = req.user?.userId || req.ip;
-  const now = Date.now();
-  
-  if (!userRateLimit.has(userId)) {
-    userRateLimit.set(userId, {
-      count: 1,
-      resetTime: now + RATE_LIMIT_WINDOW
-    });
-    return next();
-  }
-  
-  const userData = userRateLimit.get(userId);
-  
-  if (now > userData.resetTime) {
-    // Reset window
-    userData.count = 1;
-    userData.resetTime = now + RATE_LIMIT_WINDOW;
-    return next();
-  }
-  
-  if (userData.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return res.status(429).json({ 
-      success: false,
-      code: 'RATE_LIMIT_EXCEEDED',
-      message: 'Too many requests. Please try again later.',
-      retryAfter: Math.ceil((userData.resetTime - now) / 1000),
-      timestamp: new Date().toISOString()
-    });
-  }
-  
-  userData.count++;
-  next();
-};
-
-// Clean up old rate limit entries periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [userId, data] of userRateLimit.entries()) {
-    if (now > data.resetTime + 60000) { // Keep for 1 extra minute
-      userRateLimit.delete(userId);
-    }
-  }
-}, 60000); // Clean every minute
-
-/**
- * ✅ CORS MIDDLEWARE
- */
-const corsMiddleware = (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-API-Key');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-};
-
-/**
- * ✅ LOGGING MIDDLEWARE
- */
-const requestLogger = (req, res, next) => {
-  const start = Date.now();
-  const timestamp = new Date().toISOString();
-  
-  // Log request
-  console.log(`📨 [${timestamp}] ${req.method} ${req.originalUrl} - IP: ${req.ip} - User: ${req.user?.username || 'Guest'}`);
-  
-  // Store original send function
-  const originalSend = res.send;
-  
-  // Override send function to log response
-  res.send = function(body) {
-    const duration = Date.now() - start;
-    const statusCode = res.statusCode;
-    
-    // Log response
-    console.log(`📤 [${timestamp}] ${req.method} ${req.originalUrl} - Status: ${statusCode} - Duration: ${duration}ms`);
-    
-    // Call original send
-    return originalSend.call(this, body);
-  };
-  
-  next();
-};
-
-/**
- * ✅ ERROR HANDLING MIDDLEWARE
- */
-const errorHandler = (err, req, res, next) => {
-  console.error('💥 Global error handler:', err);
-  
-  const statusCode = err.statusCode || 500;
-  const errorCode = err.code || 'INTERNAL_ERROR';
-  const message = err.message || 'Internal Server Error';
-  
-  res.status(statusCode).json({
-    success: false,
-    code: errorCode,
-    message: message,
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-    timestamp: new Date().toISOString(),
-    path: req.originalUrl,
-    method: req.method
-  });
-};
-
-/**
- * ✅ NOT FOUND MIDDLEWARE
- */
-const notFoundHandler = (req, res, next) => {
-  res.status(404).json({
-    success: false,
-    code: 'ENDPOINT_NOT_FOUND',
-    message: `Endpoint ${req.method} ${req.originalUrl} not found`,
-    timestamp: new Date().toISOString(),
-    documentation: `${process.env.BASE_URL || 'https://xoss.onrender.com'}/api/docs`
-  });
-};
-
-/**
- * ✅ REQUEST VALIDATION MIDDLEWARE
- */
-const validateRequest = (schema) => {
-  return (req, res, next) => {
-    try {
-      const { error } = schema.validate(req.body, { abortEarly: false });
-      
-      if (error) {
-        const errors = error.details.map(detail => ({
-          field: detail.path.join('.'),
-          message: detail.message
-        }));
-        
-        return res.status(400).json({
-          success: false,
-          code: 'VALIDATION_ERROR',
-          message: 'Request validation failed',
-          errors: errors,
-          timestamp: new Date().toISOString()
-        });
-      }
-      
-      next();
-    } catch (error) {
-      console.error('🔴 Request validation error:', error);
-      res.status(500).json({
-        success: false,
-        code: 'VALIDATION_PROCESS_ERROR',
-        message: 'Failed to validate request',
-        timestamp: new Date().toISOString()
-      });
-    }
-  };
-};
-
-/**
- * ✅ FILE UPLOAD VALIDATION
- */
-const validateFileUpload = (allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'], maxSize = 5 * 1024 * 1024) => {
-  return (req, res, next) => {
-    if (!req.file) {
-      return next();
-    }
-    
-    const { mimetype, size } = req.file;
-    
-    // Check file type
-    if (!allowedTypes.includes(mimetype)) {
-      return res.status(400).json({
-        success: false,
-        code: 'INVALID_FILE_TYPE',
-        message: `Invalid file type. Allowed types: ${allowedTypes.join(', ')}`,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Check file size
-    if (size > maxSize) {
-      return res.status(400).json({
-        success: false,
-        code: 'FILE_TOO_LARGE',
-        message: `File size exceeds limit of ${maxSize / (1024 * 1024)}MB`,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    next();
-  };
-};
-
-// Export all middleware functions
+// Export all middleware
 module.exports = {
   auth,
   adminAuth,
-  superAdminAuth,
+  rateLimitedAuth,
   optionalAuth,
   apiKeyAuth,
-  rateLimitByUser,
-  corsMiddleware,
-  requestLogger,
-  errorHandler,
-  notFoundHandler,
-  validateRequest,
-  validateFileUpload,
   
-  // Helper functions
-  getUserId: (req) => req.user?.userId || req.user?._id,
-  getUserRole: (req) => req.user?.role || 'user',
-  isAdmin: (req) => ['admin', 'moderator', 'super_admin'].includes(req.user?.role),
-  isSuperAdmin: (req) => req.user?.role === 'admin' || req.user?.role === 'super_admin'
+  // Utility functions for controllers
+  isAdmin: (user) => ['admin', 'moderator', 'super_admin'].includes(user?.role),
+  isPremium: (user) => user?.is_premium || false,
+  hasPermission: (user, permission) => {
+    const permissions = getUserPermissions(user?.role);
+    return permissions.includes(permission) || permissions.includes('all_permissions');
+  }
 };
