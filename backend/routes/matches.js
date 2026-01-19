@@ -136,10 +136,10 @@ router.post('/admin/:id/prizes/distribute', adminAuth, matchController.distribut
 // ==============================================
 
 // ✅ MODERATOR: Get matches for moderation
-router.get('/moderator/pending/review', moderatorAuth, matchController.getPendingMatchesForModerator);
+// router.get('/moderator/pending/review', moderatorAuth, matchController.getPendingMatchesForModerator);
 
 // ✅ MODERATOR: Approve match (router.param('id') will pre-populate req.match)
-router.post('/moderator/:id/approve', moderatorAuth, matchController.approveMatchForModerator);
+// router.post('/moderator/:id/approve', moderatorAuth, matchController.approveMatchForModerator);
 
 // ✅ MODERATOR: Reject match (router.param('id') will pre-populate req.match)
 router.post('/moderator/:id/reject', moderatorAuth, matchController.rejectMatchForModerator);
