@@ -1227,4 +1227,13 @@ router.get('/health', (req, res) => {
       statistics: {
         total_rooms: chatRooms.size,
         online_users: onlineUsers.size,
-        active_ch
+        active_chats: Array.from(chatRooms.values()).filter(r => r.is_active).length,
+        total_messages: Array.from(chatRooms.values()).reduce((sum, room) => 
+          sum + (room.messages?.length || 0), 0
+        )
+      }
+    }
+  });
+});
+
+module.exports = router;
