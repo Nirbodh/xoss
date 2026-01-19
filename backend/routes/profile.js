@@ -5,7 +5,8 @@ const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const bcrypt = require('bcryptjs');
 const authMiddleware = require('../middleware/auth');
-const adminMiddleware = require('../middleware/admin');
+// TODO: Create admin middleware file or use auth.js
+// const adminMiddleware = require('../middleware/admin');
 const upload = require('../middleware/upload');
 
 // ✅ ALL ROUTES ARE PROTECTED (REQUIRE AUTHENTICATION)
@@ -346,6 +347,8 @@ router.get('/stats', async (req, res) => {
 // ====================
 
 // ✅ GET ALL USERS (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.get('/admin/users', adminMiddleware, async (req, res) => {
   try {
     const { page = 1, limit = 20, search = '', status = '', role = '' } = req.query;
@@ -390,8 +393,11 @@ router.get('/admin/users', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ GET USER BY ID (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.get('/admin/users/:id', adminMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
@@ -458,8 +464,11 @@ router.get('/admin/users/:id', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ UPDATE USER (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.put('/admin/users/:id', adminMiddleware, async (req, res) => {
   try {
     const { name, email, phone, role, status, balance } = req.body;
@@ -512,8 +521,11 @@ router.put('/admin/users/:id', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ DELETE USER (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.delete('/admin/users/:id', adminMiddleware, async (req, res) => {
   try {
     const userId = req.params.id;
@@ -569,8 +581,11 @@ router.delete('/admin/users/:id', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ UPDATE USER WALLET BALANCE (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.post('/admin/users/:id/wallet', adminMiddleware, async (req, res) => {
   try {
     const { amount, type, description } = req.body;
@@ -646,8 +661,11 @@ router.post('/admin/users/:id/wallet', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ GET USER TRANSACTIONS (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.get('/admin/users/:id/transactions', adminMiddleware, async (req, res) => {
   try {
     const { page = 1, limit = 20, type = '' } = req.query;
@@ -682,8 +700,11 @@ router.get('/admin/users/:id/transactions', adminMiddleware, async (req, res) =>
     });
   }
 });
+*/
 
 // ✅ VERIFY USER (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.post('/admin/users/:id/verify', adminMiddleware, async (req, res) => {
   try {
     const { isVerified, verificationNote } = req.body;
@@ -723,8 +744,11 @@ router.post('/admin/users/:id/verify', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ BAN/UNBAN USER (ADMIN ONLY)
+// TODO: Uncomment when admin middleware is created
+/*
 router.post('/admin/users/:id/ban', adminMiddleware, async (req, res) => {
   try {
     const { status, banReason, banDuration } = req.body;
@@ -775,8 +799,11 @@ router.post('/admin/users/:id/ban', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ✅ ADMIN STATISTICS DASHBOARD
+// TODO: Uncomment when admin middleware is created
+/*
 router.get('/admin/stats', adminMiddleware, async (req, res) => {
   try {
     const User = require('../models/User');
@@ -857,6 +884,7 @@ router.get('/admin/stats', adminMiddleware, async (req, res) => {
     });
   }
 });
+*/
 
 // ====================
 // ✅ HELPER FUNCTIONS
