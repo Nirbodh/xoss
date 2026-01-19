@@ -84,10 +84,10 @@ router.get('/:id/results/my', auth, matchController.getMyMatchResult);
 // ==============================================
 
 // ✅ GET dashboard overview
-router.get('/dashboard/overview', auth, matchController.getDashboardOverview);
+// router.get('/dashboard/overview', auth, matchController.getDashboardOverview);
 
 // ✅ GET match analytics
-router.get('/:id/analytics/detailed', auth, matchController.getMatchAnalytics);
+// router.get('/:id/analytics/detailed', auth, matchController.getMatchAnalytics);
 
 // ==============================================
 // 🔥 ADMIN PROTECTED ROUTES (adminAuth middleware)
