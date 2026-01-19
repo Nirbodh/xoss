@@ -1,27 +1,43 @@
-// models/Wallet.js - PROFESSIONAL VERSION WITH ADVANCED FEATURES
+// models/Wallet.js - XOSS গেমিং ওয়ালেট সিস্টেম
 const mongoose = require('mongoose');
 
-// 🔥 TRANSACTION SCHEMA (Enhanced)
+// ==================== TRANSACTION SCHEMA ====================
 const transactionSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'User ID is required'],
-    index: true
+    required: [true, 'User ID is required']
   },
   
   type: {
     type: String,
     enum: [
-      'deposit', 'deposit_request', 'deposit_approved', 'deposit_rejected',
-      'withdrawal', 'withdrawal_request', 'withdrawal_approved', 'withdrawal_rejected', 'withdrawal_refund',
-      'credit', 'debit', 
-      'match_entry', 'match_refund', 'match_win', 'match_bonus',
-      'tournament_entry', 'tournament_refund', 'tournament_win', 'tournament_bonus',
-      'referral_bonus', 'signup_bonus', 'daily_bonus', 'promo_bonus',
-      'transfer_in', 'transfer_out',
-      'admin_credit', 'admin_debit',
-      'chargeback', 'refund', 'adjustment'
+      'deposit',
+      'deposit_request',
+      'deposit_approved',
+      'deposit_rejected',
+      'withdrawal',
+      'withdrawal_request',
+      'withdrawal_approved',
+      'withdrawal_rejected',
+      'credit',
+      'debit',
+      'match_entry',
+      'match_refund',
+      'match_win',
+      'match_bonus',
+      'tournament_entry',
+      'tournament_refund',
+      'tournament_win',
+      'tournament_bonus',
+      'referral_bonus',
+      'signup_bonus',
+      'daily_bonus',
+      'promo_bonus',
+      'admin_credit',
+      'admin_debit',
+      'refund',
+      'adjustment'
     ],
     required: [true, 'Transaction type is required']
   },
@@ -43,20 +59,15 @@ const transactionSchema = new mongoose.Schema({
   
   status: {
     type: String,
-    enum: ['pending', 'processing', 'completed', 'failed', 'cancelled', 'reversed', 'on_hold'],
-    default: 'pending',
+    enum: ['pending', 'processing', 'completed', 'failed', 'cancelled', 'reversed'],
+    default: 'completed',
     index: true
   },
   
-  payment_method: {
+  method: {
     type: String,
     enum: ['bkash', 'nagad', 'rocket', 'bank', 'card', 'wallet', 'cash', 'system', 'manual', 'other'],
     default: 'system'
-  },
-  
-  gateway_response: {
-    type: Object,
-    default: {}
   },
   
   reference_id: {
@@ -75,32 +86,19 @@ const transactionSchema = new mongoose.Schema({
     default: {}
   },
   
-  // 🔥 AUDIT FIELDS
-  processed_by: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  
-  processed_at: Date,
-  
   notes: {
     type: String,
     default: '',
     maxlength: [1000, 'Notes cannot exceed 1000 characters']
-  },
-  
-  // 🔥 SECURITY FIELDS
-  ip_address: String,
-  user_agent: String,
-  device_id: String
+  }
 
 }, {
   timestamps: true,
-  toJSON: { getters: true, virtuals: true },
-  toObject: { getters: true, virtuals: true }
+  toJSON: { getters: true },
+  toObject: { getters: true }
 });
 
-// 🔥 WALLET SCHEMA (Enhanced)
+// ==================== WALLET SCHEMA ====================
 const walletSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -110,7 +108,6 @@ const walletSchema = new mongoose.Schema({
     index: true
   },
   
-  // 🔥 BALANCE FIELDS
   balance: {
     type: Number,
     default: 0,
@@ -144,7 +141,6 @@ const walletSchema = new mongoose.Schema({
     set: v => Math.round(v * 100) / 100
   },
   
-  // 🔥 STATISTICS
   total_earned: {
     type: Number,
     default: 0,
@@ -185,41 +181,14 @@ const walletSchema = new mongoose.Schema({
     set: v => Math.round(v * 100) / 100
   },
   
-  // 🔥 LIMITS & SETTINGS
   limits: {
     daily_deposit_limit: { type: Number, default: 50000 },
     daily_withdrawal_limit: { type: Number, default: 50000 },
     max_deposit: { type: Number, default: 100000 },
     max_withdrawal: { type: Number, default: 50000 },
-    min_deposit: { type: Number, default: 10 },
+    min_deposit: { type: Number, default: 100 },
     min_withdrawal: { type: Number, default: 100 }
   },
-  
-  settings: {
-    auto_withdraw: { type: Boolean, default: false },
-    low_balance_alert: { type: Boolean, default: true },
-    notify_on_deposit: { type: Boolean, default: true },
-    notify_on_withdrawal: { type: Boolean, default: true },
-    notify_on_large_transaction: { type: Boolean, default: true }
-  },
-  
-  // 🔥 SECURITY
-  security: {
-    pin_code: { type: String, select: false },
-    two_factor_enabled: { type: Boolean, default: false },
-    last_password_change: Date,
-    suspicious_activity_count: { type: Number, default: 0 },
-    locked_until: Date
-  },
-  
-  // 🔥 ACTIVITY TRACKING
-  last_activity: {
-    type: Date,
-    default: Date.now
-  },
-  
-  last_deposit: Date,
-  last_withdrawal: Date,
   
   daily_stats: {
     deposits_today: { type: Number, default: 0 },
@@ -229,20 +198,19 @@ const walletSchema = new mongoose.Schema({
     last_reset: { type: Date, default: Date.now }
   },
   
-  // 🔥 REFERRAL SYSTEM
-  referral_earnings: {
-    type: Number,
-    default: 0,
-    min: 0
+  last_activity: {
+    type: Date,
+    default: Date.now
   },
   
-  // 🔥 VERSIONING
+  last_deposit: Date,
+  last_withdrawal: Date,
+  
   version: {
     type: Number,
     default: 1
   },
   
-  // 🔥 METADATA
   metadata: {
     type: Object,
     default: {}
@@ -250,11 +218,11 @@ const walletSchema = new mongoose.Schema({
 
 }, {
   timestamps: true,
-  toJSON: { getters: true, virtuals: true },
-  toObject: { getters: true, virtuals: true }
+  toJSON: { getters: true },
+  toObject: { getters: true }
 });
 
-// 🔥 MIDDLEWARE: Sync with User model
+// ==================== MIDDLEWARE ====================
 walletSchema.pre('save', async function(next) {
   try {
     // Sync available balance
@@ -274,19 +242,22 @@ walletSchema.pre('save', async function(next) {
       };
     }
     
-    // Update User's wallet_balance
-    if (this.isModified('balance')) {
+    // Update User's wallet_balance if it exists
+    try {
       const User = require('./User');
-      await User.findByIdAndUpdate(
-        this.user_id,
-        { 
-          wallet_balance: this.balance,
-          total_earnings: this.total_earned
-        },
-        { timestamps: false }
-      );
-      
-      console.log(`[WALLET SYNC] User ${this.user_id}: Balance synced to ${this.balance}`);
+      if (mongoose.models.User) {
+        await User.findByIdAndUpdate(
+          this.user_id,
+          { 
+            wallet_balance: this.balance
+          },
+          { timestamps: false }
+        );
+        
+        console.log(`[WALLET SYNC] User ${this.user_id}: Balance updated to ${this.balance}`);
+      }
+    } catch (userError) {
+      console.log('[WALLET SYNC] User model not found or error:', userError.message);
     }
     
     next();
@@ -295,38 +266,25 @@ walletSchema.pre('save', async function(next) {
   }
 });
 
-// 🔥 STATIC METHODS
+// ==================== STATIC METHODS ====================
 
-// Find or create wallet with atomic operation
-walletSchema.statics.findOrCreate = async function(userId, options = {}) {
-  const session = options.session;
-  const defaults = {
-    balance: 0,
-    total_earned: 0,
-    total_spent: 0,
-    available_balance: 0,
-    pending_balance: 0,
-    locked_balance: 0
-  };
-  
+// ✅ Find or create wallet
+walletSchema.statics.findOrCreate = async function(userId, session = null) {
   try {
-    let wallet = await this.findOne({ user_id: userId }).session(session || null);
+    let wallet = await this.findOne({ user_id: userId }).session(session);
     
     if (!wallet) {
-      // Get user info
-      const User = require('./User');
-      const user = await User.findById(userId).session(session || null);
-      
-      if (!user) {
-        throw new Error(`User ${userId} not found`);
-      }
-      
       wallet = new this({
         user_id: userId,
-        balance: user.wallet_balance || defaults.balance,
-        total_earned: user.total_earnings || defaults.total_earned,
+        balance: 0,
+        available_balance: 0,
+        pending_balance: 0,
+        locked_balance: 0,
+        total_earned: 0,
         total_spent: 0,
-        available_balance: user.wallet_balance || defaults.available_balance,
+        total_deposited: 0,
+        total_withdrawn: 0,
+        total_bonus: 0,
         daily_stats: {
           last_reset: new Date()
         }
@@ -344,7 +302,7 @@ walletSchema.statics.findOrCreate = async function(userId, options = {}) {
   }
 };
 
-// Get wallet summary
+// ✅ Get wallet summary
 walletSchema.statics.getSummary = async function(userId) {
   const wallet = await this.findOne({ user_id: userId });
   
@@ -352,7 +310,6 @@ walletSchema.statics.getSummary = async function(userId) {
     throw new Error('Wallet not found');
   }
   
-  // Get recent transactions
   const Transaction = mongoose.model('Transaction');
   const recentTransactions = await Transaction.find({ user_id: userId })
     .sort({ createdAt: -1 })
@@ -399,15 +356,15 @@ walletSchema.statics.getSummary = async function(userId) {
   };
 };
 
-// 🔥 INSTANCE METHODS
+// ==================== INSTANCE METHODS ====================
 
-// Credit wallet (add money)
+// ✅ Credit wallet (add money)
 walletSchema.methods.credit = async function(amount, options = {}) {
   if (amount <= 0) {
     throw new Error('Credit amount must be positive');
   }
   
-  const session = options.session;
+  const session = options.session || null;
   const metadata = options.metadata || {};
   const type = options.type || 'credit';
   const description = options.description || 'Wallet credit';
@@ -434,18 +391,17 @@ walletSchema.methods.credit = async function(amount, options = {}) {
   await this.save({ session });
   
   // Create transaction
+  const Transaction = mongoose.model('Transaction');
   const transaction = await Transaction.create([{
     user_id: this.user_id,
     type: type,
     amount: amount,
     description: description,
     status: 'completed',
-    payment_method: metadata.method || 'system',
+    method: metadata.method || 'system',
     reference_id: metadata.reference_id,
-    transaction_id: `TXN${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-    metadata: metadata,
-    ip_address: metadata.ip_address,
-    user_agent: metadata.user_agent
+    transaction_id: metadata.transaction_id || `TXN${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+    metadata: metadata
   }], { session });
   
   console.log(`[WALLET CREDIT] User ${this.user_id}: +${amount} (${type}). New balance: ${this.balance}`);
@@ -456,17 +412,17 @@ walletSchema.methods.credit = async function(amount, options = {}) {
   };
 };
 
-// Debit wallet (remove money)
+// ✅ Debit wallet (remove money)
 walletSchema.methods.debit = async function(amount, options = {}) {
   if (amount <= 0) {
     throw new Error('Debit amount must be positive');
   }
   
   if (this.available_balance < amount) {
-    throw new Error('Insufficient available balance');
+    throw new Error(`Insufficient available balance. Available: ${this.available_balance}, Required: ${amount}`);
   }
   
-  const session = options.session;
+  const session = options.session || null;
   const metadata = options.metadata || {};
   const type = options.type || 'debit';
   const description = options.description || 'Wallet debit';
@@ -488,18 +444,17 @@ walletSchema.methods.debit = async function(amount, options = {}) {
   await this.save({ session });
   
   // Create transaction
+  const Transaction = mongoose.model('Transaction');
   const transaction = await Transaction.create([{
     user_id: this.user_id,
     type: type,
     amount: amount,
     description: description,
     status: 'completed',
-    payment_method: metadata.method || 'system',
+    method: metadata.method || 'system',
     reference_id: metadata.reference_id,
-    transaction_id: `TXN${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
-    metadata: metadata,
-    ip_address: metadata.ip_address,
-    user_agent: metadata.user_agent
+    transaction_id: metadata.transaction_id || `TXN${Date.now()}${Math.random().toString(36).substr(2, 5).toUpperCase()}`,
+    metadata: metadata
   }], { session });
   
   console.log(`[WALLET DEBIT] User ${this.user_id}: -${amount} (${type}). New balance: ${this.balance}`);
@@ -510,7 +465,7 @@ walletSchema.methods.debit = async function(amount, options = {}) {
   };
 };
 
-// Lock balance (for pending transactions)
+// ✅ Lock balance (for pending transactions)
 walletSchema.methods.lockBalance = async function(amount, reason = '') {
   if (amount <= 0) {
     throw new Error('Lock amount must be positive');
@@ -531,7 +486,7 @@ walletSchema.methods.lockBalance = async function(amount, reason = '') {
   return this;
 };
 
-// Unlock balance
+// ✅ Unlock balance
 walletSchema.methods.unlockBalance = async function(amount, reason = '') {
   if (amount <= 0) {
     throw new Error('Unlock amount must be positive');
@@ -552,8 +507,10 @@ walletSchema.methods.unlockBalance = async function(amount, reason = '') {
   return this;
 };
 
-// Get transaction history with pagination
+// ✅ Get transaction history with pagination
 walletSchema.methods.getTransactionHistory = async function(options = {}) {
+  const Transaction = mongoose.model('Transaction');
+  
   const {
     page = 1,
     limit = 20,
@@ -599,70 +556,7 @@ walletSchema.methods.getTransactionHistory = async function(options = {}) {
   };
 };
 
-// Get balance history (for charts)
-walletSchema.methods.getBalanceHistory = async function(days = 30) {
-  const endDate = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  
-  const transactions = await Transaction.aggregate([
-    {
-      $match: {
-        user_id: this.user_id,
-        createdAt: { $gte: startDate, $lte: endDate },
-        status: 'completed'
-      }
-    },
-    {
-      $group: {
-        _id: {
-          year: { $year: '$createdAt' },
-          month: { $month: '$createdAt' },
-          day: { $dayOfMonth: '$createdAt' }
-        },
-        credits: {
-          $sum: {
-            $cond: [
-              { $in: ['$type', ['credit', 'deposit', 'win', 'bonus', 'refund']] },
-              '$amount',
-              0
-            ]
-          }
-        },
-        debits: {
-          $sum: {
-            $cond: [
-              { $in: ['$type', ['debit', 'withdrawal', 'entry_fee', 'payment']] },
-              '$amount',
-              0
-            ]
-          }
-        },
-        count: { $sum: 1 }
-      }
-    },
-    {
-      $project: {
-        date: {
-          $dateFromParts: {
-            year: '$_id.year',
-            month: '$_id.month',
-            day: '$_id.day'
-          }
-        },
-        credits: 1,
-        debits: 1,
-        net_change: { $subtract: ['$credits', '$debits'] },
-        transaction_count: '$count'
-      }
-    },
-    { $sort: { date: 1 } }
-  ]);
-  
-  return transactions;
-};
-
-// Check if operation is within limits
+// ✅ Check if operation is within limits
 walletSchema.methods.checkLimits = function(operation, amount) {
   const now = new Date();
   const lastReset = this.daily_stats.last_reset;
@@ -697,7 +591,7 @@ walletSchema.methods.checkLimits = function(operation, amount) {
   return { allowed: true };
 };
 
-// 🔥 VIRTUAL FIELDS
+// ==================== VIRTUAL FIELDS ====================
 walletSchema.virtual('total_transactions').get(function() {
   return this.total_earned + this.total_spent;
 });
@@ -706,14 +600,19 @@ walletSchema.virtual('profit_loss').get(function() {
   return this.total_earned - this.total_spent;
 });
 
-// 🔥 INDEXES
+// ==================== INDEXES ====================
 walletSchema.index({ user_id: 1 }, { unique: true });
 walletSchema.index({ balance: -1 });
 walletSchema.index({ 'daily_stats.last_reset': 1 });
 walletSchema.index({ last_activity: -1 });
-walletSchema.index({ 'security.locked_until': 1 });
 
-// Create models
+transactionSchema.index({ user_id: 1 });
+transactionSchema.index({ type: 1 });
+transactionSchema.index({ status: 1 });
+transactionSchema.index({ createdAt: -1 });
+transactionSchema.index({ reference_id: 1 });
+
+// ==================== CREATE MODELS ====================
 const Wallet = mongoose.model('Wallet', walletSchema);
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
