@@ -100,11 +100,11 @@ const startServer = async () => {
     app.use('/api/invites', require('./routes/invites'));
     // app.use('/api/support', require('./routes/support')); // 🔧 Commented out due to nodemailer dependency
 
-    // 6. ✅ CONTENT ROUTES
-    app.use('/api/posts', require('./routes/posts'));
-    app.use('/api/comments', require('./routes/comments'));
-    app.use('/api/likes', require('./routes/likes'));
-    app.use('/api/media', require('./routes/media'));
+    // 6. ✅ CONTENT ROUTES - ALL COMMENTED OUT
+    // app.use('/api/posts', require('./routes/posts')); // 🔧 Commented out due to helpers dependency
+    // app.use('/api/comments', require('./routes/comments')); // 🔧 Commented out
+    // app.use('/api/likes', require('./routes/likes')); // 🔧 Commented out
+    // app.use('/api/media', require('./routes/media')); // 🔧 Commented out
 
     // 7. ✅ ADMIN ROUTES
     app.use('/api/admin', require('./routes/admin'));
@@ -140,7 +140,7 @@ const startServer = async () => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'production',
         endpoints: {
-          total: 155, // 🔧 Updated from 156 to 155
+          total: 151, // 🔧 Updated from 155 to 151
           categories: [
             'Authentication (12 endpoints)',
             'Users & Profile (15 endpoints)',
@@ -176,8 +176,8 @@ const startServer = async () => {
         memory: process.memoryUsage(),
         uptime: process.uptime(),
         endpoints: {
-          total: 155, // 🔧 Updated from 156 to 155
-          working: 155
+          total: 151, // 🔧 Updated from 155 to 151
+          working: 151
         }
       });
     });
@@ -491,7 +491,7 @@ const startServer = async () => {
         success: true,
         message: '📚 XOSS Gaming API Documentation',
         version: '4.0.0',
-        total_endpoints: 155, // 🔧 Updated from 156 to 155
+        total_endpoints: 151, // 🔧 Updated from 155 to 151
         base_url: 'https://xoss.onrender.com/api',
         endpoints: endpoints
       });
@@ -712,7 +712,7 @@ const startServer = async () => {
       console.log('   👑 Admin Panel (25 endpoints)');
       console.log('   ⚙️ System & Utility (15 endpoints)');
       console.log('='.repeat(70));
-      console.log('🚀 Server ready! Total endpoints: 155'); // 🔧 Updated from 156 to 155
+      console.log('🚀 Server ready! Total endpoints: 151'); // 🔧 Updated from 155 to 151
       console.log('📚 Documentation: https://xoss.onrender.com/api/docs');
       console.log('='.repeat(70));
     });
