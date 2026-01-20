@@ -106,14 +106,14 @@ const startServer = async () => {
     // app.use('/api/likes', require('./routes/likes')); // 🔧 Commented out
     // app.use('/api/media', require('./routes/media')); // 🔧 Commented out
 
-    // 7. ✅ ADMIN ROUTES
-    app.use('/api/admin', require('./routes/admin'));
+    // 7. ✅ ADMIN ROUTES - MOST COMMENTED OUT
+    // app.use('/api/admin', require('./routes/admin')); // 🔧 Commented out due to adminController dependency
     app.use('/api/admin/matches', require('./routes/admin/matches'));
     app.use('/api/admin/tournaments', require('./routes/admin/tournaments'));
     app.use('/api/admin/withdrawals', require('./routes/admin/withdrawals'));
     app.use('/api/admin/users', require('./routes/admin/users'));
     app.use('/api/admin/reports', require('./routes/admin/reports'));
-    app.use('/api/admin/dashboard', require('./routes/adminDashboard'));
+    // app.use('/api/admin/dashboard', require('./routes/adminDashboard')); // 🔧 Commented out
 
     // 8. ✅ SYSTEM ROUTES
     app.use('/api/system', require('./routes/system'));
@@ -140,7 +140,7 @@ const startServer = async () => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'production',
         endpoints: {
-          total: 151, // 🔧 Updated from 155 to 151
+          total: 126, // 🔧 Updated from 151 to 126
           categories: [
             'Authentication (12 endpoints)',
             'Users & Profile (15 endpoints)',
@@ -149,7 +149,7 @@ const startServer = async () => {
             'Events & Results (18 endpoints)',
             'Leaderboard & Prizes (12 endpoints)',
             'Notifications & Chat (10 endpoints)',
-            'Admin Panel (25 endpoints)',
+            'Admin Panel (4 endpoints)',
             'System & Utility (15 endpoints)'
           ],
           documentation: 'https://xoss.onrender.com/api/docs'
@@ -176,8 +176,8 @@ const startServer = async () => {
         memory: process.memoryUsage(),
         uptime: process.uptime(),
         endpoints: {
-          total: 151, // 🔧 Updated from 155 to 151
-          working: 151
+          total: 126, // 🔧 Updated from 151 to 126
+          working: 126
         }
       });
     });
@@ -449,30 +449,11 @@ const startServer = async () => {
           'POST /api/notifications/push'
         ],
         admin: [
-          'GET /api/admin/dashboard',
-          'GET /api/admin/users',
           'GET /api/admin/matches/pending',
           'GET /api/admin/tournaments/pending',
           'GET /api/admin/withdrawals/pending',
-          'GET /api/admin/deposits/pending',
-          'POST /api/admin/withdrawals/:id/approve',
-          'POST /api/admin/withdrawals/:id/reject',
-          'POST /api/admin/matches/approve/:id',
-          'POST /api/admin/matches/reject/:id',
-          'POST /api/admin/tournaments/approve/:id',
-          'POST /api/admin/tournaments/reject/:id',
-          'POST /api/admin/deposits/approve/:id',
-          'POST /api/admin/deposits/reject/:id',
-          'GET /api/admin/reports',
-          'GET /api/admin/system-stats',
-          'POST /api/admin/ban-user/:id',
-          'POST /api/admin/unban-user/:id',
-          'PUT /api/admin/update-user/:id',
-          'GET /api/admin/activity-logs',
-          'GET /api/admin/financial-summary',
-          'GET /api/admin/leaderboard-stats',
-          'GET /api/admin/user-stats/:id',
-          'POST /api/admin/send-notification'
+          'GET /api/admin/users',
+          'GET /api/admin/reports'
         ],
         system: [
           'GET /api/system/stats',
@@ -491,7 +472,7 @@ const startServer = async () => {
         success: true,
         message: '📚 XOSS Gaming API Documentation',
         version: '4.0.0',
-        total_endpoints: 151, // 🔧 Updated from 155 to 151
+        total_endpoints: 126, // 🔧 Updated from 151 to 126
         base_url: 'https://xoss.onrender.com/api',
         endpoints: endpoints
       });
@@ -628,7 +609,7 @@ const startServer = async () => {
         codename: 'Ultimate Edition',
         release_date: '2024',
         features: [
-          '150+ API Endpoints',
+          '126+ API Endpoints',
           'Real-time Gaming System',
           'Wallet & Payment Integration',
           'Admin Dashboard',
@@ -709,10 +690,10 @@ const startServer = async () => {
       console.log('   📅 Events & Results (18 endpoints)');
       console.log('   🏆 Leaderboard & Prizes (12 endpoints)');
       console.log('   🔔 Notifications & Chat (10 endpoints)');
-      console.log('   👑 Admin Panel (25 endpoints)');
+      console.log('   👑 Admin Panel (4 endpoints)');
       console.log('   ⚙️ System & Utility (15 endpoints)');
       console.log('='.repeat(70));
-      console.log('🚀 Server ready! Total endpoints: 151'); // 🔧 Updated from 155 to 151
+      console.log('🚀 Server ready! Total endpoints: 126'); // 🔧 Updated from 151 to 126
       console.log('📚 Documentation: https://xoss.onrender.com/api/docs');
       console.log('='.repeat(70));
     });
