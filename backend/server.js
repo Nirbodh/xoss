@@ -97,7 +97,7 @@ const startServer = async () => {
     app.use('/api/chat', require('./routes/chat'));
     app.use('/api/friends', require('./routes/friends'));
     app.use('/api/invites', require('./routes/invites'));
-    app.use('/api/support', require('./routes/support'));
+    // app.use('/api/support', require('./routes/support')); // 🔧 Commented out due to nodemailer dependency
 
     // 6. ✅ CONTENT ROUTES
     app.use('/api/posts', require('./routes/posts'));
@@ -139,7 +139,7 @@ const startServer = async () => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'production',
         endpoints: {
-          total: 156,
+          total: 155, // 🔧 Updated from 156 to 155
           categories: [
             'Authentication (12 endpoints)',
             'Users & Profile (15 endpoints)',
@@ -175,8 +175,8 @@ const startServer = async () => {
         memory: process.memoryUsage(),
         uptime: process.uptime(),
         endpoints: {
-          total: 156,
-          working: 156
+          total: 155, // 🔧 Updated from 156 to 155
+          working: 155
         }
       });
     });
@@ -490,7 +490,7 @@ const startServer = async () => {
         success: true,
         message: '📚 XOSS Gaming API Documentation',
         version: '4.0.0',
-        total_endpoints: 156,
+        total_endpoints: 155, // 🔧 Updated from 156 to 155
         base_url: 'https://xoss.onrender.com/api',
         endpoints: endpoints
       });
@@ -711,7 +711,7 @@ const startServer = async () => {
       console.log('   👑 Admin Panel (25 endpoints)');
       console.log('   ⚙️ System & Utility (15 endpoints)');
       console.log('='.repeat(70));
-      console.log('🚀 Server ready! Total endpoints: 156');
+      console.log('🚀 Server ready! Total endpoints: 155'); // 🔧 Updated from 156 to 155
       console.log('📚 Documentation: https://xoss.onrender.com/api/docs');
       console.log('='.repeat(70));
     });
