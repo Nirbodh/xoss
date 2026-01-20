@@ -1,7 +1,7 @@
 // routes/admin/withdrawals.js - ADMIN ONLY ROUTES
 const express = require('express');
 const router = express.Router();
-const { adminAuth } = require('../middleware/auth');
+const { adminAuth } = require('../../middleware/auth');
 
 // ==============================================
 // 🔥 ADMIN WITHDRAWAL DASHBOARD
