@@ -1,8 +1,8 @@
 // routes/admin/users.js - ADMIN ONLY ROUTES
 const express = require('express');
 const router = express.Router();
-const { adminAuth } = require('../middleware/auth');
-const User = require('../models/User');
+const { adminAuth } = require('../../middleware/auth');
+const User = require('../../models/User');
 
 // ==============================================
 // 🔥 ADMIN USER DASHBOARD
