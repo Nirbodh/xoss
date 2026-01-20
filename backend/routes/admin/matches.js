@@ -1,8 +1,8 @@
 // routes/admin/matches.js - ADMIN ONLY ROUTES
 const express = require('express');
 const router = express.Router();
-const { adminAuth } = require('../middleware/auth');
-const matchController = require('../controllers/matchController');
+const { adminAuth } = require('../../middleware/auth');
+const matchController = require('../../controllers/matchController');
 
 // ==============================================
 // 🔥 ADMIN DASHBOARD OVERVIEW
