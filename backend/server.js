@@ -108,11 +108,11 @@ const startServer = async () => {
 
     // 7. ✅ ADMIN ROUTES - MOST COMMENTED OUT
     // app.use('/api/admin', require('./routes/admin')); // 🔧 Commented out due to adminController dependency
-    app.use('/api/admin/matches', require('./routes/admin/matches'));
-    app.use('/api/admin/tournaments', require('./routes/admin/tournaments'));
-    app.use('/api/admin/withdrawals', require('./routes/admin/withdrawals'));
-    app.use('/api/admin/users', require('./routes/admin/users'));
-    app.use('/api/admin/reports', require('./routes/admin/reports'));
+    // app.use('/api/admin/matches', require('./routes/admin/matches'));
+    // app.use('/api/admin/tournaments', require('./routes/admin/tournaments'));
+    // app.use('/api/admin/withdrawals', require('./routes/admin/withdrawals'));
+    // app.use('/api/admin/users', require('./routes/admin/users'));
+    // app.use('/api/admin/reports', require('./routes/admin/reports'));
     // app.use('/api/admin/dashboard', require('./routes/adminDashboard')); // 🔧 Commented out
 
     // 8. ✅ SYSTEM ROUTES
@@ -121,7 +121,7 @@ const startServer = async () => {
     app.use('/api/settings', require('./routes/settings'));
 
     // 9. ✅ UTILITY ROUTES
-    app.use('/api/utility', require('./routes/utility'));
+    // app.use('/api/utility', require('./routes/utility'));
 
     // ====================
     // ✅ DIRECT ENDPOINTS
