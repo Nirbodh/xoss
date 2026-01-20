@@ -1,8 +1,8 @@
 // routes/admin/tournaments.js - ADMIN ONLY ROUTES
 const express = require('express');
 const router = express.Router();
-const { adminAuth } = require('../middleware/auth');
-const tournamentController = require('../controllers/tournamentController');
+const { adminAuth } = require('../../middleware/auth');
+const tournamentController = require('../../controllers/tournamentController');
 
 // ==============================================
 // 🔥 ADMIN DASHBOARD OVERVIEW
