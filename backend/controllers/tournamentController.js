@@ -2093,25 +2093,26 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
     
     // Get statistics
     const stats = await Tournament.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          total_tournaments: { $sum: 1 },
-          total_prize_pool: { $sum: '$total_prize' },
-          total_collection: { $sum: { $multiply: ['$entry_fee', '$current_participants'] } },
-          total_participants: { $sum: '$current_participants' },
-          approved_count: { 
-            $sum: { $cond: [{ $eq: ['$approval_status', 'approved'] }, 1, 0] }
-          },
-          pending_count: { 
-            $sum: { $cond: [{ $eq: ['$approval_status', 'pending'] }, 1, 0] }
-          },
-          rejected_count: { 
-            $sum: { $cond: [{ $eq: ['$approval_status', 'rejected'] }, 1, 0] }
-        }
+  { $match: filter }, // filter অনুযায়ী টুর্নামেন্ট বাছাই
+  {
+    $group: {
+      _id: null, // সব ডকুমেন্ট একসাথে গ্রুপ হবে
+      total_tournaments: { $sum: 1 }, // টুর্নামেন্ট সংখ্যা
+      total_prize_pool: { $sum: '$total_prize' }, // prize যোগফল
+      total_collection: { $sum: { $multiply: ['$entry_fee', '$current_participants'] } }, // entry_fee × participants যোগফল
+      total_participants: { $sum: '$current_participants' }, // মোট participants
+      approved_count: { 
+        $sum: { $cond: [{ $eq: ['$approval_status', 'approved'] }, 1, 0] } // approved count
+      },
+      pending_count: { 
+        $sum: { $cond: [{ $eq: ['$approval_status', 'pending'] }, 1, 0] } // pending count
+      },
+      rejected_count: { 
+        $sum: { $cond: [{ $eq: ['$approval_status', 'rejected'] }, 1, 0] } // rejected count
       }
-    ]);
+    }
+  }
+]);
     
     // Calculate pagination
     const totalPages = Math.ceil(totalTournaments / pageSize);
