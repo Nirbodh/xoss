@@ -5,10 +5,10 @@ const Wallet = require('../models/Wallet').Wallet;
 const Transaction = require('../models/Wallet').Transaction;
 const User = require('../models/User');
 const Notification = require('../models/Notification');
-const Redis = require('ioredis');
+//const Redis = require('ioredis');
 
 // Redis for rate limiting and caching
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+//const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 // 🔥 CONSTANTS
 const WITHDRAWAL_CONFIG = {
