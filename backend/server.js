@@ -284,6 +284,100 @@ const startServer = async () => {
       }
     });
 
+    // ✅ DIRECT TOURNAMENTS ENDPOINT - THIS IS WHAT I ADDED
+    app.get('/api/tournaments', async (req, res) => {
+      try {
+        console.log('📡 GET /api/tournaments requested (Direct Endpoint)');
+        
+        // Query parameters
+        const { 
+          status, 
+          type, 
+          game, 
+          page = 1, 
+          limit = 20,
+          sortBy = 'start_time',
+          sortOrder = 'asc'
+        } = req.query;
+        
+        // Build filter object
+        const filter = {};
+        
+        if (status) {
+          filter.status = status;
+        }
+        
+        if (type) {
+          filter.type = type;
+        }
+        
+        if (game) {
+          filter.game = game;
+        }
+        
+        // Only show active tournaments by default
+        if (!status) {
+          filter.status = { $in: ['upcoming', 'live', 'completed'] };
+        }
+        
+        // Calculate pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        // Fetch tournaments
+        const Tournament = require('./models/Tournament');
+        const tournaments = await Tournament.find(filter)
+          .populate('creator', 'name username avatar')
+          .populate('participants.user', 'name username avatar')
+          .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .lean();
+        
+        // Get total count
+        const total = await Tournament.countDocuments(filter);
+        
+        // Calculate available slots for each tournament
+        const tournamentsWithSlots = tournaments.map(tournament => ({
+          ...tournament,
+          available_slots: tournament.max_participants - tournament.participants.length,
+          is_full: tournament.participants.length >= tournament.max_participants,
+          is_joinable: tournament.status === 'upcoming' && 
+                       tournament.participants.length < tournament.max_participants,
+          formatted_prize: `৳${tournament.total_prize || 0}`,
+          formatted_entry_fee: `৳${tournament.entry_fee || 0}`
+        }));
+        
+        res.json({
+          success: true,
+          count: tournamentsWithSlots.length,
+          total: total,
+          data: tournamentsWithSlots,
+          pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            pages: Math.ceil(total / parseInt(limit))
+          },
+          filter: {
+            status,
+            type,
+            game
+          },
+          timestamp: new Date().toISOString()
+        });
+        
+      } catch (error) {
+        console.error('❌ Error fetching tournaments:', error);
+        res.status(500).json({
+          success: false,
+          code: 'FETCH_ERROR',
+          message: 'Failed to fetch tournaments',
+          error: error.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
     // ✅ API DOCUMENTATION
     app.get('/api/docs', (req, res) => {
       const endpoints = {
@@ -384,7 +478,7 @@ const startServer = async () => {
           'POST /api/matches/admin/reject/:id'
         ],
         tournaments: [
-          'GET /api/tournaments',
+          'GET /api/tournaments', // THIS IS NOW ADDED
           'GET /api/tournaments/:id',
           'POST /api/tournaments',
           'PUT /api/tournaments/:id',
@@ -473,7 +567,7 @@ const startServer = async () => {
         success: true,
         message: '📚 XOSS Gaming API Documentation',
         version: '4.0.0',
-        total_endpoints: 126, // 🔧 Updated from 151 to 126
+        total_endpoints: 127, // 🔧 Updated from 126 to 127 (1 added)
         base_url: 'https://xoss.onrender.com/api',
         endpoints: endpoints
       });
@@ -610,7 +704,7 @@ const startServer = async () => {
         codename: 'Ultimate Edition',
         release_date: '2024',
         features: [
-          '126+ API Endpoints',
+          '127+ API Endpoints', // 🔧 Updated from 126 to 127
           'Real-time Gaming System',
           'Wallet & Payment Integration',
           'Admin Dashboard',
@@ -694,7 +788,7 @@ const startServer = async () => {
       console.log('   👑 Admin Panel (4 endpoints)');
       console.log('   ⚙️ System & Utility (15 endpoints)');
       console.log('='.repeat(70));
-      console.log('🚀 Server ready! Total endpoints: 126'); // 🔧 Updated from 151 to 126
+      console.log('🚀 Server ready! Total endpoints: 127'); // 🔧 Updated from 126 to 127
       console.log('📚 Documentation: https://xoss.onrender.com/api/docs');
       console.log('='.repeat(70));
     });
