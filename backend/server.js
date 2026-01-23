@@ -5,6 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
+require('./config/redis');
 
 const connectDB = require('./config/database');
 const app = express();
