@@ -734,187 +734,6 @@ const notifyParticipants = async (tournament, eventType, session) => {
   }
 };
 
-// ==================== CREATE TOURNAMENT ====================
-exports.createTournament = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  
-  try {
-    console.log('🎮 CREATE TOURNAMENT REQUEST:', {
-      user: req.user.username,
-      body: req.body,
-      ip: req.ip
-    });
-
-    // Validate user
-    if (!req.user || !req.user.userId) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(401).json({
-        success: false,
-        code: 'UNAUTHORIZED',
-        message: 'User authentication required',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    const userId = req.user.userId;
-    const userRole = req.user.role || 'user';
-    
-    // Validate tournament data
-    const validationErrors = validateTournamentData(req.body, userRole === 'admin');
-    if (validationErrors.length > 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        code: 'VALIDATION_ERROR',
-        message: 'Tournament data validation failed',
-        errors: validationErrors,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Check rate limit for tournament creation
-    const rateLimitKey = `rate_limit:create_tournament:${userId}`;
-    const canCreate = await checkRateLimit(rateLimitKey, TOURNAMENT_RATE_LIMIT.CREATE, 3600);
-    
-    if (!canCreate) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(429).json({
-        success: false,
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: 'Too many tournament creation attempts. Please try again later.',
-        limit: TOURNAMENT_RATE_LIMIT.CREATE,
-        period: 'per hour',
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Map request data to tournament model
-    const tournamentData = mapTournamentData(req.body, userId, userRole);
-    
-    // Calculate prize pool if not specified
-    if (tournamentData.total_prize === 0) {
-      tournamentData.total_prize = calculatePrizePool(tournamentData);
-    }
-    
-    // Create tournament
-    const tournament = await Tournament.create([tournamentData], { session });
-    const createdTournament = tournament[0];
-    
-    // Populate creator info
-    await createdTournament.populate('created_by', 'username name email rating');
-    if (createdTournament.approved_by) {
-      await createdTournament.populate('approved_by', 'username name');
-    }
-    
-    // Create notification for admin (if not auto-approved)
-    if (userRole === 'user') {
-      try {
-        const adminUsers = await User.find({ role: { $in: ['admin', 'moderator'] } }).session(session);
-        
-        for (const admin of adminUsers) {
-          await Notification.create([{
-            user_id: admin._id,
-            type: 'tournament_pending',
-            title: 'New Tournament Pending Approval',
-            message: `New tournament "${createdTournament.title}" created by ${req.user.username || 'User'}`,
-            data: {
-              tournament_id: createdTournament._id,
-              tournament_title: createdTournament.title,
-              created_by: userId,
-              created_by_name: req.user.username || 'User',
-              prize_pool: createdTournament.total_prize,
-              participants: createdTournament.max_participants
-            },
-            priority: 'high'
-          }], { session });
-        }
-        console.log(`📢 Notifications sent to ${adminUsers.length} admins`);
-      } catch (notifyError) {
-        console.error('❌ Notification creation error:', notifyError);
-        // Don't fail the transaction because of notification error
-      }
-    }
-    
-    // Commit transaction
-    await session.commitTransaction();
-    session.endSession();
-    
-    // Clear tournaments cache
-    await clearTournamentsCache();
-    
-    console.log('✅ Tournament created successfully:', createdTournament._id);
-    
-    // Prepare response
-    const response = {
-      success: true,
-      code: 'TOURNAMENT_CREATED',
-      message: userRole === 'user' 
-        ? 'Tournament created successfully! Waiting for admin approval.' 
-        : 'Tournament created and auto-approved successfully!',
-      data: {
-        tournament: formatTournamentResponse(createdTournament),
-        creator: {
-          id: req.user.userId,
-          username: req.user.username,
-          name: req.user.name,
-          rating: req.user.rating || 1000
-        },
-        approval_info: {
-          status: createdTournament.approval_status,
-          message: createdTournament.approval_status === 'approved' 
-            ? 'Tournament is live and visible to users' 
-            : 'Waiting for admin review',
-          estimated_review_time: 'Within 24 hours'
-        },
-        economic_impact: {
-          entry_fee: createdTournament.entry_fee,
-          prize_pool: createdTournament.total_prize,
-          platform_fee: calculatePlatformFee(createdTournament.entry_fee, createdTournament.max_participants),
-          estimated_revenue: calculateEstimatedRevenue(createdTournament)
-        },
-        timeline: {
-          registration_deadline: createdTournament.registration_deadline,
-          schedule_time: createdTournament.schedule_time,
-          start_time: createdTournament.start_time,
-          end_time: createdTournament.end_time
-        },
-        next_steps: [
-          'Share tournament with friends',
-          'Wait for participants to join',
-          'Set up room details before start time',
-          'Check participant verification'
-        ]
-      },
-      timestamp: new Date().toISOString(),
-      reference_id: `T${createdTournament._id}${Date.now().toString().slice(-6)}`
-    };
-    
-    res.status(201).json(response);
-    
-  } catch (error) {
-    // Abort transaction on error
-    try {
-      await session.abortTransaction();
-      session.endSession();
-    } catch (sessionError) {
-      console.error('❌ Session abort error:', sessionError);
-    }
-    
-    console.error('❌ CREATE TOURNAMENT ERROR:', {
-      error: error.message,
-      stack: error.stack,
-      user: req.user?.username,
-      endpoint: req.originalUrl
-    });
-    
-    handleTournamentError(res, error);
-  }
-};
-
 // ==================== GET ALL TOURNAMENTS ====================
 exports.getTournaments = async (req, res) => {
   try {
@@ -1117,6 +936,187 @@ exports.getTournaments = async (req, res) => {
   }
 };
 
+// ==================== CREATE TOURNAMENT ====================
+exports.createTournament = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    console.log('🎮 CREATE TOURNAMENT REQUEST:', {
+      user: req.user.username,
+      body: req.body,
+      ip: req.ip
+    });
+
+    // Validate user
+    if (!req.user || !req.user.userId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(401).json({
+        success: false,
+        code: 'UNAUTHORIZED',
+        message: 'User authentication required',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const userId = req.user.userId;
+    const userRole = req.user.role || 'user';
+    
+    // Validate tournament data
+    const validationErrors = validateTournamentData(req.body, userRole === 'admin');
+    if (validationErrors.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Tournament data validation failed',
+        errors: validationErrors,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Check rate limit for tournament creation
+    const rateLimitKey = `rate_limit:create_tournament:${userId}`;
+    const canCreate = await checkRateLimit(rateLimitKey, TOURNAMENT_RATE_LIMIT.CREATE, 3600);
+    
+    if (!canCreate) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(429).json({
+        success: false,
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many tournament creation attempts. Please try again later.',
+        limit: TOURNAMENT_RATE_LIMIT.CREATE,
+        period: 'per hour',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Map request data to tournament model
+    const tournamentData = mapTournamentData(req.body, userId, userRole);
+    
+    // Calculate prize pool if not specified
+    if (tournamentData.total_prize === 0) {
+      tournamentData.total_prize = calculatePrizePool(tournamentData);
+    }
+    
+    // Create tournament
+    const tournament = await Tournament.create([tournamentData], { session });
+    const createdTournament = tournament[0];
+    
+    // Populate creator info
+    await createdTournament.populate('created_by', 'username name email rating');
+    if (createdTournament.approved_by) {
+      await createdTournament.populate('approved_by', 'username name');
+    }
+    
+    // Create notification for admin (if not auto-approved)
+    if (userRole === 'user') {
+      try {
+        const adminUsers = await User.find({ role: { $in: ['admin', 'moderator'] } }).session(session);
+        
+        for (const admin of adminUsers) {
+          await Notification.create([{
+            user_id: admin._id,
+            type: 'tournament_pending',
+            title: 'New Tournament Pending Approval',
+            message: `New tournament "${createdTournament.title}" created by ${req.user.username || 'User'}`,
+            data: {
+              tournament_id: createdTournament._id,
+              tournament_title: createdTournament.title,
+              created_by: userId,
+              created_by_name: req.user.username || 'User',
+              prize_pool: createdTournament.total_prize,
+              participants: createdTournament.max_participants
+            },
+            priority: 'high'
+          }], { session });
+        }
+        console.log(`📢 Notifications sent to ${adminUsers.length} admins`);
+      } catch (notifyError) {
+        console.error('❌ Notification creation error:', notifyError);
+        // Don't fail the transaction because of notification error
+      }
+    }
+    
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+    
+    // Clear tournaments cache
+    await clearTournamentsCache();
+    
+    console.log('✅ Tournament created successfully:', createdTournament._id);
+    
+    // Prepare response
+    const response = {
+      success: true,
+      code: 'TOURNAMENT_CREATED',
+      message: userRole === 'user' 
+        ? 'Tournament created successfully! Waiting for admin approval.' 
+        : 'Tournament created and auto-approved successfully!',
+      data: {
+        tournament: formatTournamentResponse(createdTournament),
+        creator: {
+          id: req.user.userId,
+          username: req.user.username,
+          name: req.user.name,
+          rating: req.user.rating || 1000
+        },
+        approval_info: {
+          status: createdTournament.approval_status,
+          message: createdTournament.approval_status === 'approved' 
+            ? 'Tournament is live and visible to users' 
+            : 'Waiting for admin review',
+          estimated_review_time: 'Within 24 hours'
+        },
+        economic_impact: {
+          entry_fee: createdTournament.entry_fee,
+          prize_pool: createdTournament.total_prize,
+          platform_fee: calculatePlatformFee(createdTournament.entry_fee, createdTournament.max_participants),
+          estimated_revenue: calculateEstimatedRevenue(createdTournament)
+        },
+        timeline: {
+          registration_deadline: createdTournament.registration_deadline,
+          schedule_time: createdTournament.schedule_time,
+          start_time: createdTournament.start_time,
+          end_time: createdTournament.end_time
+        },
+        next_steps: [
+          'Share tournament with friends',
+          'Wait for participants to join',
+          'Set up room details before start time',
+          'Check participant verification'
+        ]
+      },
+      timestamp: new Date().toISOString(),
+      reference_id: `T${createdTournament._id}${Date.now().toString().slice(-6)}`
+    };
+    
+    res.status(201).json(response);
+    
+  } catch (error) {
+    // Abort transaction on error
+    try {
+      await session.abortTransaction();
+      session.endSession();
+    } catch (sessionError) {
+      console.error('❌ Session abort error:', sessionError);
+    }
+    
+    console.error('❌ CREATE TOURNAMENT ERROR:', {
+      error: error.message,
+      stack: error.stack,
+      user: req.user?.username,
+      endpoint: req.originalUrl
+    });
+    
+    handleTournamentError(res, error);
+  }
+};
+
 // ==================== GET TOURNAMENT BY ID ====================
 exports.getTournamentById = async (req, res) => {
   try {
@@ -1208,6 +1208,36 @@ exports.getTournamentById = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
+};
+
+// 🔥 HELPER: Calculate estimated prizes
+const calculateEstimatedPrizes = (tournament) => {
+  const totalPrize = tournament.total_prize;
+  const distribution = tournament.prize_distribution || [50, 30, 20];
+  
+  return distribution.map((percentage, index) => ({
+    position: index + 1,
+    percentage: percentage,
+    amount: (totalPrize * percentage) / 100,
+    formatted_amount: formatCurrency((totalPrize * percentage) / 100)
+  }));
+};
+
+// 🔥 HELPER: Calculate time until
+const calculateTimeUntil = (date) => {
+  const now = new Date();
+  const target = new Date(date);
+  const diffMs = target - now;
+  
+  if (diffMs <= 0) return 'Started';
+  
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  
+  if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
+  if (diffHours > 0) return `${diffHours}h ${diffMinutes}m`;
+  return `${diffMinutes}m`;
 };
 
 // ==================== UPDATE TOURNAMENT ====================
@@ -2079,7 +2109,6 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
           },
           rejected_count: { 
             $sum: { $cond: [{ $eq: ['$approval_status', 'rejected'] }, 1, 0] }
-          }
         }
       }
     ]);
@@ -2639,36 +2668,6 @@ exports.updateTournamentStatus = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
-};
-
-// 🔥 HELPER: Calculate estimated prizes
-const calculateEstimatedPrizes = (tournament) => {
-  const totalPrize = tournament.total_prize;
-  const distribution = tournament.prize_distribution || [50, 30, 20];
-  
-  return distribution.map((percentage, index) => ({
-    position: index + 1,
-    percentage: percentage,
-    amount: (totalPrize * percentage) / 100,
-    formatted_amount: formatCurrency((totalPrize * percentage) / 100)
-  }));
-};
-
-// 🔥 HELPER: Calculate time until
-const calculateTimeUntil = (date) => {
-  const now = new Date();
-  const target = new Date(date);
-  const diffMs = target - now;
-  
-  if (diffMs <= 0) return 'Started';
-  
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  
-  if (diffDays > 0) return `${diffDays}d ${diffHours}h`;
-  if (diffHours > 0) return `${diffHours}h ${diffMinutes}m`;
-  return `${diffMinutes}m`;
 };
 
 // 🔥 HELPER: Get next steps for status
