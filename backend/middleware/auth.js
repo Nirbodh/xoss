@@ -41,7 +41,7 @@ const auth = async (req, res, next) => {
       return res.status(securityCheck.status).json(securityCheck.response);
     }
 
-    // Attach enhanced user object
+    // Attach enhanced user object - FIXED FOR User.js SCHEMA
     req.user = {
       // Core identifiers
       _id: user._id,
@@ -53,19 +53,59 @@ const auth = async (req, res, next) => {
       email: user.email,
       username: user.username,
       name: user.name || user.username,
-      phone: user.phone,
-      avatar: user.avatar,
+      phone: user.phone || '',
+      avatar: user.avatar || 'https://res.cloudinary.com/xoss/image/upload/v1/default_avatar.png',
       
-      // Financial
-      wallet_balance: user.wallet_balance || 0,
-      total_earnings: user.total_earnings || 0,
-      total_deposits: user.total_deposits || 0,
-      total_withdrawals: user.total_withdrawals || 0,
+      // Financial - COMPATIBLE WITH BOTH SCHEMAS
+      wallet_balance: user.wallet_balance || user.wallet?.balance || user.balance || 0,
+      total_earnings: user.total_earnings || user.wallet?.total_earned || 0,
+      total_deposits: user.total_deposits || user.wallet?.total_deposited || 0,
+      total_withdrawals: user.total_withdrawals || user.wallet?.total_withdrawn || 0,
+      
+      // OLD SCHEMA COMPATIBILITY
+      balance: user.wallet_balance || user.balance || user.wallet?.balance || 0,
+      
+      // NEW SCHEMA COMPATIBILITY
+      wallet: {
+        balance: user.wallet_balance || user.wallet?.balance || user.balance || 0,
+        total_earned: user.total_earnings || user.wallet?.total_earned || 0,
+        total_deposited: user.wallet?.total_deposited || 0,
+        total_withdrawn: user.wallet?.total_withdrawn || 0,
+        total_won: user.wallet?.total_won || 0,
+        total_lost: user.wallet?.total_lost || 0
+      },
       
       // Status
-      is_active: user.is_active,
-      is_verified: user.is_verified,
+      is_active: user.is_active !== false,
+      is_verified: user.is_verified || false,
       is_premium: user.is_premium || false,
+      
+      // Gaming stats - COMPATIBLE WITH BOTH SCHEMAS
+      level: user.level || user.progression?.current || 1,
+      experience: user.experience || user.progression?.experience || 0,
+      matches_played: user.matches_played || user.stats?.matches_played || 0,
+      matches_won: user.matches_won || user.stats?.matches_won || 0,
+      favorite_game: user.favorite_game || user.gaming?.favorite_game || 'Free Fire',
+      
+      // Progression - NEW SCHEMA
+      progression: user.progression || {
+        current: user.level || 1,
+        experience: user.experience || 0,
+        next_level_xp: 1000
+      },
+      
+      // Stats - NEW SCHEMA
+      stats: user.stats || {
+        matches_played: user.matches_played || 0,
+        matches_won: user.matches_won || 0,
+        win_rate: 0
+      },
+      
+      // Gaming - NEW SCHEMA
+      gaming: user.gaming || {
+        favorite_game: user.favorite_game || 'Free Fire',
+        favorite_mode: 'Ranked'
+      },
       
       // Security
       last_login: user.last_login,
@@ -76,8 +116,12 @@ const auth = async (req, res, next) => {
       permissions: getUserPermissions(user.role),
       features: getUserFeatures(user.role),
       
+      // Account Status
+      account_status: user.account_status || 'active',
+      
       // Metadata
       created_at: user.createdAt,
+      updated_at: user.updatedAt,
       member_since: formatMemberSince(user.createdAt)
     };
 
@@ -115,7 +159,7 @@ const extractToken = (req) => {
 
 const verifyToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET, {
+    return jwt.verify(token, process.env.JWT_SECRET || 'xoss-gaming-secret-key-2024', {
       algorithms: ['HS256'],
       ignoreExpiration: false,
       clockTolerance: 30
@@ -128,7 +172,7 @@ const verifyToken = (token) => {
 const findUserWithCache = async (userId) => {
   // In production, you can add Redis cache here
   return await User.findById(userId)
-    .select('-password -reset_password_token -reset_password_expires')
+    .select('-password -reset_password_token -reset_password_expires -email_verification_token -email_verification_expires')
     .lean();
 };
 
@@ -140,7 +184,7 @@ const performSecurityChecks = async (user, req) => {
   };
 
   // Check if account is active
-  if (user.is_active === false) {
+  if (user.is_active === false || user.account_status === 'suspended' || user.account_status === 'banned') {
     checks.valid = false;
     checks.status = 403;
     checks.response = {
@@ -154,7 +198,7 @@ const performSecurityChecks = async (user, req) => {
   }
 
   // Check if email is verified (optional based on settings)
-  if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.is_verified) {
+  if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.is_verified && !user.verification?.email_verified) {
     checks.valid = false;
     checks.status = 403;
     checks.response = {
@@ -188,8 +232,10 @@ const performSecurityChecks = async (user, req) => {
 const getUserPermissions = (role) => {
   const permissions = {
     user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile'],
+    premium_user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile', 'premium_features'],
     moderator: ['approve_matches', 'manage_users', 'view_reports', 'all_user_permissions'],
-    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
+    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management'],
+    super_admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
   };
   
   return permissions[role] || permissions.user;
@@ -198,8 +244,10 @@ const getUserPermissions = (role) => {
 const getUserFeatures = (role) => {
   const features = {
     user: ['basic_gaming', 'wallet', 'friends', 'notifications'],
+    premium_user: ['basic_gaming', 'wallet', 'friends', 'notifications', 'premium_games', 'priority_support'],
     moderator: ['moderation_tools', 'analytics', 'all_user_features'],
-    admin: ['admin_dashboard', 'system_controls', 'all_features']
+    admin: ['admin_dashboard', 'system_controls', 'all_features'],
+    super_admin: ['admin_dashboard', 'system_controls', 'all_features']
   };
   
   return features[role] || features.user;
@@ -207,7 +255,11 @@ const getUserFeatures = (role) => {
 
 const updateUserActivity = async (userId, ip) => {
   await User.findByIdAndUpdate(userId, {
-    $set: { last_login: new Date(), last_ip: ip },
+    $set: { 
+      last_login: new Date(), 
+      last_ip: ip,
+      'metadata.last_active': new Date()
+    },
     $inc: { login_count: 1 }
   }).catch(console.error);
 };
@@ -260,6 +312,18 @@ const handleAuthError = (res, error) => {
   }
 
   return sendAuthError(res, code, message, status);
+};
+
+const formatMemberSince = (date) => {
+  if (!date) return 'Recently';
+  const now = new Date();
+  const diffMonths = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
+  
+  if (diffMonths < 1) return 'New Member';
+  if (diffMonths < 12) return `${diffMonths} month${diffMonths > 1 ? 's' : ''}`;
+  
+  const years = Math.floor(diffMonths / 12);
+  return `${years} year${years > 1 ? 's' : ''}`;
 };
 
 // Admin authentication with enhanced security
@@ -335,13 +399,14 @@ const optionalAuth = async (req, res, next) => {
       const decoded = verifyToken(token);
       if (decoded) {
         const user = await findUserWithCache(decoded.userId);
-        if (user && user.is_active) {
+        if (user && user.is_active !== false) {
           req.user = {
             _id: user._id,
             userId: user._id,
             role: user.role || 'user',
             email: user.email,
             username: user.username,
+            wallet_balance: user.wallet_balance || user.wallet?.balance || 0,
             is_authenticated: true
           };
         }
