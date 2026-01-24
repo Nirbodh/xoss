@@ -1,148 +1,237 @@
+// routes/auth.js - COMPLETE FIXED VERSION
 const express = require('express');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const { auth } = require('../middleware/auth');
 const router = express.Router();
+const User = require('../models/User');
 
-// Register
-router.post('/register', async (req, res) => {
+// ✅ FIXED LOGIN ROUTE
+router.post('/login', async (req, res) => {
+  console.log('🔐 LOGIN REQUEST RECEIVED:', { 
+    email: req.body.email,
+    timestamp: new Date().toISOString() 
+  });
+
   try {
-    const { username, email, password, phone, favorite_game } = req.body;
+    const { email, password } = req.body;
 
     // Validation
-    if (!username || !email || !password) {
+    if (!email || !password) {
       return res.status(400).json({ 
         success: false,
-        message: 'Please provide all required fields' 
+        message: 'Email and password are required' 
       });
     }
 
+    // ✅ FIX 1: সরাসরি MongoDB query (Model bypass)
+    const mongoose = require('mongoose');
+    const bcrypt = require('bcryptjs');
+    const jwt = require('jsonwebtoken');
+    
+    // Direct collection access
+    const db = mongoose.connection.db;
+    const user = await db.collection('users').findOne({
+      email: email.toLowerCase().trim()
+    });
+
+    console.log('🔍 DATABASE RESULT:', {
+      found: !!user,
+      email: user?.email,
+      hasPassword: !!user?.password,
+      userId: user?._id
+    });
+
+    // User not found
+    if (!user) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid email or password' 
+      });
+    }
+
+    // No password in database
+    if (!user.password) {
+      console.log('⚠️ USER HAS NO PASSWORD IN DB:', user.email);
+      return res.status(400).json({ 
+        success: false,
+        message: 'Account setup incomplete. Please reset password.' 
+      });
+    }
+
+    // ✅ FIX 2: Direct bcrypt compare
+    const isMatch = await bcrypt.compare(password, user.password);
+    console.log('🔐 PASSWORD COMPARISON:', { match: isMatch });
+
+    if (!isMatch) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Invalid email or password' 
+      });
+    }
+
+    // Check account status
+    if (user.is_active === false || user.account_status === 'suspended') {
+      return res.status(403).json({ 
+        success: false,
+        message: 'Account is suspended. Contact support.' 
+      });
+    }
+
+    // ✅ FIX 3: Generate JWT token
+    const token = jwt.sign(
+      { 
+        userId: user._id.toString(),
+        email: user.email,
+        role: user.role || 'user'
+      },
+      process.env.JWT_SECRET || 'xoss-gaming-default-secret-2024',
+      { expiresIn: '7d' }
+    );
+
+    // ✅ FIX 4: Prepare response (Backward compatible)
+    const responseUser = {
+      _id: user._id,
+      id: user._id,
+      email: user.email,
+      username: user.username || user.email.split('@')[0],
+      phone: user.phone || '',
+      name: user.name || '',
+      avatar: user.avatar || 'https://res.cloudinary.com/xoss/image/upload/v1/default_avatar.png',
+      role: user.role || 'user',
+      
+      // Wallet balance (all possible fields)
+      wallet_balance: user.wallet_balance || user.balance || user.wallet?.balance || 0,
+      wallet: {
+        balance: user.wallet_balance || user.balance || user.wallet?.balance || 0,
+        total_earned: user.total_earnings || user.wallet?.total_earned || 0
+      },
+      
+      // Level (all possible fields)
+      level: user.level || user.progression?.current || 1,
+      experience: user.experience || user.progression?.experience || 0,
+      progression: {
+        current: user.level || user.progression?.current || 1,
+        experience: user.experience || user.progression?.experience || 0
+      },
+      
+      // Stats
+      matches_played: user.matches_played || user.stats?.matches_played || 0,
+      matches_won: user.matches_won || user.stats?.matches_won || 0,
+      
+      // Account status
+      is_verified: user.is_verified || false,
+      is_active: user.is_active !== false,
+      account_status: user.account_status || 'active',
+      
+      // Timestamps
+      createdAt: user.createdAt || new Date(),
+      updatedAt: user.updatedAt || new Date()
+    };
+
+    console.log('✅ LOGIN SUCCESS:', {
+      email: user.email,
+      userId: user._id,
+      walletBalance: responseUser.wallet_balance,
+      level: responseUser.level
+    });
+
+    // Success response
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token: token,
+      user: responseUser
+    });
+
+  } catch (error) {
+    console.error('🔥 LOGIN PROCESS ERROR:', {
+      message: error.message,
+      stack: error.stack,
+      email: req.body.email
+    });
+    
+    res.status(500).json({ 
+      success: false,
+      message: 'Login failed. Please try again.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ✅ SIMPLE REGISTER ROUTE (যদি নতুন ইউজার করতে চান)
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password, phone } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Email and password are required' 
+      });
+    }
+    
+    const mongoose = require('mongoose');
+    const bcrypt = require('bcryptjs');
+    const jwt = require('jsonwebtoken');
+    const db = mongoose.connection.db;
+    
     // Check if user exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { username }] 
+    const existingUser = await db.collection('users').findOne({
+      $or: [{ email }, { username }]
     });
     
     if (existingUser) {
       return res.status(400).json({ 
         success: false,
-        message: 'User already exists with this email or username' 
+        message: 'User already exists' 
       });
     }
-
+    
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
+    
     // Create new user
-    const user = new User({
-      username,
-      email,
-      password,
-      phone,
-      favorite_game
-    });
-
-    await user.save();
-
+    const newUser = {
+      username: username || email.split('@')[0],
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      phone: phone || '',
+      wallet_balance: 1000,
+      level: 1,
+      experience: 0,
+      matches_played: 0,
+      matches_won: 0,
+      is_verified: false,
+      is_active: true,
+      account_status: 'active',
+      role: 'user',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    
+    const result = await db.collection('users').insertOne(newUser);
+    
     // Generate token
     const token = jwt.sign(
-      { userId: user._id }, 
-      process.env.JWT_SECRET, 
+      { userId: result.insertedId },
+      process.env.JWT_SECRET || 'xoss-gaming-default-secret-2024',
       { expiresIn: '7d' }
     );
-
+    
     res.status(201).json({
       success: true,
-      message: 'User registered successfully',
+      message: 'Registration successful',
       token,
       user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        wallet_balance: user.wallet_balance,
-        avatar: user.avatar
+        _id: result.insertedId,
+        ...newUser,
+        password: undefined // Remove password from response
       }
     });
+    
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ 
       success: false,
-      message: 'Server error', 
-      error: error.message 
-    });
-  }
-});
-
-// Login
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Please provide email and password' 
-      });
-    }
-
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid credentials' 
-      });
-    }
-
-    // Check password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Invalid credentials' 
-      });
-    }
-
-    // Generate token
-    const token = jwt.sign(
-      { userId: user._id }, 
-      process.env.JWT_SECRET, 
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error', 
-      error: error.message 
-    });
-  }
-});
-
-// Get current user
-router.get('/me', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'User not found' 
-      });
-    }
-
-    res.json({
-      success: true,
-      user
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: 'Server error' 
+      message: 'Registration failed' 
     });
   }
 });
