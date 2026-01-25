@@ -1,134 +1,94 @@
-// middleware/auth.js - PRODUCTION PRO VERSION
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 
-// Rate limiter for auth attempts
 const loginRateLimiter = new RateLimiterMemory({
-  points: 5, // 5 attempts
-  duration: 15 * 60, // per 15 minutes
-  blockDuration: 30 * 60 // block for 30 minutes
+  points: 5,
+  duration: 15 * 60,
+  blockDuration: 30 * 60
 });
 
 const auth = async (req, res, next) => {
   const startTime = Date.now();
   
   try {
-    // Extract token from various sources
     let token = extractToken(req);
     
     if (!token) {
       return sendAuthError(res, 'NO_TOKEN', 'Authentication token required', 401);
     }
 
-    // Verify token
     const decoded = verifyToken(token);
     
     if (!decoded) {
       return sendAuthError(res, 'INVALID_TOKEN', 'Invalid or malformed token', 401);
     }
 
-    // Find user with cache consideration
     const user = await findUserWithCache(decoded.userId);
     
     if (!user) {
       return sendAuthError(res, 'USER_NOT_FOUND', 'User account not found', 401);
     }
 
-    // Security checks
     const securityCheck = await performSecurityChecks(user, req);
     if (!securityCheck.valid) {
       return res.status(securityCheck.status).json(securityCheck.response);
     }
 
-    // Attach enhanced user object - FIXED FOR User.js SCHEMA
     req.user = {
-      // Core identifiers
       _id: user._id,
       userId: user._id,
       id: user._id,
       
-      // User info
       role: user.role || 'user',
       email: user.email,
       username: user.username,
       name: user.name || user.username,
-      phone: user.phone || '',
-      avatar: user.avatar || 'https://res.cloudinary.com/xoss/image/upload/v1/default_avatar.png',
+      phone: user.phone,
+      avatar: user.avatar,
       
-      // Financial - COMPATIBLE WITH BOTH SCHEMAS
-      wallet_balance: user.wallet_balance || user.wallet?.balance || user.balance || 0,
-      total_earnings: user.total_earnings || user.wallet?.total_earned || 0,
-      total_deposits: user.total_deposits || user.wallet?.total_deposited || 0,
-      total_withdrawals: user.total_withdrawals || user.wallet?.total_withdrawn || 0,
-      
-      // OLD SCHEMA COMPATIBILITY
-      balance: user.wallet_balance || user.balance || user.wallet?.balance || 0,
-      
-      // NEW SCHEMA COMPATIBILITY
-      wallet: {
-        balance: user.wallet_balance || user.wallet?.balance || user.balance || 0,
-        total_earned: user.total_earnings || user.wallet?.total_earned || 0,
-        total_deposited: user.wallet?.total_deposited || 0,
-        total_withdrawn: user.wallet?.total_withdrawn || 0,
-        total_won: user.wallet?.total_won || 0,
-        total_lost: user.wallet?.total_lost || 0
+      wallet_balance: user.wallet?.balance || user.wallet_balance || user.balance || 0,
+      wallet: user.wallet || {
+        balance: user.wallet_balance || user.balance || 0,
+        total_earned: user.total_earnings || 0,
+        total_deposited: 0,
+        total_withdrawn: 0
       },
       
-      // Status
-      is_active: user.is_active !== false,
-      is_verified: user.is_verified || false,
-      is_premium: user.is_premium || false,
-      
-      // Gaming stats - COMPATIBLE WITH BOTH SCHEMAS
-      level: user.level || user.progression?.current || 1,
-      experience: user.experience || user.progression?.experience || 0,
-      matches_played: user.matches_played || user.stats?.matches_played || 0,
-      matches_won: user.matches_won || user.stats?.matches_won || 0,
-      favorite_game: user.favorite_game || user.gaming?.favorite_game || 'Free Fire',
-      
-      // Progression - NEW SCHEMA
+      level: user.progression?.current || user.level || 1,
+      experience: user.progression?.experience || user.experience || 0,
       progression: user.progression || {
         current: user.level || 1,
         experience: user.experience || 0,
         next_level_xp: 1000
       },
       
-      // Stats - NEW SCHEMA
+      matches_played: user.stats?.matches_played || user.matches_played || 0,
+      matches_won: user.stats?.matches_won || user.matches_won || 0,
       stats: user.stats || {
         matches_played: user.matches_played || 0,
         matches_won: user.matches_won || 0,
-        win_rate: 0
+        win_rate: 0,
+        rank_score: 1000
       },
       
-      // Gaming - NEW SCHEMA
-      gaming: user.gaming || {
-        favorite_game: user.favorite_game || 'Free Fire',
-        favorite_mode: 'Ranked'
-      },
+      is_active: user.is_active,
+      is_verified: user.is_verified || user.verification?.email_verified || false,
+      is_premium: user.is_premium || false,
       
-      // Security
       last_login: user.last_login,
       login_count: user.login_count || 0,
       ip_address: req.ip,
       
-      // Permissions
       permissions: getUserPermissions(user.role),
       features: getUserFeatures(user.role),
       
-      // Account Status
-      account_status: user.account_status || 'active',
-      
-      // Metadata
       created_at: user.createdAt,
-      updated_at: user.updatedAt,
       member_since: formatMemberSince(user.createdAt)
     };
 
-    // Update last activity
     await updateUserActivity(user._id, req.ip);
 
-    // Log successful auth
     logAuthSuccess(req, user, Date.now() - startTime);
     
     next();
@@ -139,7 +99,6 @@ const auth = async (req, res, next) => {
   }
 };
 
-// Helper functions
 const extractToken = (req) => {
   const authHeader = req.headers.authorization;
   const cookieToken = req.cookies?.token;
@@ -159,7 +118,7 @@ const extractToken = (req) => {
 
 const verifyToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'xoss-gaming-secret-key-2024', {
+    return jwt.verify(token, process.env.JWT_SECRET, {
       algorithms: ['HS256'],
       ignoreExpiration: false,
       clockTolerance: 30
@@ -170,9 +129,8 @@ const verifyToken = (token) => {
 };
 
 const findUserWithCache = async (userId) => {
-  // In production, you can add Redis cache here
   return await User.findById(userId)
-    .select('-password -reset_password_token -reset_password_expires -email_verification_token -email_verification_expires')
+    .select('-password -reset_password_token -reset_password_expires')
     .lean();
 };
 
@@ -183,8 +141,7 @@ const performSecurityChecks = async (user, req) => {
     response: null
   };
 
-  // Check if account is active
-  if (user.is_active === false || user.account_status === 'suspended' || user.account_status === 'banned') {
+  if (user.is_active === false) {
     checks.valid = false;
     checks.status = 403;
     checks.response = {
@@ -197,8 +154,7 @@ const performSecurityChecks = async (user, req) => {
     return checks;
   }
 
-  // Check if email is verified (optional based on settings)
-  if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.is_verified && !user.verification?.email_verified) {
+  if (process.env.REQUIRE_EMAIL_VERIFICATION === 'true' && !user.is_verified) {
     checks.valid = false;
     checks.status = 403;
     checks.response = {
@@ -211,7 +167,6 @@ const performSecurityChecks = async (user, req) => {
     return checks;
   }
 
-  // Check for suspicious activity (multiple IPs, etc.)
   const suspicious = await checkSuspiciousActivity(user._id, req.ip);
   if (suspicious) {
     checks.valid = false;
@@ -232,10 +187,8 @@ const performSecurityChecks = async (user, req) => {
 const getUserPermissions = (role) => {
   const permissions = {
     user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile'],
-    premium_user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile', 'premium_features'],
     moderator: ['approve_matches', 'manage_users', 'view_reports', 'all_user_permissions'],
-    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management'],
-    super_admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
+    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
   };
   
   return permissions[role] || permissions.user;
@@ -244,10 +197,8 @@ const getUserPermissions = (role) => {
 const getUserFeatures = (role) => {
   const features = {
     user: ['basic_gaming', 'wallet', 'friends', 'notifications'],
-    premium_user: ['basic_gaming', 'wallet', 'friends', 'notifications', 'premium_games', 'priority_support'],
     moderator: ['moderation_tools', 'analytics', 'all_user_features'],
-    admin: ['admin_dashboard', 'system_controls', 'all_features'],
-    super_admin: ['admin_dashboard', 'system_controls', 'all_features']
+    admin: ['admin_dashboard', 'system_controls', 'all_features']
   };
   
   return features[role] || features.user;
@@ -255,19 +206,13 @@ const getUserFeatures = (role) => {
 
 const updateUserActivity = async (userId, ip) => {
   await User.findByIdAndUpdate(userId, {
-    $set: { 
-      last_login: new Date(), 
-      last_ip: ip,
-      'metadata.last_active': new Date()
-    },
+    $set: { last_login: new Date(), last_ip: ip },
     $inc: { login_count: 1 }
   }).catch(console.error);
 };
 
 const checkSuspiciousActivity = async (userId, currentIp) => {
-  // Implement suspicious activity detection logic
-  // Check for multiple IP addresses, rapid logins, etc.
-  return false; // Return true if suspicious
+  return false;
 };
 
 const logAuthSuccess = (req, user, duration) => {
@@ -316,22 +261,21 @@ const handleAuthError = (res, error) => {
 
 const formatMemberSince = (date) => {
   if (!date) return 'Recently';
+  
   const now = new Date();
-  const diffMonths = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
+  const joinDate = new Date(date);
+  const diffMonths = (now.getFullYear() - joinDate.getFullYear()) * 12 + (now.getMonth() - joinDate.getMonth());
   
   if (diffMonths < 1) return 'New Member';
   if (diffMonths < 12) return `${diffMonths} month${diffMonths > 1 ? 's' : ''}`;
   
-  const years = Math.floor(diffMonths / 12);
-  return `${years} year${years > 1 ? 's' : ''}`;
+  const diffYears = Math.floor(diffMonths / 12);
+  return `${diffYears} year${diffYears > 1 ? 's' : ''}`;
 };
 
-// Admin authentication with enhanced security
 const adminAuth = async (req, res, next) => {
   try {
-    // First authenticate normally
     await auth(req, res, async () => {
-      // Check admin role
       if (!['admin', 'moderator', 'super_admin'].includes(req.user.role)) {
         return res.status(403).json({
           success: false,
@@ -343,13 +287,11 @@ const adminAuth = async (req, res, next) => {
         });
       }
 
-      // Additional admin security checks
       const adminSecurity = await checkAdminSecurity(req.user._id);
       if (!adminSecurity.valid) {
         return res.status(403).json(adminSecurity.response);
       }
 
-      // Log admin access
       console.log(`👑 ADMIN ACCESS | User: ${req.user.username} | Endpoint: ${req.originalUrl}`);
 
       next();
@@ -366,12 +308,9 @@ const adminAuth = async (req, res, next) => {
 };
 
 const checkAdminSecurity = async (userId) => {
-  // Add additional security checks for admin access
-  // Example: Check if admin account is locked, requires 2FA, etc.
   return { valid: true };
 };
 
-// Rate limited authentication for login endpoints
 const rateLimitedAuth = (req, res, next) => {
   const key = req.ip;
   
@@ -390,7 +329,6 @@ const rateLimitedAuth = (req, res, next) => {
     });
 };
 
-// Optional authentication (for public endpoints that can work with or without auth)
 const optionalAuth = async (req, res, next) => {
   try {
     const token = extractToken(req);
@@ -399,14 +337,13 @@ const optionalAuth = async (req, res, next) => {
       const decoded = verifyToken(token);
       if (decoded) {
         const user = await findUserWithCache(decoded.userId);
-        if (user && user.is_active !== false) {
+        if (user && user.is_active) {
           req.user = {
             _id: user._id,
             userId: user._id,
             role: user.role || 'user',
             email: user.email,
             username: user.username,
-            wallet_balance: user.wallet_balance || user.wallet?.balance || 0,
             is_authenticated: true
           };
         }
@@ -424,7 +361,6 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
-// API key authentication for microservices
 const apiKeyAuth = (req, res, next) => {
   const apiKey = req.headers['x-api-key'] || req.query.api_key;
   
@@ -456,7 +392,6 @@ const apiKeyAuth = (req, res, next) => {
   next();
 };
 
-// Export all middleware
 module.exports = {
   auth,
   adminAuth,
@@ -464,7 +399,6 @@ module.exports = {
   optionalAuth,
   apiKeyAuth,
   
-  // Utility functions for controllers
   isAdmin: (user) => ['admin', 'moderator', 'super_admin'].includes(user?.role),
   isPremium: (user) => user?.is_premium || false,
   hasPermission: (user, permission) => {
