@@ -12,23 +12,49 @@ const auth = async (req, res, next) => {
   const startTime = Date.now();
   
   try {
+    console.log('🔐 AUTH MIDDLEWARE STARTED:', {
+      path: req.originalUrl,
+      method: req.method,
+      ip: req.ip,
+      timestamp: new Date().toISOString()
+    });
+
     let token = extractToken(req);
     
     if (!token) {
+      console.log('❌ No token provided');
       return sendAuthError(res, 'NO_TOKEN', 'Authentication token required', 401);
     }
+
+    console.log('🔑 Token extracted, length:', token.length);
 
     const decoded = verifyToken(token);
     
     if (!decoded) {
+      console.log('❌ Token verification failed');
       return sendAuthError(res, 'INVALID_TOKEN', 'Invalid or malformed token', 401);
     }
+
+    console.log('✅ Token decoded:', {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role
+    });
 
     const user = await findUserWithCache(decoded.userId);
     
     if (!user) {
+      console.log('❌ User not found for ID:', decoded.userId);
       return sendAuthError(res, 'USER_NOT_FOUND', 'User account not found', 401);
     }
+
+    console.log('👤 User found:', {
+      userId: user._id,
+      email: user.email,
+      role: user.role,
+      is_active: user.is_active,
+      is_verified: user.is_verified
+    });
 
     const securityCheck = await performSecurityChecks(user, req);
     if (!securityCheck.valid) {
@@ -38,7 +64,7 @@ const auth = async (req, res, next) => {
     req.user = {
       _id: user._id,
       userId: user._id,
-      id: user._id,
+      id: user._id.toString(),
       
       role: user.role || 'user',
       email: user.email,
@@ -87,6 +113,14 @@ const auth = async (req, res, next) => {
       member_since: formatMemberSince(user.createdAt)
     };
 
+    console.log('✅ AUTH SUCCESS - User set:', {
+      userId: req.user.userId,
+      role: req.user.role,
+      email: req.user.email,
+      username: req.user.username,
+      walletBalance: req.user.wallet_balance
+    });
+
     await updateUserActivity(user._id, req.ip);
 
     logAuthSuccess(req, user, Date.now() - startTime);
@@ -94,6 +128,11 @@ const auth = async (req, res, next) => {
     next();
 
   } catch (error) {
+    console.error('🔴 AUTH FAILED:', {
+      error: error.message,
+      stack: error.stack,
+      path: req.originalUrl
+    });
     logAuthError(error, req, Date.now() - startTime);
     handleAuthError(res, error);
   }
@@ -118,12 +157,13 @@ const extractToken = (req) => {
 
 const verifyToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET, {
+    return jwt.verify(token, process.env.JWT_SECRET || 'xoss-gaming-secret-key-2024', {
       algorithms: ['HS256'],
       ignoreExpiration: false,
       clockTolerance: 30
     });
   } catch (error) {
+    console.error('Token verification error:', error.message);
     return null;
   }
 };
@@ -187,8 +227,10 @@ const performSecurityChecks = async (user, req) => {
 const getUserPermissions = (role) => {
   const permissions = {
     user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile'],
+    premium_user: ['create_match', 'join_match', 'withdraw', 'deposit', 'view_profile', 'create_tournament'],
     moderator: ['approve_matches', 'manage_users', 'view_reports', 'all_user_permissions'],
-    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
+    admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management'],
+    super_admin: ['all_permissions', 'system_settings', 'financial_management', 'user_management']
   };
   
   return permissions[role] || permissions.user;
@@ -197,21 +239,32 @@ const getUserPermissions = (role) => {
 const getUserFeatures = (role) => {
   const features = {
     user: ['basic_gaming', 'wallet', 'friends', 'notifications'],
+    premium_user: ['basic_gaming', 'wallet', 'friends', 'notifications', 'tournaments'],
     moderator: ['moderation_tools', 'analytics', 'all_user_features'],
-    admin: ['admin_dashboard', 'system_controls', 'all_features']
+    admin: ['admin_dashboard', 'system_controls', 'all_features'],
+    super_admin: ['admin_dashboard', 'system_controls', 'all_features']
   };
   
   return features[role] || features.user;
 };
 
 const updateUserActivity = async (userId, ip) => {
-  await User.findByIdAndUpdate(userId, {
-    $set: { last_login: new Date(), last_ip: ip },
-    $inc: { login_count: 1 }
-  }).catch(console.error);
+  try {
+    await User.findByIdAndUpdate(userId, {
+      $set: { 
+        last_login: new Date(), 
+        'security.last_login_ip': ip,
+        'metadata.last_active': new Date()
+      },
+      $inc: { 'metadata.session_count': 1 }
+    }).catch(console.error);
+  } catch (error) {
+    console.error('Update user activity error:', error);
+  }
 };
 
 const checkSuspiciousActivity = async (userId, currentIp) => {
+  // Implement suspicious activity check here
   return false;
 };
 
