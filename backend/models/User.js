@@ -4,9 +4,6 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
-  // ==================== 🔥 BACKWARD COMPATIBLE CORE FIELDS ====================
-  
-  // ✅ OLD SCHEMA FIELDS (EXISTING DATABASE SUPPORT)
   wallet_balance: {
     type: Number,
     default: 0,
@@ -62,9 +59,6 @@ const userSchema = new mongoose.Schema({
     default: true
   },
   
-  // ==================== 🔥 NEW SCHEMA FIELDS ====================
-  
-  // 🔥 CORE IDENTIFIERS
   id: {
     type: String,
     unique: true,
@@ -72,7 +66,6 @@ const userSchema = new mongoose.Schema({
     index: true
   },
 
-  // 🔥 AUTHENTICATION & PERSONAL INFO
   username: {
     type: String,
     required: [true, 'Username is required'],
@@ -112,14 +105,13 @@ const userSchema = new mongoose.Schema({
     default: 'https://res.cloudinary.com/xoss/image/upload/v1/default_avatar.png',
     validate: {
       validator: function(v) {
-        if (!v) return true; // Allow empty
+        if (!v) return true;
         return /^(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))$/.test(v);
       },
       message: 'Please provide a valid image URL'
     }
   },
 
-  // 🔥 AUTHENTICATION SECURITY
   password: {
     type: String,
     required: [true, 'Password is required'],
@@ -151,7 +143,6 @@ const userSchema = new mongoose.Schema({
     select: false
   },
 
-  // 🔥 ROLE & PERMISSIONS
   role: {
     type: String,
     enum: {
@@ -178,7 +169,6 @@ const userSchema = new mongoose.Schema({
     ]
   },
 
-  // 🔥 WALLET & FINANCIAL SYSTEM (NEW STRUCTURE)
   wallet: {
     balance: {
       type: Number,
@@ -214,7 +204,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 GAMING STATISTICS & PERFORMANCE (NEW STRUCTURE)
   stats: {
     matches_played: {
       type: Number,
@@ -264,7 +253,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 GAMING PREFERENCES
   gaming: {
     favorite_game: {
       type: String,
@@ -291,7 +279,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 LEVEL & PROGRESSION SYSTEM (NEW STRUCTURE)
   progression: {
     current: {
       type: Number,
@@ -317,7 +304,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 SOCIAL & NETWORKING
   social: {
     friends: [{
       type: mongoose.Schema.Types.ObjectId,
@@ -351,7 +337,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 SECURITY & ACTIVITY TRACKING
   security: {
     two_factor_enabled: {
       type: Boolean,
@@ -391,7 +376,6 @@ const userSchema = new mongoose.Schema({
     }]
   },
 
-  // 🔥 ACCOUNT STATUS & VERIFICATION
   account_status: {
     type: String,
     enum: ['active', 'inactive', 'suspended', 'banned', 'deleted'],
@@ -436,7 +420,6 @@ const userSchema = new mongoose.Schema({
     }]
   },
 
-  // 🔥 SETTINGS & PREFERENCES
   settings: {
     notifications: {
       email: {
@@ -486,7 +469,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 REFERRAL SYSTEM
   referral: {
     code: {
       type: String,
@@ -515,7 +497,6 @@ const userSchema = new mongoose.Schema({
     }
   },
 
-  // 🔥 ANALYTICS & METADATA
   metadata: {
     registration_source: {
       type: String,
@@ -536,7 +517,7 @@ const userSchema = new mongoose.Schema({
       default: 0
     },
     total_play_time: {
-      type: Number, // in minutes
+      type: Number,
       default: 0
     }
   }
@@ -546,7 +527,6 @@ const userSchema = new mongoose.Schema({
   toJSON: { 
     virtuals: true,
     transform: function(doc, ret) {
-      // Remove sensitive fields
       delete ret.password;
       delete ret.password_reset_token;
       delete ret.password_reset_expires;
@@ -567,8 +547,6 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-// ==================== 🔥 VIRTUAL PROPERTIES ====================
-
 userSchema.virtual('win_percentage').get(function() {
   const played = this.stats.matches_played || this.matches_played || 0;
   const won = this.stats.matches_won || this.matches_won || 0;
@@ -577,33 +555,34 @@ userSchema.virtual('win_percentage').get(function() {
 });
 
 userSchema.virtual('current_balance').get(function() {
-  // Priority: wallet_balance (old) > balance (old) > wallet.balance (new)
+  if (this.wallet?.balance !== undefined) return this.wallet.balance;
   if (this.wallet_balance !== undefined) return this.wallet_balance;
   if (this.balance !== undefined) return this.balance;
-  if (this.wallet?.balance !== undefined) return this.wallet.balance;
   return 0;
 });
 
 userSchema.virtual('current_level').get(function() {
-  // Priority: level (old) > progression.current (new)
-  if (this.level !== undefined) return this.level;
   if (this.progression?.current !== undefined) return this.progression.current;
+  if (this.level !== undefined) return this.level;
   return 1;
 });
 
 userSchema.virtual('current_experience').get(function() {
-  // Priority: experience (old) > progression.experience (new)
-  if (this.experience !== undefined) return this.experience;
   if (this.progression?.experience !== undefined) return this.progression.experience;
+  if (this.experience !== undefined) return this.experience;
   return 0;
 });
 
 userSchema.virtual('total_matches_played').get(function() {
-  return this.stats.matches_played || this.matches_played || 0;
+  if (this.stats?.matches_played !== undefined) return this.stats.matches_played;
+  if (this.matches_played !== undefined) return this.matches_played;
+  return 0;
 });
 
 userSchema.virtual('total_matches_won').get(function() {
-  return this.stats.matches_won || this.matches_won || 0;
+  if (this.stats?.matches_won !== undefined) return this.stats.matches_won;
+  if (this.matches_won !== undefined) return this.matches_won;
+  return 0;
 });
 
 userSchema.virtual('full_name').get(function() {
@@ -625,46 +604,36 @@ userSchema.virtual('is_authenticated').get(function() {
   return this.account_status === 'active' && this.is_active !== false;
 });
 
-// ==================== 🔥 INDEXES FOR PERFORMANCE ====================
-
 userSchema.index({ username: 1 });
 userSchema.index({ email: 1 });
 userSchema.index({ 'wallet.balance': -1 });
-userSchema.index({ wallet_balance: -1 }); // OLD schema index
-userSchema.index({ balance: -1 }); // OLD schema index
+userSchema.index({ wallet_balance: -1 });
+userSchema.index({ balance: -1 });
 userSchema.index({ 'stats.rank_score': -1 });
-userSchema.index({ level: -1 }); // OLD schema index
-userSchema.index({ 'progression.current': -1 }); // NEW schema index
+userSchema.index({ level: -1 });
+userSchema.index({ 'progression.current': -1 });
 userSchema.index({ 'referral.code': 1 });
 userSchema.index({ account_status: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ 'metadata.last_active': -1 });
 
-// ==================== 🔥 MIDDLEWARE ====================
-
 userSchema.pre('save', async function(next) {
   try {
-    // 🔄 SYNC OLD AND NEW SCHEMA DATA
     this.syncSchemaData();
     
-    // Generate referral code if not exists
     if (!this.referral?.code) {
       this.referral = this.referral || {};
       this.referral.code = this.generateReferralCode();
     }
 
-    // Calculate win rate from both schemas
     this.calculateWinRate();
     
-    // Calculate KD ratio
     this.calculateKDRatio();
     
-    // Update rank based on score
     if (this.stats?.rank_score) {
       this.stats.highest_rank = this.calculateRank(this.stats.rank_score);
     }
 
-    // Hash password if modified
     if (this.isModified('password')) {
       this.password = await bcrypt.hash(this.password, 12);
       this.password_changed_at = Date.now() - 1000;
@@ -677,56 +646,47 @@ userSchema.pre('save', async function(next) {
 });
 
 userSchema.pre(/^find/, function(next) {
-  // Always exclude sensitive fields
   this.select('-__v -password -password_reset_token -password_reset_expires -email_verification_token -email_verification_expires -security.two_factor_secret');
   next();
 });
 
-// ==================== 🔥 INSTANCE METHODS ====================
-
-// 🔄 Schema sync method
 userSchema.methods.syncSchemaData = function() {
-  // Sync wallet data
-  if (this.wallet_balance !== undefined) {
+  if (this.wallet?.balance !== undefined) {
+    this.wallet_balance = this.wallet.balance;
+    this.balance = this.wallet.balance;
+  } else if (this.wallet_balance !== undefined) {
     this.wallet = this.wallet || {};
     this.wallet.balance = this.wallet_balance;
-  } else if (this.wallet?.balance !== undefined) {
-    this.wallet_balance = this.wallet.balance;
   }
   
-  // Sync balance field (old schema)
-  if (this.balance !== undefined && this.wallet_balance === undefined) {
-    this.wallet_balance = this.balance;
-  }
-  
-  // Sync level data
-  if (this.level !== undefined) {
+  if (this.progression?.current !== undefined) {
+    this.level = this.progression.current;
+  } else if (this.level !== undefined) {
     this.progression = this.progression || {};
     this.progression.current = this.level;
-  } else if (this.progression?.current !== undefined) {
-    this.level = this.progression.current;
   }
   
-  // Sync experience data
-  if (this.experience !== undefined) {
+  if (this.progression?.experience !== undefined) {
+    this.experience = this.progression.experience;
+  } else if (this.experience !== undefined) {
     this.progression = this.progression || {};
     this.progression.experience = this.experience;
-  } else if (this.progression?.experience !== undefined) {
-    this.experience = this.progression.experience;
   }
   
-  // Sync matches data
-  if (this.matches_played !== undefined) {
+  if (this.stats?.matches_played !== undefined) {
+    this.matches_played = this.stats.matches_played;
+  } else if (this.matches_played !== undefined) {
     this.stats = this.stats || {};
     this.stats.matches_played = this.matches_played;
   }
   
-  if (this.matches_won !== undefined) {
+  if (this.stats?.matches_won !== undefined) {
+    this.matches_won = this.stats.matches_won;
+  } else if (this.matches_won !== undefined) {
     this.stats = this.stats || {};
     this.stats.matches_won = this.matches_won;
   }
   
-  // Sync total earnings
   if (this.total_earnings !== undefined && this.wallet) {
     this.wallet.total_earned = this.total_earnings;
   }
@@ -773,7 +733,7 @@ userSchema.methods.createPasswordResetToken = function() {
     .update(resetToken)
     .digest('hex');
     
-  this.password_reset_expires = Date.now() + 10 * 60 * 1000; // 10 minutes
+  this.password_reset_expires = Date.now() + 10 * 60 * 1000;
   
   return resetToken;
 };
@@ -786,7 +746,7 @@ userSchema.methods.createEmailVerificationToken = function() {
     .update(verificationToken)
     .digest('hex');
     
-  this.email_verification_expires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  this.email_verification_expires = Date.now() + 24 * 60 * 60 * 1000;
   
   return verificationToken;
 };
@@ -829,7 +789,6 @@ userSchema.methods.addLoginHistory = function(ip, userAgent, location, successfu
     successful: successful
   });
   
-  // Keep only last 50 login attempts
   if (this.security.login_history.length > 50) {
     this.security.login_history = this.security.login_history.slice(0, 50);
   }
@@ -848,48 +807,84 @@ userSchema.methods.getFormattedUser = function() {
     avatar: this.avatar,
     role: this.role,
     
-    // Unified wallet data
     wallet_balance: this.current_balance,
     wallet: {
       balance: this.current_balance,
       total_earned: this.wallet?.total_earned || this.total_earnings || 0,
       total_deposited: this.wallet?.total_deposited || 0,
-      total_withdrawn: this.wallet?.total_withdrawn || 0
+      total_withdrawn: this.wallet?.total_withdrawn || 0,
+      total_won: this.wallet?.total_won || 0,
+      total_lost: this.wallet?.total_lost || 0,
+      last_transaction: this.wallet?.last_transaction,
+      transaction_count: this.wallet?.transaction_count || 0
     },
     
-    // Unified level data
     level: this.current_level,
     experience: this.current_experience,
     progression: this.progression || {
       current: this.current_level,
       experience: this.current_experience,
-      next_level_xp: 1000
+      next_level_xp: 1000,
+      badges: [],
+      achievements: []
     },
     
-    // Unified stats
     matches_played: this.total_matches_played,
     matches_won: this.total_matches_won,
-    stats: this.stats || {},
+    stats: {
+      ...this.stats,
+      matches_played: this.total_matches_played,
+      matches_won: this.total_matches_won,
+      matches_lost: this.stats?.matches_lost || 0,
+      win_rate: this.stats?.win_rate || 0,
+      rank_score: this.stats?.rank_score || 1000,
+      highest_rank: this.stats?.highest_rank || 'Bronze V'
+    },
     
-    // Status
-    is_verified: this.is_verified,
-    is_active: this.is_active,
-    account_status: this.account_status,
+    favorite_game: this.gaming?.favorite_game || this.favorite_game || 'Free Fire',
+    gaming: this.gaming || {
+      favorite_game: this.favorite_game || 'Free Fire',
+      favorite_mode: 'Ranked',
+      preferred_device: 'mobile',
+      play_style: 'balanced',
+      squad_preference: 'squad'
+    },
     
-    // Virtuals
+    social: this.social || {},
+    
+    is_verified: this.is_verified || this.verification?.email_verified || false,
+    is_active: this.is_active !== false,
+    account_status: this.account_status || 'active',
+    
+    settings: this.settings || {},
+    
+    verification: this.verification || {
+      email_verified: this.is_verified || false,
+      phone_verified: false,
+      kyc_verified: false,
+      kyc_level: 'none'
+    },
+    
     win_percentage: this.win_percentage,
     profile_completion: this.profile_completion,
     is_authenticated: this.is_authenticated,
+    full_name: this.full_name,
     
-    // Timestamps
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
-    last_active: this.metadata?.last_active
+    last_active: this.metadata?.last_active,
+    
+    referral: this.referral || {
+      code: this.generateReferralCode(),
+      total_referrals: 0,
+      referral_earnings: 0
+    },
+    
+    metadata: this.metadata || {}
   };
 };
 
 userSchema.methods.updateWallet = async function(amount, type) {
-  // Ensure wallet exists
   this.wallet = this.wallet || {};
   
   const update = {};
@@ -919,11 +914,14 @@ userSchema.methods.updateWallet = async function(amount, type) {
   update['wallet.last_transaction'] = new Date();
   update['wallet.transaction_count'] = (this.wallet.transaction_count || 0) + 1;
   
-  // Apply updates
   Object.assign(this.wallet, update);
   
-  // Sync with old schema
   this.wallet_balance = this.wallet.balance;
+  this.balance = this.wallet.balance;
+  
+  if (type === 'win') {
+    this.total_earnings = (this.total_earnings || 0) + amount;
+  }
   
   return this.save({ validateBeforeSave: false });
 };
@@ -944,8 +942,6 @@ userSchema.methods.unlockAccount = function() {
   this.security.lock_until = undefined;
   return this.save({ validateBeforeSave: false });
 };
-
-// ==================== 🔥 STATIC METHODS ====================
 
 userSchema.statics.findByEmailOrUsername = function(identifier) {
   return this.findOne({
@@ -970,8 +966,6 @@ userSchema.statics.getLeaderboard = async function(limit = 100, sortBy = 'rank_s
     .lean();
 };
 
-// ==================== 🔥 HELPER FUNCTIONS ====================
-
 userSchema.methods.calculateRank = function(score) {
   if (score >= 2500) return 'Grandmaster';
   if (score >= 2200) return 'Master';
@@ -981,8 +975,6 @@ userSchema.methods.calculateRank = function(score) {
   if (score >= 1000) return 'Silver';
   return 'Bronze';
 };
-
-// ==================== 🔥 COMPOUND INDEXES ====================
 
 userSchema.index({
   'stats.rank_score': -1,
