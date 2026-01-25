@@ -3,7 +3,6 @@ const router = express.Router();
 const User = require('../models/User');
 const { auth } = require('../middleware/auth');
 
-// Get user profile
 router.get('/:id', auth, async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
@@ -16,16 +15,17 @@ router.get('/:id', auth, async (req, res) => {
       });
     }
     
+    const formattedUser = user.getFormattedUser ? user.getFormattedUser() : user;
+    
     res.json({
       success: true,
-      data: user
+      data: formattedUser
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// Update user profile
 router.put('/:id', auth, async (req, res) => {
   try {
     if (req.user.userId !== req.params.id && req.user.role !== 'admin') {
@@ -41,17 +41,18 @@ router.put('/:id', auth, async (req, res) => {
       { new: true }
     ).select('-password');
     
+    const formattedUser = user.getFormattedUser ? user.getFormattedUser() : user;
+    
     res.json({
       success: true,
       message: 'Profile updated',
-      data: user
+      data: formattedUser
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// Get user stats
 router.get('/:id/stats', auth, async (req, res) => {
   try {
     const Match = require('../models/Match');
@@ -62,11 +63,28 @@ router.get('/:id/stats', auth, async (req, res) => {
       Tournament.countDocuments({ 'participants.user': req.params.id })
     ]);
     
+    const user = await User.findById(req.params.id).select('stats matches_played matches_won');
+    
+    let winRate = 0;
+    if (user) {
+      const matchesPlayed = user.stats?.matches_played || user.matches_played || 0;
+      const matchesWon = user.stats?.matches_won || user.matches_won || 0;
+      if (matchesPlayed > 0) {
+        winRate = (matchesWon / matchesPlayed) * 100;
+      }
+    }
+    
     res.json({
       success: true,
       data: {
         totalMatches: matches,
-        totalTournaments: tournaments
+        totalTournaments: tournaments,
+        winRate: winRate.toFixed(2),
+        userStats: user?.stats || {
+          matches_played: user?.matches_played || 0,
+          matches_won: user?.matches_won || 0,
+          win_rate: winRate.toFixed(2)
+        }
       }
     });
   } catch (error) {
