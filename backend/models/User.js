@@ -653,7 +653,7 @@ userSchema.pre(/^find/, function(next) {
 userSchema.methods.syncSchemaData = function() {
   if (this.wallet?.balance !== undefined) {
     this.wallet_balance = this.wallet.balance;
-    this.balance = this.wallet.balance;
+   // this.balance = this.wallet.balance;
   } else if (this.wallet_balance !== undefined) {
     this.wallet = this.wallet || {};
     this.wallet.balance = this.wallet_balance;
