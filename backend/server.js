@@ -1,4 +1,3 @@
-// server.js - XOSS GAMING COMPLETE API SERVER WITH 150+ ENDPOINTS
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -10,19 +9,16 @@ require('./config/redis');
 const connectDB = require('./config/database');
 const app = express();
 
-// ✅ Connect MongoDB FIRST, then start server
 const startServer = async () => {
   try {
     console.log('🚀 Starting XOSS Gaming Ultimate Server...');
     console.log('🔗 Connecting to MongoDB...');
 
-    // Connect to database
     await connectDB();
     console.log('✅ Database connected successfully!');
 
     console.log('🛠️ Setting up server middleware...');
 
-    // ✅ Professional Middleware Stack
     app.use(cors({
       origin: '*',
       credentials: true,
@@ -31,10 +27,7 @@ const startServer = async () => {
     }));
     app.use(express.json({ limit: '50mb' }));
     app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-    // app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); // 🔧 Commented out
-    // app.use('/public', express.static(path.join(__dirname, 'public'))); // 🔧 Commented out
 
-    // ✅ Security Headers Middleware
     app.use((req, res, next) => {
       res.header('X-Content-Type-Options', 'nosniff');
       res.header('X-Frame-Options', 'DENY');
@@ -43,11 +36,10 @@ const startServer = async () => {
       next();
     });
 
-    // ✅ Rate Limiting Middleware
     const rateLimit = require('express-rate-limit');
     const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 1000, // limit each IP to 1000 requests per windowMs
+      windowMs: 15 * 60 * 1000,
+      max: 1000,
       message: {
         success: false,
         message: 'Too many requests, please try again later.'
@@ -55,36 +47,24 @@ const startServer = async () => {
     });
     app.use('/api/', limiter);
 
-    // ✅ Request Logging Middleware
     app.use((req, res, next) => {
       const timestamp = new Date().toISOString();
       console.log(`📨 ${timestamp} ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
       next();
     });
 
-    // ====================
-    // ✅ ALL API ROUTES
-    // ====================
-
     console.log('🔄 Loading ALL API routes...');
 
-    // 1. ✅ AUTHENTICATION ROUTES
     app.use('/api/auth', require('./routes/auth'));
-
-    // 2. ✅ USER MANAGEMENT ROUTES
     app.use('/api/users', require('./routes/users'));
     app.use('/api/profile', require('./routes/profile'));
     app.use('/api/referrals', require('./routes/referrals'));
-
-    // 3. ✅ WALLET & FINANCE ROUTES
     app.use('/api/wallet', require('./routes/wallet'));
     app.use('/api/deposits', require('./routes/deposits'));
     app.use('/api/withdrawals', require('./routes/withdrawals'));
     app.use('/api/transactions', require('./routes/transactions'));
     app.use('/api/payments', require('./routes/payments'));
     app.use('/api/prizes', require('./routes/prizeRoutes'));
-
-    // 4. ✅ GAMING ROUTES
     app.use('/api/matches', require('./routes/matches'));
     app.use('/api/tournaments', require('./routes/tournaments'));
     app.use('/api/events', require('./routes/events'));
@@ -93,44 +73,16 @@ const startServer = async () => {
     app.use('/api/results', require('./routes/resultRoutes'));
     app.use('/api/leaderboard', require('./routes/leaderboard'));
     app.use('/api/winners', require('./routes/winners'));
-
-    // 5. ✅ SOCIAL & COMMUNICATION ROUTES
     app.use('/api/notifications', require('./routes/notifications'));
     app.use('/api/chat', require('./routes/chat'));
     app.use('/api/friends', require('./routes/friends'));
     app.use('/api/invites', require('./routes/invites'));
-    // app.use('/api/support', require('./routes/support')); // 🔧 Commented out due to nodemailer dependency
-
-    // 6. ✅ CONTENT ROUTES - ALL COMMENTED OUT
-    // app.use('/api/posts', require('./routes/posts')); // 🔧 Commented out due to helpers dependency
-    // app.use('/api/comments', require('./routes/comments')); // 🔧 Commented out
-    // app.use('/api/likes', require('./routes/likes')); // 🔧 Commented out
-    // app.use('/api/media', require('./routes/media')); // 🔧 Commented out
-
-    // 7. ✅ ADMIN ROUTES - MOST COMMENTED OUT
-    // app.use('/api/admin', require('./routes/admin')); // 🔧 Commented out due to adminController dependency
-    // app.use('/api/admin/matches', require('./routes/admin/matches'));
-    // app.use('/api/admin/tournaments', require('./routes/admin/tournaments'));
-    // app.use('/api/admin/withdrawals', require('./routes/admin/withdrawals'));
-    // app.use('/api/admin/users', require('./routes/admin/users'));
-    // app.use('/api/admin/reports', require('./routes/admin/reports'));
-    // app.use('/api/admin/dashboard', require('./routes/adminDashboard')); // 🔧 Commented out
-
-    // 8. ✅ SYSTEM ROUTES
     app.use('/api/system', require('./routes/system'));
     app.use('/api/analytics', require('./routes/analytics'));
     app.use('/api/settings', require('./routes/settings'));
 
-    // 9. ✅ UTILITY ROUTES
-    // app.use('/api/utility', require('./routes/utility'));
-
-    // ====================
-    // ✅ DIRECT ENDPOINTS
-    // ====================
-
     console.log('✅ All routes loaded successfully!');
 
-    // ✅ ROOT ENDPOINT
     app.get('/', (req, res) => {
       res.json({
         success: true,
@@ -141,7 +93,7 @@ const startServer = async () => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'production',
         endpoints: {
-          total: 126, // 🔧 Updated from 151 to 126
+          total: 126,
           categories: [
             'Authentication (12 endpoints)',
             'Users & Profile (15 endpoints)',
@@ -158,7 +110,6 @@ const startServer = async () => {
       });
     });
 
-    // ✅ HEALTH CHECK
     app.get('/api/health', (req, res) => {
       const dbStatus = mongoose.connection.readyState;
       const statusMap = {
@@ -177,13 +128,12 @@ const startServer = async () => {
         memory: process.memoryUsage(),
         uptime: process.uptime(),
         endpoints: {
-          total: 126, // 🔧 Updated from 151 to 126
+          total: 126,
           working: 126
         }
       });
     });
 
-    // ✅ DATABASE STATUS
     app.get('/api/db-status', (req, res) => {
       const dbStatus = mongoose.connection.readyState;
       const statusMap = {
@@ -207,7 +157,6 @@ const startServer = async () => {
       });
     });
 
-    // ✅ SYSTEM STATISTICS
     app.get('/api/system/stats', async (req, res) => {
       try {
         const Match = require('./models/Match');
@@ -284,12 +233,10 @@ const startServer = async () => {
       }
     });
 
-    // ✅ DIRECT TOURNAMENTS ENDPOINT - THIS IS WHAT I ADDED
     app.get('/api/tournaments', async (req, res) => {
       try {
         console.log('📡 GET /api/tournaments requested (Direct Endpoint)');
         
-        // Query parameters
         const { 
           status, 
           type, 
@@ -300,7 +247,6 @@ const startServer = async () => {
           sortOrder = 'asc'
         } = req.query;
         
-        // Build filter object
         const filter = {};
         
         if (status) {
@@ -315,15 +261,12 @@ const startServer = async () => {
           filter.game = game;
         }
         
-        // Only show active tournaments by default
         if (!status) {
           filter.status = { $in: ['upcoming', 'live', 'completed'] };
         }
         
-        // Calculate pagination
         const skip = (parseInt(page) - 1) * parseInt(limit);
         
-        // Fetch tournaments
         const Tournament = require('./models/Tournament');
         const tournaments = await Tournament.find(filter)
           .populate('creator', 'name username avatar')
@@ -333,10 +276,8 @@ const startServer = async () => {
           .limit(parseInt(limit))
           .lean();
         
-        // Get total count
         const total = await Tournament.countDocuments(filter);
         
-        // Calculate available slots for each tournament
         const tournamentsWithSlots = tournaments.map(tournament => ({
           ...tournament,
           available_slots: tournament.max_participants - tournament.participants.length,
@@ -378,7 +319,6 @@ const startServer = async () => {
       }
     });
 
-    // ✅ API DOCUMENTATION
     app.get('/api/docs', (req, res) => {
       const endpoints = {
         authentication: [
@@ -478,7 +418,7 @@ const startServer = async () => {
           'POST /api/matches/admin/reject/:id'
         ],
         tournaments: [
-          'GET /api/tournaments', // THIS IS NOW ADDED
+          'GET /api/tournaments',
           'GET /api/tournaments/:id',
           'POST /api/tournaments',
           'PUT /api/tournaments/:id',
@@ -567,21 +507,18 @@ const startServer = async () => {
         success: true,
         message: '📚 XOSS Gaming API Documentation',
         version: '4.0.0',
-        total_endpoints: 127, // 🔧 Updated from 126 to 127 (1 added)
+        total_endpoints: 127,
         base_url: 'https://xoss.onrender.com/api',
         endpoints: endpoints
       });
     });
 
-    // ✅ GET ALL ENDPOINTS
     app.get('/api/endpoints', (req, res) => {
       const endpoints = [];
       
-      // Collect all registered routes
       const collectRoutes = (stack, basePath = '') => {
         stack.forEach((middleware) => {
           if (middleware.route) {
-            // Routes registered directly on the app
             const methods = Object.keys(middleware.route.methods);
             endpoints.push({
               path: basePath + middleware.route.path,
@@ -589,7 +526,6 @@ const startServer = async () => {
               type: 'direct'
             });
           } else if (middleware.name === 'router' && middleware.handle.stack) {
-            // Routes registered via router
             const routerPath = middleware.regexp.toString()
               .replace('/^', '')
               .replace('\\/?(?=\\/|$)/i', '')
@@ -612,7 +548,6 @@ const startServer = async () => {
       });
     });
 
-    // ✅ TEST ALL ENDPOINTS
     app.get('/api/test/all', async (req, res) => {
       try {
         const endpoints = [
@@ -685,7 +620,6 @@ const startServer = async () => {
       }
     });
 
-    // ✅ UTILITY ENDPOINTS
     app.get('/api/utility/status', (req, res) => {
       res.json({
         success: true,
@@ -704,7 +638,7 @@ const startServer = async () => {
         codename: 'Ultimate Edition',
         release_date: '2024',
         features: [
-          '127+ API Endpoints', // 🔧 Updated from 126 to 127
+          '127+ API Endpoints',
           'Real-time Gaming System',
           'Wallet & Payment Integration',
           'Admin Dashboard',
@@ -716,7 +650,6 @@ const startServer = async () => {
       });
     });
 
-    // ✅ ERROR HANDLING
     app.use('*', (req, res) => {
       res.status(404).json({
         success: false,
@@ -728,7 +661,6 @@ const startServer = async () => {
       });
     });
 
-    // ✅ ERROR HANDLING MIDDLEWARE
     app.use((err, req, res, next) => {
       console.error('💥 Server Error:', err);
 
@@ -762,10 +694,6 @@ const startServer = async () => {
       });
     });
 
-    // ====================
-    // ✅ START SERVER
-    // ====================
-
     const PORT = process.env.PORT || 5000;
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('\n' + '='.repeat(70));
@@ -788,12 +716,11 @@ const startServer = async () => {
       console.log('   👑 Admin Panel (4 endpoints)');
       console.log('   ⚙️ System & Utility (15 endpoints)');
       console.log('='.repeat(70));
-      console.log('🚀 Server ready! Total endpoints: 127'); // 🔧 Updated from 126 to 127
+      console.log('🚀 Server ready! Total endpoints: 127');
       console.log('📚 Documentation: https://xoss.onrender.com/api/docs');
       console.log('='.repeat(70));
     });
 
-    // ✅ GRACEFUL SHUTDOWN HANDLERS
     const gracefulShutdown = async (signal) => {
       console.log(`\n⚠️ Received ${signal}. Starting graceful shutdown...`);
       
@@ -833,5 +760,4 @@ const startServer = async () => {
   }
 };
 
-// ✅ Start the server
 startServer();
