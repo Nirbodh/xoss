@@ -658,7 +658,7 @@ userSchema.methods.syncSchemaData = function() {
    // else if (this.wallet_balance !== undefined) {
    // this.wallet = this.wallet || {};
    // this.wallet.balance = this.wallet_balance;
-  }
+// }
   
   if (this.progression?.current !== undefined) {
     this.level = this.progression.current;
