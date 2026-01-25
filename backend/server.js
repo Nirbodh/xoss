@@ -4,9 +4,9 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
-require('./config/redis');
 
 const connectDB = require('./config/database');
+const { auth, adminAuth, optionalAuth } = require('./middleware/auth'); // ✅ IMPORT AUTH
 const app = express();
 
 const startServer = async () => {
@@ -56,30 +56,30 @@ const startServer = async () => {
     console.log('🔄 Loading ALL API routes...');
 
     app.use('/api/auth', require('./routes/auth'));
-    app.use('/api/users', require('./routes/users'));
-    app.use('/api/profile', require('./routes/profile'));
-    app.use('/api/referrals', require('./routes/referrals'));
-    app.use('/api/wallet', require('./routes/wallet'));
-    app.use('/api/deposits', require('./routes/deposits'));
-    app.use('/api/withdrawals', require('./routes/withdrawals'));
-    app.use('/api/transactions', require('./routes/transactions'));
-    app.use('/api/payments', require('./routes/payments'));
-    app.use('/api/prizes', require('./routes/prizeRoutes'));
-    app.use('/api/matches', require('./routes/matches'));
-    app.use('/api/tournaments', require('./routes/tournaments'));
-    app.use('/api/events', require('./routes/events'));
-    app.use('/api/games', require('./routes/games'));
-    app.use('/api/rooms', require('./routes/rooms'));
-    app.use('/api/results', require('./routes/resultRoutes'));
-    app.use('/api/leaderboard', require('./routes/leaderboard'));
-    app.use('/api/winners', require('./routes/winners'));
-    app.use('/api/notifications', require('./routes/notifications'));
-    app.use('/api/chat', require('./routes/chat'));
-    app.use('/api/friends', require('./routes/friends'));
-    app.use('/api/invites', require('./routes/invites'));
-    app.use('/api/system', require('./routes/system'));
-    app.use('/api/analytics', require('./routes/analytics'));
-    app.use('/api/settings', require('./routes/settings'));
+    app.use('/api/users', auth, require('./routes/users')); // ✅ PROTECTED
+    app.use('/api/profile', auth, require('./routes/profile')); // ✅ PROTECTED
+    app.use('/api/referrals', auth, require('./routes/referrals')); // ✅ PROTECTED
+    app.use('/api/wallet', auth, require('./routes/wallet')); // ✅ PROTECTED
+    app.use('/api/deposits', auth, require('./routes/deposits')); // ✅ PROTECTED
+    app.use('/api/withdrawals', auth, require('./routes/withdrawals')); // ✅ PROTECTED
+    app.use('/api/transactions', auth, require('./routes/transactions')); // ✅ PROTECTED
+    app.use('/api/payments', auth, require('./routes/payments')); // ✅ PROTECTED
+    app.use('/api/prizes', auth, require('./routes/prizeRoutes')); // ✅ PROTECTED
+    app.use('/api/matches', optionalAuth, require('./routes/matches')); // ✅ OPTIONAL AUTH
+    app.use('/api/tournaments', auth, require('./routes/tournaments')); // ✅ PROTECTED
+    app.use('/api/events', auth, require('./routes/events')); // ✅ PROTECTED
+    app.use('/api/games', optionalAuth, require('./routes/games')); // ✅ OPTIONAL AUTH
+    app.use('/api/rooms', auth, require('./routes/rooms')); // ✅ PROTECTED
+    app.use('/api/results', auth, require('./routes/resultRoutes')); // ✅ PROTECTED
+    app.use('/api/leaderboard', optionalAuth, require('./routes/leaderboard')); // ✅ OPTIONAL AUTH
+    app.use('/api/winners', auth, require('./routes/winners')); // ✅ PROTECTED
+    app.use('/api/notifications', auth, require('./routes/notifications')); // ✅ PROTECTED
+    app.use('/api/chat', auth, require('./routes/chat')); // ✅ PROTECTED
+    app.use('/api/friends', auth, require('./routes/friends')); // ✅ PROTECTED
+    app.use('/api/invites', auth, require('./routes/invites')); // ✅ PROTECTED
+    app.use('/api/system', auth, require('./routes/system')); // ✅ PROTECTED
+    app.use('/api/analytics', adminAuth, require('./routes/analytics')); // ✅ ADMIN ONLY
+    app.use('/api/settings', auth, require('./routes/settings')); // ✅ PROTECTED
 
     console.log('✅ All routes loaded successfully!');
 
@@ -157,8 +157,10 @@ const startServer = async () => {
       });
     });
 
-    app.get('/api/system/stats', async (req, res) => {
+    app.get('/api/system/stats', auth, async (req, res) => { // ✅ PROTECTED
       try {
+        console.log('📊 System stats requested by:', req.user.email);
+        
         const Match = require('./models/Match');
         const Tournament = require('./models/Tournament');
         const User = require('./models/User');
@@ -233,9 +235,16 @@ const startServer = async () => {
       }
     });
 
-    app.get('/api/tournaments', async (req, res) => {
+    // ✅ DIRECT TOURNAMENTS ENDPOINT - PROTECTED WITH AUTH
+    app.get('/api/tournaments', auth, async (req, res) => {
       try {
-        console.log('📡 GET /api/tournaments requested (Direct Endpoint)');
+        console.log('📡 GET /api/tournaments requested (Protected Endpoint)');
+        console.log('👤 Authenticated user:', {
+          userId: req.user?.userId,
+          role: req.user?.role,
+          email: req.user?.email,
+          username: req.user?.username
+        });
         
         const { 
           status, 
