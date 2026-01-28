@@ -43,13 +43,13 @@ router.delete('/:id/delete', auth, tournamentController.deleteTournament);
 router.post('/:id/join/free', auth, tournamentController.joinTournament);
 
 // ✅ JOIN tournament WITH PAYMENT
-router.post('/:id/join/paid', auth, tournamentController.joinTournamentWithPayment);
+router.post('/:id/join-with-payment', auth, tournamentController.joinTournamentWithPayment);
 
 // ✅ LEAVE tournament
 router.post('/:id/leave', auth, tournamentController.leaveTournament);
 
 // ✅ GET user tournaments
-router.get('/user/my-tournaments', auth, tournamentController.getUserTournaments);
+router.get('/user/tournaments', auth, tournamentController.getUserTournaments);
 
 // ✅ GET tournament participants
 router.get('/:id/participants/list', auth, tournamentController.getTournamentParticipants);
