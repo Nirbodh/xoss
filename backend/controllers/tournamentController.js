@@ -1,4 +1,4 @@
-// controllers/tournamentController.js - COMPLETE FIXED VERSION
+// controllers/tournamentController.js - COMPLETE FIXED VERSION WITH ALL FEATURES
 const Tournament = require('../models/Tournament');
 const mongoose = require('mongoose');
 const { Wallet, Transaction } = require('../models/Wallet');
@@ -11,6 +11,7 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 // Constants
 const TOURNAMENT_CACHE_TTL = 60;
+const TOURNAMENT_DETAILS_CACHE_TTL = 300;
 const TOURNAMENT_RATE_LIMIT = {
   CREATE: 5,
   JOIN: 10
@@ -235,23 +236,33 @@ const generateTournamentsCacheKey = (query, user) => {
 
 // 🔥 HELPER: Clear tournaments cache
 const clearTournamentsCache = async () => {
-  const keys = await redis.keys('tournaments:*');
-  if (keys.length > 0) {
-    await redis.del(...keys);
-    console.log('🧹 Cleared tournaments cache');
+  try {
+    const keys = await redis.keys('tournaments:*');
+    if (keys.length > 0) {
+      await redis.del(...keys);
+      console.log('🧹 Cleared tournaments cache');
+    }
+  } catch (error) {
+    console.error('❌ Clear tournaments cache error:', error);
   }
 };
 
 // 🔥 HELPER: Clear tournament related caches
 const clearTournamentRelatedCaches = async (tournamentId, userId) => {
-  const keys = [
-    `tournament:${tournamentId}`,
-    `user_tournaments:${userId}`,
-    ...(await redis.keys('tournaments:*'))
-  ];
-  
-  if (keys.length > 0) {
-    await redis.del(...keys);
+  try {
+    const keys = [
+      `tournament:${tournamentId}`,
+      `tournament:${tournamentId}:details`,
+      `tournament:${tournamentId}:participants`,
+      `user_tournaments:${userId}`,
+      ...(await redis.keys('tournaments:*'))
+    ];
+    
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch (error) {
+    console.error('❌ Clear tournament caches error:', error);
   }
 };
 
@@ -312,6 +323,56 @@ const isUserAlreadyJoined = (participants, userId) => {
   ) || false;
 };
 
+// 🔥 HELPER: Create transaction record
+const createTransactionRecord = async (userId, type, amount, description, referenceId, metadata = {}, session = null) => {
+  try {
+    const transactionData = {
+      user_id: userId,
+      type: type,
+      amount: amount,
+      description: description,
+      status: 'completed',
+      reference_id: referenceId,
+      metadata: metadata,
+      timestamp: new Date()
+    };
+
+    if (session) {
+      return await Transaction.create([transactionData], { session });
+    } else {
+      return await Transaction.create([transactionData]);
+    }
+  } catch (error) {
+    console.error('❌ Transaction creation error:', error);
+    throw error;
+  }
+};
+
+// 🔥 HELPER: Create notification
+const createNotification = async (userId, type, title, message, data = {}, priority = 'medium', session = null) => {
+  try {
+    const notificationData = {
+      user_id: userId,
+      type: type,
+      title: title,
+      message: message,
+      data: data,
+      priority: priority,
+      read: false,
+      created_at: new Date()
+    };
+
+    if (session) {
+      return await Notification.create([notificationData], { session });
+    } else {
+      return await Notification.create([notificationData]);
+    }
+  } catch (error) {
+    console.error('❌ Notification creation error:', error);
+    // Don't throw error for notification failure
+  }
+};
+
 // 🔥 HELPER: Process tournament payment
 const processTournamentPayment = async (tournament, userId, body, session) => {
   const entryFee = tournament.entry_fee || 0;
@@ -364,22 +425,21 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
     wallet.last_activity = new Date();
     await wallet.save({ session });
 
-    const transaction = await Transaction.create([{
-      user_id: userId,
-      type: 'debit',
-      amount: entryFee,
-      description: `Tournament Entry Fee: ${tournament.title}`,
-      status: 'completed',
-      method: 'tournament_entry',
-      reference_id: tournament._id.toString(),
-      metadata: {
+    const transaction = await createTransactionRecord(
+      userId,
+      'debit',
+      entryFee,
+      `Tournament Entry Fee: ${tournament.title}`,
+      tournament._id,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         match_type: 'tournament',
         entry_fee: entryFee,
         game: tournament.game
-      }
-    }], { session });
+      },
+      session
+    );
 
     console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${wallet.balance}`);
 
@@ -411,6 +471,73 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
   }
 };
 
+// 🔥 HELPER: Process revenue sharing
+const processRevenueSharing = async (tournament, joinerId, joinerUsername, entryFee, session) => {
+  try {
+    const creatorId = tournament.created_by;
+    
+    // Check if creator is not admin and not joining themselves
+    if (creatorId.toString() !== joinerId.toString()) {
+      const creator = await User.findById(creatorId).session(session);
+      
+      if (creator && creator.role !== 'admin') {
+        const revenueShare = entryFee * 0.10; // 10% revenue
+        
+        // Update creator's wallet
+        const creatorWallet = await Wallet.findOne({ user_id: creatorId }).session(session);
+        if (creatorWallet) {
+          creatorWallet.balance += revenueShare;
+          creatorWallet.total_earned += revenueShare;
+          creatorWallet.last_activity = new Date();
+          await creatorWallet.save({ session });
+
+          // Transaction record for creator
+          await createTransactionRecord(
+            creatorId,
+            'credit',
+            revenueShare,
+            `10% revenue from ${joinerUsername} joining your tournament: ${tournament.title}`,
+            tournament._id,
+            {
+              tournament_id: tournament._id,
+              tournament_title: tournament.title,
+              from_user: joinerId,
+              revenue_type: 'creator_share',
+              percentage: 10
+            },
+            session
+          );
+
+          // Give 5 points to creator for each join
+          await User.findByIdAndUpdate(creatorId, {
+            $inc: { 
+              points: 5,
+              total_points_earned: 5
+            },
+            $push: {
+              points_history: {
+                type: 'player_join',
+                amount: 5,
+                description: `${joinerUsername} joined your tournament: ${tournament.title}`,
+                timestamp: new Date(),
+                reference_id: tournament._id
+              }
+            }
+          }).session(session);
+
+          console.log(`💰 Creator ${creatorId} received 10% revenue: ${revenueShare} and 5 points`);
+          
+          return revenueShare;
+        }
+      }
+    }
+    return 0;
+  } catch (error) {
+    console.error('❌ Revenue sharing error:', error);
+    throw error;
+  }
+};
+
 // 🔥 HELPER: Update tournament stats
 const updateTournamentStats = (tournament, participant) => {
   if (!tournament.stats) {
@@ -428,12 +555,12 @@ const updateTournamentStats = (tournament, participant) => {
 // 🔥 HELPER: Create join notification
 const createJoinNotification = async (tournament, user, session) => {
   try {
-    await Notification.create([{
-      user_id: tournament.created_by,
-      type: 'participant_joined',
-      title: 'New Participant Joined',
-      message: `${user.username || 'A user'} joined your tournament "${tournament.title}"`,
-      data: {
+    await createNotification(
+      tournament.created_by,
+      'participant_joined',
+      'New Participant Joined',
+      `${user.username || 'A user'} joined your tournament "${tournament.title}"`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         participant_id: user.userId,
@@ -441,23 +568,25 @@ const createJoinNotification = async (tournament, user, session) => {
         entry_fee: tournament.entry_fee,
         current_participants: tournament.current_participants
       },
-      priority: 'medium'
-    }], { session });
+      'medium',
+      session
+    );
 
-    await Notification.create([{
-      user_id: user.userId,
-      type: 'tournament_joined',
-      title: 'Tournament Joined Successfully',
-      message: `You joined "${tournament.title}" successfully`,
-      data: {
+    await createNotification(
+      user.userId,
+      'tournament_joined',
+      'Tournament Joined Successfully',
+      `You joined "${tournament.title}" successfully`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         schedule_time: tournament.schedule_time,
         room_id: tournament.room_id,
         entry_fee: tournament.entry_fee
       },
-      priority: 'high'
-    }], { session });
+      'high',
+      session
+    );
 
   } catch (error) {
     console.error('❌ Notification creation error:', error);
@@ -622,12 +751,12 @@ const canUserCreateTournament = (user) => {
 // 🔥 HELPER: Create tournament approval notifications
 const createTournamentApprovalNotifications = async (tournament, admin, session) => {
   try {
-    await Notification.create([{
-      user_id: tournament.created_by,
-      type: 'tournament_approved',
-      title: 'Tournament Approved!',
-      message: `Your tournament "${tournament.title}" has been approved by admin`,
-      data: {
+    await createNotification(
+      tournament.created_by,
+      'tournament_approved',
+      'Tournament Approved!',
+      `Your tournament "${tournament.title}" has been approved by admin`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         approved_by: admin.username,
@@ -635,26 +764,28 @@ const createTournamentApprovalNotifications = async (tournament, admin, session)
         start_time: tournament.start_time,
         prize_pool: tournament.total_prize
       },
-      priority: 'high'
-    }], { session });
+      'high',
+      session
+    );
 
     if (tournament.participants && tournament.participants.length > 0) {
-      const participantNotifications = tournament.participants.map(participant => ({
-        user_id: participant.user,
-        type: 'tournament_go_live',
-        title: 'Tournament is Live!',
-        message: `Tournament "${tournament.title}" is now live and starting soon`,
-        data: {
-          tournament_id: tournament._id,
-          tournament_title: tournament.title,
-          start_time: tournament.start_time,
-          room_id: tournament.room_id,
-          check_in_required: tournament.check_in_required
-        },
-        priority: 'high'
-      }));
-      
-      await Notification.insertMany(participantNotifications, { session });
+      for (const participant of tournament.participants) {
+        await createNotification(
+          participant.user,
+          'tournament_go_live',
+          'Tournament is Live!',
+          `Tournament "${tournament.title}" is now live and starting soon`,
+          {
+            tournament_id: tournament._id,
+            tournament_title: tournament.title,
+            start_time: tournament.start_time,
+            room_id: tournament.room_id,
+            check_in_required: tournament.check_in_required
+          },
+          'high',
+          session
+        );
+      }
     }
 
   } catch (error) {
@@ -687,22 +818,21 @@ const notifyParticipants = async (tournament, eventType, session) => {
     const template = messageTemplates[eventType];
     if (!template) return;
 
-    const notifications = tournament.participants.map(participant => ({
-      user_id: participant.user,
-      type: `tournament_${eventType}`,
-      title: template.title,
-      message: template.message,
-      data: {
-        tournament_id: tournament._id,
-        tournament_title: tournament.title,
-        event_type: eventType,
-        timestamp: new Date()
-      },
-      priority: 'high'
-    }));
-
-    if (notifications.length > 0) {
-      await Notification.insertMany(notifications, { session });
+    for (const participant of tournament.participants) {
+      await createNotification(
+        participant.user,
+        `tournament_${eventType}`,
+        template.title,
+        template.message,
+        {
+          tournament_id: tournament._id,
+          tournament_title: tournament.title,
+          event_type: eventType,
+          timestamp: new Date()
+        },
+        'high',
+        session
+      );
     }
 
   } catch (error) {
@@ -1006,7 +1136,7 @@ exports.getTournaments = async (req, res) => {
       success: true,
       code: 'TOURNAMENTS_FETCHED',
       message: 'Tournaments fetched successfully',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -1098,7 +1228,7 @@ exports.getTournamentById = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_FETCHED',
       message: 'Tournament details fetched successfully',
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
       participants_info: {
         total: tournament.current_participants,
         max: tournament.max_participants,
@@ -1128,11 +1258,11 @@ exports.getTournamentById = async (req, res) => {
       timestamp: new Date().toISOString(),
       cache_info: {
         cached: false,
-        ttl: TOURNAMENT_CACHE_TTL
+        ttl: TOURNAMENT_DETAILS_CACHE_TTL
       }
     };
     
-    await redis.setex(cacheKey, TOURNAMENT_CACHE_TTL, JSON.stringify(response));
+    await redis.setex(cacheKey, TOURNAMENT_DETAILS_CACHE_TTL, JSON.stringify(response));
     
     res.json(response);
     
@@ -1269,7 +1399,7 @@ exports.searchTournaments = async (req, res) => {
       success: true,
       code: 'SEARCH_COMPLETED',
       message: 'Tournament search completed successfully',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       search_info: {
         query: query || '',
         filters: {
@@ -1338,7 +1468,7 @@ exports.getFeaturedTournaments = async (req, res) => {
       success: true,
       code: 'FEATURED_TOURNAMENTS_FETCHED',
       message: 'Featured tournaments fetched successfully',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       count: tournaments.length,
       featured_until: new Date(Date.now() + 24 * 60 * 60 * 1000),
       timestamp: new Date().toISOString(),
@@ -1400,7 +1530,7 @@ exports.getUpcomingTournaments = async (req, res) => {
       success: true,
       code: 'UPCOMING_TOURNAMENTS_FETCHED',
       message: 'Upcoming tournaments fetched successfully',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       count: tournaments.length,
       time_window: `${hours} hours`,
       next_update: new Date(Date.now() + 5 * 60 * 1000),
@@ -1682,17 +1812,56 @@ exports.createTournament = async (req, res) => {
       await createdTournament.populate('approved_by', 'username name');
     }
     
+    // ✅ GIVE POINTS TO CREATOR (5 points for tournament creation)
+    if (userRole !== 'admin') {
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 
+          points: 5,
+          total_points_earned: 5
+        },
+        $push: {
+          points_history: {
+            type: 'tournament_creation',
+            amount: 5,
+            description: `Created tournament: ${createdTournament.title}`,
+            timestamp: new Date(),
+            reference_id: createdTournament._id
+          }
+        }
+      }).session(session);
+      
+      console.log(`✅ ${req.user.username} received 5 points for creating tournament`);
+    }
+    
+    // Create notification for creator
+    await createNotification(
+      userId,
+      'tournament_created',
+      'Tournament Created Successfully',
+      userRole === 'admin' 
+        ? `Your tournament "${createdTournament.title}" has been created and auto-approved!` 
+        : `Your tournament "${createdTournament.title}" has been created! Waiting for admin approval.`,
+      {
+        tournament_id: createdTournament._id,
+        tournament_title: createdTournament.title,
+        status: createdTournament.approval_status,
+        prize_pool: createdTournament.total_prize || 0
+      },
+      'high',
+      session
+    );
+    
     if (userRole === 'user') {
       try {
         const adminUsers = await User.find({ role: { $in: ['admin', 'moderator'] } }).session(session);
         
         for (const admin of adminUsers) {
-          await Notification.create([{
-            user_id: admin._id,
-            type: 'tournament_pending',
-            title: 'New Tournament Pending Approval',
-            message: `New tournament "${createdTournament.title}" created by ${req.user.username || 'User'}`,
-            data: {
+          await createNotification(
+            admin._id,
+            'tournament_pending',
+            'New Tournament Pending Approval',
+            `New tournament "${createdTournament.title}" created by ${req.user.username || 'User'}`,
+            {
               tournament_id: createdTournament._id,
               tournament_title: createdTournament.title,
               created_by: userId,
@@ -1700,19 +1869,21 @@ exports.createTournament = async (req, res) => {
               prize_pool: createdTournament.total_prize,
               participants: createdTournament.max_participants
             },
-            priority: 'high'
-          }], { session });
+            'high',
+            session
+          );
         }
         console.log(`📢 Notifications sent to ${adminUsers.length} admins`);
       } catch (notifyError) {
-        console.error('❌ Notification creation error:', notifyError);
+        console.error('❌ Admin notification error:', notifyError);
       }
     }
     
+    // Clear cache
+    await clearTournamentsCache();
+    
     await session.commitTransaction();
     session.endSession();
-    
-    await clearTournamentsCache();
     
     console.log('✅ Tournament created successfully:', createdTournament._id);
     
@@ -1724,7 +1895,8 @@ exports.createTournament = async (req, res) => {
       message: userRole === 'user' 
         ? 'Tournament created successfully! Waiting for admin approval.' 
         : 'Tournament created and auto-approved successfully!',
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
+      points_awarded: userRole !== 'admin' ? 5 : 0,
       creator: {
         id: req.user.userId,
         username: req.user.username,
@@ -1871,6 +2043,27 @@ exports.updateTournament = async (req, res) => {
       await tournament.populate('approved_by', 'username name');
     }
     
+    // Notify participants about update
+    if (tournament.participants && tournament.participants.length > 0) {
+      for (const participant of tournament.participants) {
+        await createNotification(
+          participant.user,
+          'tournament_updated',
+          'Tournament Updated',
+          `Tournament "${tournament.title}" has been updated`,
+          {
+            tournament_id: tournament._id,
+            tournament_title: tournament.title,
+            updated_fields: Object.keys(updateData),
+            updated_by: req.user.username,
+            updated_at: new Date()
+          },
+          'medium',
+          session
+        );
+      }
+    }
+    
     await clearTournamentRelatedCaches(tournamentId, userId);
     
     await session.commitTransaction();
@@ -1884,7 +2077,7 @@ exports.updateTournament = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_UPDATED',
       message: 'Tournament updated successfully',
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
       updated_fields: Object.keys(updateData),
       updated_at: new Date().toISOString(),
       updated_by: req.user.username,
@@ -1965,48 +2158,65 @@ exports.deleteTournament = async (req, res) => {
             wallet.last_activity = new Date();
             await wallet.save({ session });
             
-            await Transaction.create([{
-              user_id: participant.user,
-              type: 'credit',
-              amount: participant.amount_paid,
-              description: `Refund for deleted tournament: ${tournament.title}`,
-              status: 'completed',
-              method: 'refund',
-              reference_id: tournament._id.toString(),
-              metadata: {
+            await createTransactionRecord(
+              participant.user,
+              'credit',
+              participant.amount_paid,
+              `Refund for deleted tournament: ${tournament.title}`,
+              tournament._id,
+              {
                 tournament_id: tournament._id,
                 tournament_title: tournament.title,
                 refund_reason: 'Tournament deleted by ' + (isAdmin ? 'admin' : 'creator')
-              }
-            }], { session });
+              },
+              session
+            );
+            
+            // Notify participant about refund
+            await createNotification(
+              participant.user,
+              'tournament_refund',
+              'Tournament Refund Processed',
+              `Tournament "${tournament.title}" was deleted. Refund of ${tournament.entry_fee} processed.`,
+              {
+                tournament_id: tournament._id,
+                tournament_title: tournament.title,
+                refund_amount: tournament.entry_fee,
+                refund_reason: 'Tournament deleted',
+                refund_status: 'completed'
+              },
+              'high',
+              session
+            );
           }
         }
       }
     }
     
     if (tournament.participants.length > 0) {
-      const deletionNotifications = tournament.participants.map(participant => ({
-        user_id: participant.user,
-        type: 'tournament_cancelled',
-        title: 'Tournament Cancelled',
-        message: `Tournament "${tournament.title}" has been cancelled`,
-        data: {
-          tournament_id: tournament._id,
-          tournament_title: tournament.title,
-          cancelled_by: req.user.username,
-          refund_processed: tournament.entry_fee > 0,
-          refund_amount: tournament.entry_fee
-        },
-        priority: 'high'
-      }));
-      
-      await Notification.insertMany(deletionNotifications, { session });
+      for (const participant of tournament.participants) {
+        await createNotification(
+          participant.user,
+          'tournament_cancelled',
+          'Tournament Cancelled',
+          `Tournament "${tournament.title}" has been cancelled`,
+          {
+            tournament_id: tournament._id,
+            tournament_title: tournament.title,
+            cancelled_by: req.user.username,
+            refund_processed: tournament.entry_fee > 0 && participant.payment_status === 'paid',
+            refund_amount: tournament.entry_fee
+          },
+          'high',
+          session
+        );
+      }
     }
     
     await Tournament.findByIdAndDelete(tournamentId).session(session);
     
     await clearTournamentsCache();
-    await redis.del(`tournament:${tournamentId}:*`);
+    await clearTournamentRelatedCaches(tournamentId, userId);
     
     await session.commitTransaction();
     session.endSession();
@@ -2020,8 +2230,8 @@ exports.deleteTournament = async (req, res) => {
       data: {
         tournament_id: tournamentId,
         title: tournament.title,
-        participants_refunded: tournament.entry_fee > 0 ? tournament.participants.length : 0,
-        total_refund_amount: tournament.entry_fee > 0 ? tournament.entry_fee * tournament.participants.length : 0,
+        participants_refunded: tournament.entry_fee > 0 ? tournament.participants.filter(p => p.payment_status === 'paid').length : 0,
+        total_refund_amount: tournament.entry_fee > 0 ? tournament.entry_fee * tournament.participants.filter(p => p.payment_status === 'paid').length : 0,
         deleted_at: new Date().toISOString(),
         deleted_by: req.user.username
       },
@@ -2051,6 +2261,7 @@ exports.joinTournamentWithPayment = async (req, res) => {
     const tournamentId = req.params.id;
     const userId = req.user.userId;
     const userRole = req.user.role;
+    const joinerUsername = req.user.username;
     
     console.log('🎮 JOIN TOURNAMENT REQUEST:', {
       tournamentId,
@@ -2137,6 +2348,9 @@ exports.joinTournamentWithPayment = async (req, res) => {
       return res.status(400).json(paymentResult.response);
     }
 
+    // ==================== 10% REVENUE SHARING ====================
+    const revenueShare = await processRevenueSharing(tournament, userId, joinerUsername, tournament.entry_fee, session);
+
     const participant = {
       user: userId,
       status: 'registered',
@@ -2164,6 +2378,20 @@ exports.joinTournamentWithPayment = async (req, res) => {
     tournament.current_participants += 1;
     
     updateTournamentStats(tournament, participant);
+    
+    // Update tournament revenue stats
+    if (!tournament.revenue_info) {
+      tournament.revenue_info = {
+        total_collected: 0,
+        creator_earned: 0,
+        platform_fee: 0,
+        revenue_share_percentage: 10
+      };
+    }
+    
+    tournament.revenue_info.total_collected += tournament.entry_fee;
+    tournament.revenue_info.creator_earned += revenueShare;
+    tournament.revenue_info.platform_fee += (tournament.entry_fee - revenueShare);
     
     await tournament.save({ session });
 
@@ -2207,6 +2435,8 @@ exports.joinTournamentWithPayment = async (req, res) => {
           check_in_time: participant.check_in_time
         },
         payment: paymentResult.details,
+        revenue_shared: revenueShare,
+        points_awarded_to_creator: 5,
         schedule: {
           start_time: tournament.start_time,
           check_in_deadline: tournament.check_in_time || new Date(tournament.start_time.getTime() - 15 * 60 * 1000),
@@ -2430,22 +2660,21 @@ exports.leaveTournament = async (req, res) => {
         wallet.last_activity = new Date();
         await wallet.save({ session });
 
-        await Transaction.create([{
-          user_id: userId,
-          type: 'credit',
-          amount: entryFee,
-          description: `Refund for leaving tournament: ${tournament.title}`,
-          status: 'completed',
-          method: 'refund',
-          reference_id: tournament._id.toString(),
-          metadata: {
+        await createTransactionRecord(
+          userId,
+          'credit',
+          entryFee,
+          `Refund for leaving tournament: ${tournament.title}`,
+          tournament._id,
+          {
             tournament_id: tournament._id,
             tournament_title: tournament.title,
             refund_reason: 'Voluntary leave before tournament start',
             joined_at: joinedAt,
             left_at: new Date()
-          }
-        }], { session });
+          },
+          session
+        );
 
         console.log(`💰 Refunded ${entryFee} to user ${userId}`);
       }
@@ -2453,12 +2682,12 @@ exports.leaveTournament = async (req, res) => {
 
     await tournament.save({ session });
 
-    await Notification.create([{
-      user_id: tournament.created_by,
-      type: 'participant_left',
-      title: 'Participant Left Tournament',
-      message: `${req.user.username} left your tournament "${tournament.title}"`,
-      data: {
+    await createNotification(
+      tournament.created_by,
+      'participant_left',
+      'Participant Left Tournament',
+      `${req.user.username} left your tournament "${tournament.title}"`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         participant_id: userId,
@@ -2466,8 +2695,9 @@ exports.leaveTournament = async (req, res) => {
         refund_processed: entryFee > 0,
         refund_amount: entryFee
       },
-      priority: 'medium'
-    }], { session });
+      'medium',
+      session
+    );
 
     await clearTournamentRelatedCaches(tournamentId, userId);
 
@@ -2512,6 +2742,14 @@ exports.getUserTournaments = async (req, res) => {
     const { type = 'all', limit = 20, page = 1 } = req.query;
     
     console.log(`👤 Fetching ${type} tournaments for user ${userId}`);
+    
+    const cacheKey = `user:${userId}:tournaments:${type}:${page}:${limit}`;
+    
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving user tournaments from cache');
+      return res.json(JSON.parse(cachedData));
+    }
     
     let filter = {};
     
@@ -2579,11 +2817,11 @@ exports.getUserTournaments = async (req, res) => {
     
     console.log(`✅ Found ${tournaments.length} ${type} tournaments for user ${userId}`);
     
-    res.json({
+    const response = {
       success: true,
       code: 'USER_TOURNAMENTS_FETCHED',
       message: `${type} tournaments fetched successfully`,
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -2597,8 +2835,17 @@ exports.getUserTournaments = async (req, res) => {
         username: req.user.username,
         tournament_type: type
       },
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: TOURNAMENT_CACHE_TTL
+      }
+    };
+
+    // Store in cache
+    await redis.setex(cacheKey, TOURNAMENT_CACHE_TTL, JSON.stringify(response));
+    
+    res.json(response);
     
   } catch (error) {
     console.error('❌ GET USER TOURNAMENTS ERROR:', error);
@@ -2617,6 +2864,14 @@ exports.getTournamentParticipants = async (req, res) => {
     const tournamentId = req.params.id;
     
     console.log(`👥 Fetching participants for tournament ${tournamentId}`);
+    
+    const cacheKey = `tournament:${tournamentId}:participants`;
+    
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving tournament participants from cache');
+      return res.json(JSON.parse(cachedData));
+    }
     
     const tournament = await Tournament.findById(tournamentId)
       .populate('participants.user', 'username avatar rating game_uid game_name')
@@ -2643,7 +2898,7 @@ exports.getTournamentParticipants = async (req, res) => {
       participant_id: p._id
     }));
     
-    res.json({
+    const response = {
       success: true,
       code: 'PARTICIPANTS_FETCHED',
       message: 'Participants fetched successfully',
@@ -2664,8 +2919,17 @@ exports.getTournamentParticipants = async (req, res) => {
           pending_check_in: participants.filter(p => p.check_in_status === 'pending').length
         }
       },
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: TOURNAMENT_CACHE_TTL
+      }
+    };
+
+    // Store in cache
+    await redis.setex(cacheKey, TOURNAMENT_CACHE_TTL, JSON.stringify(response));
+    
+    res.json(response);
     
   } catch (error) {
     console.error('❌ GET TOURNAMENT PARTICIPANTS ERROR:', error);
@@ -2694,6 +2958,14 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
       start_date,
       end_date
     } = req.query;
+    
+    const cacheKey = `admin:tournaments:${status}:${approval_status}:${game}:${page}:${limit}`;
+    
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving admin tournaments from cache');
+      return res.json(JSON.parse(cachedData));
+    }
     
     let filter = {};
     
@@ -2776,11 +3048,11 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
     
     console.log(`👑 ADMIN: Found ${tournaments.length} tournaments out of ${totalTournaments} total`);
     
-    res.json({
+    const response = {
       success: true,
       code: 'ADMIN_TOURNAMENTS_FETCHED',
       message: 'Tournaments fetched successfully for admin',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -2812,8 +3084,16 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
         admin_role: req.user.role,
         can_manage: ['admin', 'super_admin'].includes(req.user.role)
       },
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: TOURNAMENT_CACHE_TTL
+      }
+    };
+    
+    await redis.setex(cacheKey, TOURNAMENT_CACHE_TTL, JSON.stringify(response));
+    
+    res.json(response);
     
   } catch (error) {
     console.error('❌ ADMIN GET ALL TOURNAMENTS ERROR:', error);
@@ -2831,6 +3111,14 @@ exports.getPendingTournamentsForAdmin = async (req, res) => {
   try {
     console.log('👑 ADMIN: Fetching pending tournaments');
     
+    const cacheKey = 'admin:tournaments:pending';
+    
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving pending tournaments from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+    
     const tournaments = await Tournament.find({ 
       approval_status: 'pending'
     })
@@ -2843,17 +3131,25 @@ exports.getPendingTournamentsForAdmin = async (req, res) => {
     
     console.log(`📊 ADMIN: Found ${tournaments.length} pending tournaments`);
     
-    res.json({
+    const response = {
       success: true,
       code: 'PENDING_TOURNAMENTS_FETCHED',
       message: tournaments.length === 0 ? 'No pending tournaments' : 'Pending tournaments fetched',
-      data: formattedTournaments, // ✅ সরাসরি array
+      data: formattedTournaments, // ✅ Formatted data
       count: tournaments.length,
       requires_attention: tournaments.filter(t => 
         new Date(t.schedule_time) < new Date(Date.now() + 24 * 60 * 60 * 1000)
       ).length,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: TOURNAMENT_CACHE_TTL
+      }
+    };
+    
+    await redis.setex(cacheKey, TOURNAMENT_CACHE_TTL, JSON.stringify(response));
+    
+    res.json(response);
     
   } catch (error) {
     console.error('❌ ADMIN PENDING TOURNAMENTS ERROR:', error);
@@ -2930,6 +3226,7 @@ exports.approveTournamentForAdmin = async (req, res) => {
     await notifyParticipants(tournament, 'approved', session);
 
     await clearTournamentsCache();
+    await clearTournamentRelatedCaches(tournamentId, adminId);
 
     await session.commitTransaction();
     session.endSession();
@@ -2942,7 +3239,7 @@ exports.approveTournamentForAdmin = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_APPROVED',
       message: 'Tournament approved successfully',
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
       approval_details: {
         approved_by: adminName,
         approved_at: new Date().toISOString(),
@@ -3046,12 +3343,12 @@ exports.rejectTournamentForAdmin = async (req, res) => {
 
     await tournament.save({ session });
 
-    await Notification.create([{
-      user_id: tournament.created_by,
-      type: 'tournament_rejected',
-      title: 'Tournament Rejected',
-      message: `Your tournament "${tournament.title}" has been rejected`,
-      data: {
+    await createNotification(
+      tournament.created_by,
+      'tournament_rejected',
+      'Tournament Rejected',
+      `Your tournament "${tournament.title}" has been rejected`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         rejected_by: adminName,
@@ -3059,8 +3356,9 @@ exports.rejectTournamentForAdmin = async (req, res) => {
         rejection_reason: req.body.rejection_reason,
         admin_notes: req.body.admin_notes
       },
-      priority: 'high'
-    }], { session });
+      'high',
+      session
+    );
 
     if (tournament.entry_fee > 0 && tournament.participants.length > 0) {
       console.log('💰 Processing refunds for rejected tournament');
@@ -3074,45 +3372,46 @@ exports.rejectTournamentForAdmin = async (req, res) => {
             wallet.last_activity = new Date();
             await wallet.save({ session });
             
-            await Transaction.create([{
-              user_id: participant.user,
-              type: 'credit',
-              amount: participant.amount_paid,
-              description: `Refund for rejected tournament: ${tournament.title}`,
-              status: 'completed',
-              method: 'refund',
-              reference_id: tournament._id.toString(),
-              metadata: {
+            await createTransactionRecord(
+              participant.user,
+              'credit',
+              participant.amount_paid,
+              `Refund for rejected tournament: ${tournament.title}`,
+              tournament._id,
+              {
                 tournament_id: tournament._id,
                 tournament_title: tournament.title,
                 refund_reason: 'Tournament rejected by admin'
-              }
-            }], { session });
+              },
+              session
+            );
           }
         }
       }
       
       for (const participant of tournament.participants) {
         if (participant.payment_status === 'paid') {
-          await Notification.create([{
-            user_id: participant.user,
-            type: 'tournament_refund',
-            title: 'Tournament Refund Processed',
-            message: `Tournament "${tournament.title}" was rejected. Refund of ৳${tournament.entry_fee} processed.`,
-            data: {
+          await createNotification(
+            participant.user,
+            'tournament_refund',
+            'Tournament Refund Processed',
+            `Tournament "${tournament.title}" was rejected. Refund of ৳${tournament.entry_fee} processed.`,
+            {
               tournament_id: tournament._id,
               tournament_title: tournament.title,
               refund_amount: tournament.entry_fee,
               refund_reason: 'Tournament rejected by admin',
               refund_status: 'completed'
             },
-            priority: 'high'
-          }], { session });
+            'high',
+            session
+          );
         }
       }
     }
 
     await clearTournamentsCache();
+    await clearTournamentRelatedCaches(tournamentId, adminId);
 
     await session.commitTransaction();
     session.endSession();
@@ -3125,7 +3424,7 @@ exports.rejectTournamentForAdmin = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_REJECTED',
       message: 'Tournament rejected successfully',
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
       rejection_details: {
         rejected_by: adminName,
         rejected_at: new Date().toISOString(),
@@ -3264,7 +3563,7 @@ exports.updateTournamentStatus = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_STATUS_UPDATED',
       message: `Tournament status updated to ${newStatus}`,
-      data: formattedTournament, // ✅ সরাসরি object
+      data: formattedTournament, // ✅ Formatted data
       status_change: {
         old_status: oldStatus,
         new_status: newStatus,
@@ -3368,12 +3667,12 @@ exports.updateParticipantStatus = async (req, res) => {
     
     await tournament.save({ session });
     
-    await Notification.create([{
-      user_id: participant.user,
-      type: 'participant_status_updated',
-      title: 'Participant Status Updated',
-      message: `Your status in tournament "${tournament.title}" has been updated to ${status}`,
-      data: {
+    await createNotification(
+      participant.user,
+      'participant_status_updated',
+      'Participant Status Updated',
+      `Your status in tournament "${tournament.title}" has been updated to ${status}`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         old_status: oldStatus,
@@ -3381,8 +3680,11 @@ exports.updateParticipantStatus = async (req, res) => {
         updated_by: req.user.username,
         notes: notes
       },
-      priority: 'medium'
-    }], { session });
+      'medium',
+      session
+    );
+    
+    await clearTournamentRelatedCaches(tournamentId, adminId);
     
     await session.commitTransaction();
     session.endSession();
@@ -3498,22 +3800,21 @@ exports.removeParticipant = async (req, res) => {
         wallet.last_activity = new Date();
         await wallet.save({ session });
         
-        await Transaction.create([{
-          user_id: userId,
-          type: 'credit',
-          amount: entryFee,
-          description: `Refund for removal from tournament: ${tournament.title}`,
-          status: 'completed',
-          method: 'refund',
-          reference_id: tournament._id.toString(),
-          metadata: {
+        await createTransactionRecord(
+          userId,
+          'credit',
+          entryFee,
+          `Refund for removal from tournament: ${tournament.title}`,
+          tournament._id,
+          {
             tournament_id: tournament._id,
             tournament_title: tournament.title,
             refund_reason: 'Removed by admin',
             removed_by: req.user.username,
             removed_at: new Date()
-          }
-        }], { session });
+          },
+          session
+        );
         
         console.log(`💰 Refunded ${entryFee} to user ${userId}`);
       }
@@ -3521,12 +3822,12 @@ exports.removeParticipant = async (req, res) => {
     
     await tournament.save({ session });
     
-    await Notification.create([{
-      user_id: userId,
-      type: 'removed_from_tournament',
-      title: 'Removed from Tournament',
-      message: `You have been removed from tournament "${tournament.title}" by admin`,
-      data: {
+    await createNotification(
+      userId,
+      'removed_from_tournament',
+      'Removed from Tournament',
+      `You have been removed from tournament "${tournament.title}" by admin`,
+      {
         tournament_id: tournament._id,
         tournament_title: tournament.title,
         removed_by: req.user.username,
@@ -3535,8 +3836,11 @@ exports.removeParticipant = async (req, res) => {
         refund_amount: entryFee,
         reason: req.body.reason || 'Administrative decision'
       },
-      priority: 'high'
-    }], { session });
+      'high',
+      session
+    );
+    
+    await clearTournamentRelatedCaches(tournamentId, adminId);
     
     await session.commitTransaction();
     session.endSession();
@@ -3587,6 +3891,14 @@ exports.getTournamentAnalytics = async (req, res) => {
     
     console.log(`📊 Fetching analytics for tournament ${tournamentId}`);
     
+    const cacheKey = `tournament:${tournamentId}:analytics`;
+    
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving tournament analytics from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+    
     const tournament = await Tournament.findById(tournamentId)
       .populate('participants.user', 'username rating')
       .populate('created_by', 'username')
@@ -3631,7 +3943,7 @@ exports.getTournamentAnalytics = async (req, res) => {
       ? (totalParticipants / tournament.max_participants) * 100 
       : 0;
     
-    res.json({
+    const response = {
       success: true,
       code: 'ANALYTICS_FETCHED',
       message: 'Tournament analytics fetched successfully',
@@ -3694,8 +4006,16 @@ exports.getTournamentAnalytics = async (req, res) => {
           success_probability: calculateSuccessProbability(tournament, totalParticipants, averageRating)
         }
       },
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: 300
+      }
+    };
+    
+    await redis.setex(cacheKey, 300, JSON.stringify(response));
+    
+    res.json(response);
     
   } catch (error) {
     console.error('❌ GET TOURNAMENT ANALYTICS ERROR:', error);
