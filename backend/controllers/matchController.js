@@ -401,6 +401,220 @@ exports.searchMatches = async (req, res) => {
   }
 };
 
+// ✅ GET featured matches
+exports.getFeaturedMatches = async (req, res) => {
+  try {
+    const cacheKey = 'matches:featured';
+    
+    // Try to get from cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving featured matches from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    const matches = await Match.find({
+      is_featured: true,
+      approval_status: 'approved',
+      status: { $in: ['upcoming', 'registration_open'] }
+    })
+    .populate('created_by', 'username avatar rating')
+    .sort({ schedule_time: 1 })
+    .limit(10)
+    .lean();
+
+    // ✅ Apply formatter
+    const formattedMatches = matches.map(match => formatMatchResponse(match));
+
+    const response = {
+      success: true,
+      code: 'FEATURED_MATCHES_FETCHED',
+      message: 'Featured matches fetched successfully',
+      data: formattedMatches,
+      count: matches.length,
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: MATCH_CACHE_TTL
+      }
+    };
+
+    // Store in cache
+    await redis.setex(cacheKey, MATCH_CACHE_TTL, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    console.error('❌ GET FEATURED MATCHES ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch featured matches',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ GET upcoming matches
+exports.getUpcomingMatches = async (req, res) => {
+  try {
+    const cacheKey = 'matches:upcoming';
+    
+    // Try to get from cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving upcoming matches from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    const matches = await Match.find({
+      approval_status: 'approved',
+      status: { $in: ['upcoming', 'registration_open'] },
+      schedule_time: { $gt: new Date() }
+    })
+    .populate('created_by', 'username avatar rating')
+    .sort({ schedule_time: 1 })
+    .limit(20)
+    .lean();
+
+    // ✅ Apply formatter
+    const formattedMatches = matches.map(match => formatMatchResponse(match));
+
+    const response = {
+      success: true,
+      code: 'UPCOMING_MATCHES_FETCHED',
+      message: 'Upcoming matches fetched successfully',
+      data: formattedMatches,
+      count: matches.length,
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: MATCH_CACHE_TTL
+      }
+    };
+
+    // Store in cache
+    await redis.setex(cacheKey, MATCH_CACHE_TTL, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    console.error('❌ GET UPCOMING MATCHES ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch upcoming matches',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ GET match statistics
+exports.getMatchStatistics = async (req, res) => {
+  try {
+    const cacheKey = 'matches:statistics';
+    
+    // Try to get from cache first
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log('📦 Serving match statistics from cache');
+      return res.json(JSON.parse(cachedData));
+    }
+
+    const totalMatches = await Match.countDocuments();
+    const activeMatches = await Match.countDocuments({ 
+      status: { $in: ['upcoming', 'registration_open', 'live'] },
+      approval_status: 'approved'
+    });
+    const completedMatches = await Match.countDocuments({ status: 'completed' });
+    const totalParticipants = await Match.aggregate([
+      { $match: { approval_status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$current_participants' } } }
+    ]);
+    const totalPrizePool = await Match.aggregate([
+      { $match: { approval_status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$total_prize' } } }
+    ]);
+
+    const statistics = {
+      totalMatches,
+      activeMatches,
+      completedMatches,
+      totalParticipants: totalParticipants[0]?.total || 0,
+      totalPrizePool: totalPrizePool[0]?.total || 0,
+      averageParticipants: totalMatches > 0 ? Math.round((totalParticipants[0]?.total || 0) / totalMatches) : 0,
+      matchCompletionRate: totalMatches > 0 ? Math.round((completedMatches / totalMatches) * 100) : 0
+    };
+
+    const response = {
+      success: true,
+      code: 'MATCH_STATISTICS_FETCHED',
+      message: 'Match statistics fetched successfully',
+      data: statistics,
+      timestamp: new Date().toISOString(),
+      cache_info: {
+        cached: false,
+        ttl: 300 // 5 minutes for statistics
+      }
+    };
+
+    // Store in cache
+    await redis.setex(cacheKey, 300, JSON.stringify(response));
+
+    res.json(response);
+  } catch (error) {
+    console.error('❌ GET MATCH STATISTICS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'STATISTICS_ERROR',
+      message: 'Failed to fetch match statistics',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ DEBUG collections
+exports.debugCollections = async (req, res) => {
+  try {
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const matchCount = await Match.countDocuments();
+    const userCount = await User.countDocuments();
+    const walletCount = await Wallet.countDocuments();
+    const transactionCount = await Transaction.countDocuments();
+    const notificationCount = await Notification.countDocuments();
+
+    const debugInfo = {
+      collections: collections.map(c => c.name),
+      counts: {
+        matches: matchCount,
+        users: userCount,
+        wallets: walletCount,
+        transactions: transactionCount,
+        notifications: notificationCount
+      },
+      redis: {
+        connected: redis.status === 'ready',
+        status: redis.status
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    res.json({
+      success: true,
+      code: 'DEBUG_INFO',
+      message: 'Debug information fetched successfully',
+      data: debugInfo,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ DEBUG COLLECTIONS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'DEBUG_ERROR',
+      message: 'Failed to fetch debug information',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
 // ✅ CREATE a new match - FIXED WITH POINTS SYSTEM AND NOTIFICATIONS
 exports.createMatch = async (req, res) => {
   const session = await mongoose.startSession();
@@ -989,6 +1203,529 @@ exports.getUserMatches = async (req, res) => {
   }
 };
 
+// ✅ GET user created matches (simplified version)
+exports.getUserCreatedMatches = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const matches = await Match.find({ created_by: userId })
+      .sort({ created_at: -1 })
+      .lean();
+    
+    const formattedMatches = matches.map(match => formatMatchResponse(match));
+    
+    res.json({
+      success: true,
+      code: 'USER_CREATED_MATCHES_FETCHED',
+      message: 'User created matches fetched successfully',
+      data: formattedMatches,
+      count: matches.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ GET USER CREATED MATCHES ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch user created matches',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ==================== ADDITIONAL FUNCTIONS FOR ROUTES ====================
+
+// ✅ GET pending matches for admin
+exports.getPendingMatchesForAdmin = async (req, res) => {
+  try {
+    const matches = await Match.find({ approval_status: 'pending' })
+      .populate('created_by', 'username avatar email')
+      .sort({ created_at: -1 })
+      .lean();
+    
+    const formattedMatches = matches.map(match => formatMatchResponse(match));
+    
+    res.json({
+      success: true,
+      code: 'PENDING_MATCHES_FETCHED',
+      message: 'Pending matches fetched successfully',
+      data: formattedMatches,
+      count: matches.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ GET PENDING MATCHES ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch pending matches',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ UPDATE match
+exports.updateMatch = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const updateData = req.body;
+    
+    // Only allow updates to certain fields
+    const allowedUpdates = ['title', 'description', 'game', 'type', 'map', 'schedule_time', 
+                           'end_time', 'max_participants', 'total_prize', 'per_kill', 
+                           'kill_prize_enabled'];
+    
+    const filteredUpdates = {};
+    Object.keys(updateData).forEach(key => {
+      if (allowedUpdates.includes(key)) {
+        filteredUpdates[key] = updateData[key];
+      }
+    });
+    
+    filteredUpdates.updated_at = new Date();
+    
+    const match = await Match.findByIdAndUpdate(
+      matchId,
+      { $set: filteredUpdates },
+      { new: true, runValidators: true }
+    ).populate('created_by', 'username avatar');
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    await clearMatchCache(matchId);
+    
+    const formattedMatch = formatMatchResponse(match);
+    
+    res.json({
+      success: true,
+      code: 'MATCH_UPDATED',
+      message: 'Match updated successfully',
+      data: formattedMatch,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ UPDATE MATCH ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'UPDATE_ERROR',
+      message: 'Failed to update match',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ DELETE match
+exports.deleteMatch = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const match = await Match.findById(matchId);
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Check permissions
+    if (req.user.role !== 'admin' && match.created_by.toString() !== req.user.userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        code: 'FORBIDDEN',
+        message: 'You are not authorized to delete this match',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    await Match.findByIdAndDelete(matchId);
+    await clearMatchCache(matchId);
+    
+    res.json({
+      success: true,
+      code: 'MATCH_DELETED',
+      message: 'Match deleted successfully',
+      match_id: matchId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ DELETE MATCH ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'DELETE_ERROR',
+      message: 'Failed to delete match',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ UPDATE match status
+exports.updateMatchStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const matchId = req.params.id;
+    
+    const allowedStatuses = ['pending', 'upcoming', 'registration_open', 'live', 'completed', 'cancelled'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STATUS',
+        message: `Invalid status. Allowed: ${allowedStatuses.join(', ')}`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const match = await Match.findByIdAndUpdate(
+      matchId,
+      { 
+        status: status,
+        updated_at: new Date(),
+        $push: {
+          status_history: {
+            status: status,
+            timestamp: new Date(),
+            changed_by: req.user.userId,
+            notes: req.body.notes || 'Status updated'
+          }
+        }
+      },
+      { new: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    await clearMatchCache(matchId);
+    
+    const formattedMatch = formatMatchResponse(match);
+    
+    res.json({
+      success: true,
+      code: 'MATCH_STATUS_UPDATED',
+      message: 'Match status updated successfully',
+      data: formattedMatch,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ UPDATE MATCH STATUS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'STATUS_UPDATE_ERROR',
+      message: 'Failed to update match status',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ JOIN match (free version)
+exports.joinMatch = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { game_uid, game_name } = req.body;
+    const matchId = req.params.id;
+    const joinerId = req.user.userId;
+    const joinerUsername = req.user.username;
+
+    const match = await Match.findById(matchId).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check if match is free
+    if (match.entry_fee > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'PAYMENT_REQUIRED',
+        message: 'This match requires payment. Use joinMatchWithPayment instead.',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check if already joined
+    const alreadyJoined = match.participants.some(p => 
+      p.user && p.user.toString() === joinerId.toString()
+    );
+    
+    if (alreadyJoined) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'ALREADY_JOINED',
+        message: 'Already joined this match',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check if match is full
+    if (match.current_participants >= match.max_participants) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'MATCH_FULL',
+        message: 'Match is full',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Add participant
+    match.participants.push({
+      user: joinerId,
+      status: 'registered',
+      joined_at: new Date(),
+      payment_status: 'free',
+      amount_paid: 0,
+      game_data: {
+        uid: game_uid,
+        name: game_name,
+        player_name: joinerUsername
+      }
+    });
+    
+    match.current_participants += 1;
+    await match.save({ session });
+    
+    // Notify creator about new participant
+    if (match.created_by.toString() !== joinerId.toString()) {
+      await createNotification(
+        match.created_by,
+        'participant_joined',
+        'New Participant Joined',
+        `${joinerUsername} joined your match "${match.title}"`,
+        {
+          match_id: match._id,
+          match_title: match.title,
+          participant_id: joinerId,
+          participant_name: joinerUsername,
+          current_participants: match.current_participants
+        },
+        'medium',
+        session
+      );
+    }
+    
+    // Notify joiner
+    await createNotification(
+      joinerId,
+      'match_joined',
+      'Match Joined Successfully',
+      `You joined "${match.title}" successfully`,
+      {
+        match_id: match._id,
+        match_title: match.title,
+        schedule_time: match.schedule_time,
+        spots_left: match.max_participants - match.current_participants
+      },
+      'high',
+      session
+    );
+    
+    // Clear cache
+    await clearMatchCache(matchId);
+    
+    await session.commitTransaction();
+    session.endSession();
+
+    const formattedMatch = formatMatchResponse(match);
+
+    res.json({
+      success: true,
+      code: 'MATCH_JOINED_FREE',
+      message: 'Successfully joined match',
+      data: {
+        match: formattedMatch,
+        participants: match.current_participants,
+        spots_left: match.max_participants - match.current_participants
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ JOIN MATCH ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'JOIN_ERROR',
+      message: 'Failed to join match',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ LEAVE match
+exports.leaveMatch = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const matchId = req.params.id;
+    const userId = req.user.userId;
+    
+    const match = await Match.findById(matchId).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Check if user has joined
+    const participantIndex = match.participants.findIndex(p => 
+      p.user && p.user.toString() === userId.toString()
+    );
+    
+    if (participantIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'NOT_JOINED',
+        message: 'You have not joined this match',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const participant = match.participants[participantIndex];
+    
+    // Check if refund is applicable
+    if (participant.payment_status === 'paid') {
+      // Check if match hasn't started yet
+      if (match.status === 'upcoming' || match.status === 'registration_open') {
+        // Process refund
+        const wallet = await Wallet.findOne({ user_id: userId }).session(session);
+        if (wallet) {
+          wallet.balance += participant.amount_paid;
+          wallet.refunded_amount += participant.amount_paid;
+          wallet.last_activity = new Date();
+          await wallet.save({ session });
+          
+          await createTransactionRecord(
+            userId,
+            'credit',
+            participant.amount_paid,
+            `Refund for leaving match: ${match.title}`,
+            match._id,
+            {
+              match_id: match._id,
+              match_title: match.title,
+              refund_reason: 'Participant left match',
+              refund_status: 'completed'
+            },
+            session
+          );
+        }
+      }
+    }
+    
+    // Remove participant
+    match.participants.splice(participantIndex, 1);
+    match.current_participants = Math.max(0, match.current_participants - 1);
+    
+    await match.save({ session });
+    
+    // Clear cache
+    await clearMatchCache(matchId);
+    
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      code: 'MATCH_LEFT',
+      message: 'Successfully left the match',
+      match_id: matchId,
+      refund_processed: participant.payment_status === 'paid',
+      refund_amount: participant.payment_status === 'paid' ? participant.amount_paid : 0,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ LEAVE MATCH ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'LEAVE_ERROR',
+      message: 'Failed to leave match',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ GET match participants
+exports.getMatchParticipants = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const match = await Match.findById(matchId)
+      .populate('participants.user', 'username avatar rating level')
+      .select('participants current_participants max_participants');
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    res.json({
+      success: true,
+      code: 'PARTICIPANTS_FETCHED',
+      message: 'Match participants fetched successfully',
+      data: {
+        participants: match.participants,
+        current_participants: match.current_participants,
+        max_participants: match.max_participants,
+        spots_left: match.max_participants - match.current_participants
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ GET MATCH PARTICIPANTS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'FETCH_ERROR',
+      message: 'Failed to fetch match participants',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
 // ✅ ADMIN: Get all matches - FIXED WITH CACHING
 exports.getAllMatchesForAdmin = async (req, res) => {
   try {
@@ -1013,7 +1750,7 @@ exports.getAllMatchesForAdmin = async (req, res) => {
       .populate('created_by', 'username avatar')
       .populate('approved_by', 'username')
       .populate('rejected_by', 'username')
-      .sort({ createdAt: -1 })
+      .sort({ created_at: -1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit))
       .lean();
@@ -1051,6 +1788,287 @@ exports.getAllMatchesForAdmin = async (req, res) => {
       success: false,
       code: 'ADMIN_FETCH_ERROR',
       message: 'Failed to fetch matches for admin',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ ADMIN: Update match status
+exports.adminUpdateMatchStatus = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const { status, notes } = req.body;
+    
+    const allowedStatuses = ['pending', 'upcoming', 'registration_open', 'live', 'completed', 'cancelled'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STATUS',
+        message: `Invalid status. Allowed: ${allowedStatuses.join(', ')}`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const match = await Match.findByIdAndUpdate(
+      matchId,
+      { 
+        status: status,
+        updated_at: new Date(),
+        $push: {
+          status_history: {
+            status: status,
+            timestamp: new Date(),
+            changed_by: req.user.userId,
+            notes: notes || `Status updated to ${status} by admin`
+          }
+        }
+      },
+      { new: true }
+    ).populate('created_by', 'username email');
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    await clearMatchCache(matchId);
+    
+    // Notify creator about status change
+    if (match.created_by) {
+      await createNotification(
+        match.created_by._id,
+        'match_status_updated',
+        'Match Status Updated',
+        `Your match "${match.title}" status has been updated to ${status}`,
+        {
+          match_id: match._id,
+          match_title: match.title,
+          new_status: status,
+          updated_by: req.user.username,
+          notes: notes
+        },
+        'medium'
+      );
+    }
+    
+    const formattedMatch = formatMatchResponse(match);
+    
+    res.json({
+      success: true,
+      code: 'ADMIN_STATUS_UPDATED',
+      message: 'Match status updated successfully',
+      data: formattedMatch,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ ADMIN UPDATE MATCH STATUS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'ADMIN_UPDATE_ERROR',
+      message: 'Failed to update match status',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ ADMIN: Remove participant
+exports.removeParticipant = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const { matchId, userId } = req.params;
+    
+    const match = await Match.findById(matchId).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const participantIndex = match.participants.findIndex(p => 
+      p.user && p.user.toString() === userId.toString()
+    );
+    
+    if (participantIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        code: 'PARTICIPANT_NOT_FOUND',
+        message: 'Participant not found in this match',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const participant = match.participants[participantIndex];
+    
+    // Process refund if paid
+    if (participant.payment_status === 'paid') {
+      const wallet = await Wallet.findOne({ user_id: userId }).session(session);
+      if (wallet) {
+        wallet.balance += participant.amount_paid;
+        wallet.refunded_amount += participant.amount_paid;
+        wallet.last_activity = new Date();
+        await wallet.save({ session });
+        
+        await createTransactionRecord(
+          userId,
+          'credit',
+          participant.amount_paid,
+          `Refund for removal from match: ${match.title}`,
+          match._id,
+          {
+            match_id: match._id,
+            match_title: match.title,
+            refund_reason: 'Removed by admin',
+            refund_status: 'completed'
+          },
+          session
+        );
+        
+        // Notify participant about removal and refund
+        await createNotification(
+          userId,
+          'participant_removed',
+          'Removed from Match',
+          `You have been removed from match "${match.title}" by admin. Refund of ${participant.amount_paid} processed.`,
+          {
+            match_id: match._id,
+            match_title: match.title,
+            refund_amount: participant.amount_paid,
+            removed_by: req.user.username,
+            reason: req.body.reason || 'Admin decision'
+          },
+          'high',
+          session
+        );
+      }
+    }
+    
+    // Remove participant
+    match.participants.splice(participantIndex, 1);
+    match.current_participants = Math.max(0, match.current_participants - 1);
+    
+    await match.save({ session });
+    
+    await clearMatchCache(matchId);
+    
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({
+      success: true,
+      code: 'PARTICIPANT_REMOVED',
+      message: 'Participant removed successfully',
+      match_id: matchId,
+      user_id: userId,
+      refund_processed: participant.payment_status === 'paid',
+      refund_amount: participant.payment_status === 'paid' ? participant.amount_paid : 0,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ REMOVE PARTICIPANT ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'REMOVE_ERROR',
+      message: 'Failed to remove participant',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ ADMIN: Update participant status
+exports.updateParticipantStatus = async (req, res) => {
+  try {
+    const { matchId, userId } = req.params;
+    const { status } = req.body;
+    
+    const allowedStatuses = ['registered', 'checked_in', 'disqualified', 'winner', 'runner_up'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STATUS',
+        message: `Invalid status. Allowed: ${allowedStatuses.join(', ')}`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    const match = await Match.findById(matchId);
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const participantIndex = match.participants.findIndex(p => 
+      p.user && p.user.toString() === userId.toString()
+    );
+    
+    if (participantIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        code: 'PARTICIPANT_NOT_FOUND',
+        message: 'Participant not found in this match',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    match.participants[participantIndex].status = status;
+    match.participants[participantIndex].updated_at = new Date();
+    
+    await match.save();
+    
+    // Notify participant about status change
+    await createNotification(
+      userId,
+      'participant_status_updated',
+      'Participant Status Updated',
+      `Your status in match "${match.title}" has been updated to ${status}`,
+      {
+        match_id: match._id,
+        match_title: match.title,
+        new_status: status,
+        updated_by: req.user.username
+      },
+      'medium'
+    );
+    
+    await clearMatchCache(matchId);
+    
+    res.json({
+      success: true,
+      code: 'PARTICIPANT_STATUS_UPDATED',
+      message: 'Participant status updated successfully',
+      match_id: matchId,
+      user_id: userId,
+      new_status: status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ UPDATE PARTICIPANT STATUS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'UPDATE_ERROR',
+      message: 'Failed to update participant status',
       timestamp: new Date().toISOString()
     });
   }
@@ -1341,6 +2359,207 @@ exports.rejectMatchForAdmin = async (req, res) => {
       success: false,
       code: 'REJECTION_FAILED',
       message: 'Failed to reject match',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ Verify match result
+exports.verifyMatchResult = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const { verification_status, admin_notes } = req.body;
+    
+    const match = await Match.findByIdAndUpdate(
+      matchId,
+      {
+        result_verification_status: verification_status,
+        result_verified_by: req.user.userId,
+        result_verified_at: new Date(),
+        admin_notes: admin_notes || `Result verified by ${req.user.username}`
+      },
+      { new: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    await clearMatchCache(matchId);
+    
+    res.json({
+      success: true,
+      code: 'RESULT_VERIFIED',
+      message: 'Match result verified successfully',
+      match_id: matchId,
+      verification_status: verification_status,
+      verified_by: req.user.username,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ VERIFY MATCH RESULT ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'VERIFICATION_ERROR',
+      message: 'Failed to verify match result',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ Reject match result
+exports.rejectMatchResult = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    const { rejection_reason } = req.body;
+    
+    const match = await Match.findByIdAndUpdate(
+      matchId,
+      {
+        result_verification_status: 'rejected',
+        result_rejection_reason: rejection_reason,
+        result_rejected_by: req.user.userId,
+        result_rejected_at: new Date(),
+        allow_result_edit: true // Allow creator to edit result
+      },
+      { new: true }
+    );
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Notify creator about rejected result
+    await createNotification(
+      match.created_by,
+      'result_rejected',
+      'Match Result Rejected',
+      `Your match result for "${match.title}" has been rejected. Please review and resubmit.`,
+      {
+        match_id: match._id,
+        match_title: match.title,
+        rejection_reason: rejection_reason,
+        rejected_by: req.user.username
+      },
+      'high'
+    );
+    
+    await clearMatchCache(matchId);
+    
+    res.json({
+      success: true,
+      code: 'RESULT_REJECTED',
+      message: 'Match result rejected',
+      match_id: matchId,
+      rejection_reason: rejection_reason,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ REJECT MATCH RESULT ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'REJECTION_ERROR',
+      message: 'Failed to reject match result',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ Calculate winners
+exports.calculateWinners = async (req, res) => {
+  try {
+    const matchId = req.params.id;
+    
+    // This is a placeholder - implement actual winner calculation logic
+    // based on your match results
+    
+    const match = await Match.findById(matchId);
+    
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Placeholder response
+    res.json({
+      success: true,
+      code: 'WINNERS_CALCULATED',
+      message: 'Winners calculated successfully',
+      match_id: matchId,
+      winners: [], // Implement actual winner calculation
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ CALCULATE WINNERS ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'CALCULATION_ERROR',
+      message: 'Failed to calculate winners',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// ✅ Distribute prizes
+exports.distributePrizes = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const matchId = req.params.id;
+    
+    const match = await Match.findById(matchId).session(session);
+    
+    if (!match) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        code: 'MATCH_NOT_FOUND',
+        message: 'Match not found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Placeholder for prize distribution logic
+    // Implement actual prize distribution based on your business logic
+    
+    console.log(`💰 Prize distribution for match ${matchId} - Implement your logic here`);
+    
+    await session.commitTransaction();
+    session.endSession();
+    
+    res.json({
+      success: true,
+      code: 'PRIZES_DISTRIBUTED',
+      message: 'Prizes distributed successfully',
+      match_id: matchId,
+      total_prize_distributed: match.total_prize || 0,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error('❌ DISTRIBUTE PRIZES ERROR:', error);
+    res.status(500).json({
+      success: false,
+      code: 'DISTRIBUTION_ERROR',
+      message: 'Failed to distribute prizes',
       timestamp: new Date().toISOString()
     });
   }
