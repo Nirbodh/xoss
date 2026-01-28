@@ -52,8 +52,8 @@ router.patch('/:id/status/update', auth, matchController.updateMatchStatus);
 // ✅ JOIN match (without payment) (router.param('id') will pre-populate req.match)
 router.post('/:id/join/free', auth, matchController.joinMatch);
 
-// ✅ JOIN match WITH PAYMENT (router.param('id') will pre-populate req.match)
-router.post('/:id/join/paid', auth, matchController.joinMatchWithPayment);
+// ✅ ✅✅ FIXED: JOIN match WITH PAYMENT - এন্ডপয়েন্ট নাম ঠিক করা হয়েছে
+router.post('/:id/join-with-payment', auth, matchController.joinMatchWithPayment);
 
 // ✅ LEAVE match (router.param('id') will pre-populate req.match)
 router.post('/:id/leave', auth, matchController.leaveMatch);
