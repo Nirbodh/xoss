@@ -66,7 +66,7 @@ const startServer = async () => {
     app.use('/api/payments', auth, require('./routes/payments')); // ✅ PROTECTED
     app.use('/api/prizes', auth, require('./routes/prizeRoutes')); // ✅ PROTECTED
     app.use('/api/matches', optionalAuth, require('./routes/matches')); // ✅ OPTIONAL AUTH
-    app.use('/api/tournaments', auth, require('./routes/tournaments')); // ✅ PROTECTED
+    app.use('/api/tournaments', optionalAuth, require('./routes/tournaments')); // ✅ PROTECTED
     app.use('/api/events', auth, require('./routes/events')); // ✅ PROTECTED
     app.use('/api/games', optionalAuth, require('./routes/games')); // ✅ OPTIONAL AUTH
     app.use('/api/rooms', auth, require('./routes/rooms')); // ✅ PROTECTED
