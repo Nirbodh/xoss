@@ -2,7 +2,7 @@
 import { Platform } from 'react-native';
 
 // ✅ Production API URL
-const PRODUCTION_URL = "https://xoss.onrender.com";
+const PRODUCTION_URL = "https://xoss.onrender.com/api";
 
 // ✅ Export URLs
 export const BASE_URL = PRODUCTION_URL;
