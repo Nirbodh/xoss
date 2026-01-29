@@ -225,31 +225,18 @@ const walletSchema = new mongoose.Schema({
 // ==================== MIDDLEWARE ====================
 walletSchema.pre('save', async function(next) {
   try {
-    // Sync available balance
+    // ✅ available_balance সঠিকভাবে ক্যালকুলেট করুন
     this.available_balance = this.balance - this.locked_balance;
     
-    // Reset daily stats if new day
-    const now = new Date();
-    const lastReset = this.daily_stats.last_reset || new Date();
-    
-    if (now.toDateString() !== lastReset.toDateString()) {
-      this.daily_stats = {
-        deposits_today: 0,
-        withdrawals_today: 0,
-        deposit_amount_today: 0,
-        withdrawal_amount_today: 0,
-        last_reset: now
-      };
-    }
-    
-    // Update User's wallet_balance if it exists
+    // ✅ User-এর wallet_balance সিঙ্ক করুন
     try {
       const User = require('./User');
       if (mongoose.models.User) {
         await User.findByIdAndUpdate(
           this.user_id,
           { 
-            wallet_balance: this.balance
+            wallet_balance: this.balance,
+            total_earnings: this.total_earned
           },
           { timestamps: false }
         );
@@ -274,13 +261,18 @@ walletSchema.statics.findOrCreate = async function(userId, session = null) {
     let wallet = await this.findOne({ user_id: userId }).session(session);
     
     if (!wallet) {
+      // User থেকে ব্যালেন্স নিন
+      const User = require('./User');
+      const user = await User.findById(userId);
+      const userBalance = user?.wallet_balance || 0;
+      
       wallet = new this({
         user_id: userId,
-        balance: 0,
-        available_balance: 0,
+        balance: userBalance,
+        available_balance: userBalance,
         pending_balance: 0,
         locked_balance: 0,
-        total_earned: 0,
+        total_earned: user?.total_earnings || 0,
         total_spent: 0,
         total_deposited: 0,
         total_withdrawn: 0,
@@ -292,7 +284,7 @@ walletSchema.statics.findOrCreate = async function(userId, session = null) {
       
       await wallet.save({ session });
       
-      console.log(`[WALLET] Created new wallet for user ${userId}`);
+      console.log(`[WALLET] Created new wallet for user ${userId} with balance ${userBalance}`);
     }
     
     return wallet;
@@ -390,6 +382,21 @@ walletSchema.methods.credit = async function(amount, options = {}) {
   
   await this.save({ session });
   
+  // ✅ User-এর wallet_balance আপডেট করুন
+  try {
+    const User = require('./User');
+    await User.findByIdAndUpdate(
+      this.user_id,
+      { 
+        wallet_balance: this.balance,
+        total_earnings: this.total_earned
+      },
+      { timestamps: false }
+    );
+  } catch (userError) {
+    console.log('[USER SYNC] Error:', userError.message);
+  }
+  
   // Create transaction
   const Transaction = mongoose.model('Transaction');
   const transaction = await Transaction.create([{
@@ -442,6 +449,21 @@ walletSchema.methods.debit = async function(amount, options = {}) {
   }
   
   await this.save({ session });
+  
+  // ✅ User-এর wallet_balance আপডেট করুন
+  try {
+    const User = require('./User');
+    await User.findByIdAndUpdate(
+      this.user_id,
+      { 
+        wallet_balance: this.balance,
+        total_earnings: this.total_earned
+      },
+      { timestamps: false }
+    );
+  } catch (userError) {
+    console.log('[USER SYNC] Error:', userError.message);
+  }
   
   // Create transaction
   const Transaction = mongoose.model('Transaction');
