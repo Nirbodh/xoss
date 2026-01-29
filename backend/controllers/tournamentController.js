@@ -373,7 +373,7 @@ const createNotification = async (userId, type, title, message, data = {}, prior
   }
 };
 
-// 🔥 HELPER: Process tournament payment
+// 🔥 HELPER: Process tournament payment - FIXED TO USE wallet_balance
 const processTournamentPayment = async (tournament, userId, body, session) => {
   const entryFee = tournament.entry_fee || 0;
   
@@ -390,40 +390,45 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
   }
 
   try {
-    const wallet = await Wallet.findOne({ user_id: userId }).session(session);
+    // Check user's wallet_balance directly from User collection
+    const user = await User.findById(userId).session(session);
     
-    if (!wallet) {
-      return {
-        success: false,
-        response: {
-          success: false,
-          code: 'WALLET_NOT_FOUND',
-          message: 'Wallet not found. Please contact support.',
-          timestamp: new Date().toISOString()
-        }
-      };
-    }
-
-    console.log(`💰 Wallet Balance: ${wallet.balance}, Required: ${entryFee}`);
+    console.log(`💰 User ${userId} wallet_balance: ${user.wallet_balance || 0}, Required: ${entryFee}`);
     
-    if (wallet.balance < entryFee) {
+    if (!user || (user.wallet_balance || 0) < entryFee) {
       return {
         success: false,
         response: {
           success: false,
           code: 'INSUFFICIENT_BALANCE',
-          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${wallet.balance}`,
+          message: `Insufficient balance. Required: ৳${entryFee}, Available: ৳${user?.wallet_balance || 0}`,
           required: entryFee,
-          available: wallet.balance,
+          available: user?.wallet_balance || 0,
           timestamp: new Date().toISOString()
         }
       };
     }
 
-    wallet.balance -= entryFee;
-    wallet.total_spent += entryFee;
-    wallet.last_activity = new Date();
-    await wallet.save({ session });
+    // Deduct from user's wallet_balance
+    await User.findByIdAndUpdate(userId, {
+      $inc: { 
+        wallet_balance: -entryFee,
+        total_spent: entryFee
+      },
+      $set: {
+        'wallet.last_activity': new Date(),
+        'metadata.last_active': new Date()
+      }
+    }).session(session);
+
+    // Also update Wallet collection if it exists separately
+    const wallet = await Wallet.findOne({ user_id: userId }).session(session);
+    if (wallet) {
+      wallet.balance -= entryFee;
+      wallet.total_spent += entryFee;
+      wallet.last_activity = new Date();
+      await wallet.save({ session });
+    }
 
     const transaction = await createTransactionRecord(
       userId,
@@ -441,7 +446,7 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
       session
     );
 
-    console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New Balance: ${wallet.balance}`);
+    console.log(`✅ Wallet debited: ${userId}, Amount: ${entryFee}, New wallet_balance: ${(user.wallet_balance || 0) - entryFee}`);
 
     return {
       success: true,
@@ -452,7 +457,7 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
         status: 'deducted',
         method: 'wallet',
         transaction_id: transaction[0]._id.toString(),
-        new_balance: wallet.balance
+        new_balance: (user.wallet_balance || 0) - entryFee
       }
     };
     
@@ -471,7 +476,7 @@ const processTournamentPayment = async (tournament, userId, body, session) => {
   }
 };
 
-// 🔥 HELPER: Process revenue sharing
+// 🔥 HELPER: Process revenue sharing - FIXED TO USE wallet_balance
 const processRevenueSharing = async (tournament, joinerId, joinerUsername, entryFee, session) => {
   try {
     const creatorId = tournament.created_by;
@@ -483,52 +488,64 @@ const processRevenueSharing = async (tournament, joinerId, joinerUsername, entry
       if (creator && creator.role !== 'admin') {
         const revenueShare = entryFee * 0.10; // 10% revenue
         
-        // Update creator's wallet
+        // Update creator's wallet_balance directly
+        await User.findByIdAndUpdate(creatorId, {
+          $inc: { 
+            wallet_balance: revenueShare,
+            total_earnings: revenueShare
+          },
+          $set: {
+            'wallet.last_activity': new Date(),
+            'metadata.last_active': new Date()
+          }
+        }).session(session);
+
+        // Also update the Wallet collection if it exists separately
         const creatorWallet = await Wallet.findOne({ user_id: creatorId }).session(session);
         if (creatorWallet) {
           creatorWallet.balance += revenueShare;
           creatorWallet.total_earned += revenueShare;
           creatorWallet.last_activity = new Date();
           await creatorWallet.save({ session });
-
-          // Transaction record for creator
-          await createTransactionRecord(
-            creatorId,
-            'credit',
-            revenueShare,
-            `10% revenue from ${joinerUsername} joining your tournament: ${tournament.title}`,
-            tournament._id,
-            {
-              tournament_id: tournament._id,
-              tournament_title: tournament.title,
-              from_user: joinerId,
-              revenue_type: 'creator_share',
-              percentage: 10
-            },
-            session
-          );
-
-          // Give 5 points to creator for each join
-          await User.findByIdAndUpdate(creatorId, {
-            $inc: { 
-              points: 5,
-              total_points_earned: 5
-            },
-            $push: {
-              points_history: {
-                type: 'player_join',
-                amount: 5,
-                description: `${joinerUsername} joined your tournament: ${tournament.title}`,
-                timestamp: new Date(),
-                reference_id: tournament._id
-              }
-            }
-          }).session(session);
-
-          console.log(`💰 Creator ${creatorId} received 10% revenue: ${revenueShare} and 5 points`);
-          
-          return revenueShare;
         }
+
+        // Transaction record for creator
+        await createTransactionRecord(
+          creatorId,
+          'credit',
+          revenueShare,
+          `10% revenue from ${joinerUsername} joining your tournament: ${tournament.title}`,
+          tournament._id,
+          {
+            tournament_id: tournament._id,
+            tournament_title: tournament.title,
+            from_user: joinerId,
+            revenue_type: 'creator_share',
+            percentage: 10
+          },
+          session
+        );
+
+        // Give 5 points to creator for each join
+        await User.findByIdAndUpdate(creatorId, {
+          $inc: { 
+            points: 5,
+            total_points_earned: 5
+          },
+          $push: {
+            points_history: {
+              type: 'player_join',
+              amount: 5,
+              description: `${joinerUsername} joined your tournament: ${tournament.title}`,
+              timestamp: new Date(),
+              reference_id: tournament._id
+            }
+          }
+        }).session(session);
+
+        console.log(`💰 Creator ${creatorId} received 10% revenue: ${revenueShare} and 5 points`);
+        
+        return revenueShare;
       }
     }
     return 0;
@@ -1136,7 +1153,7 @@ exports.getTournaments = async (req, res) => {
       success: true,
       code: 'TOURNAMENTS_FETCHED',
       message: 'Tournaments fetched successfully',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -1228,7 +1245,7 @@ exports.getTournamentById = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_FETCHED',
       message: 'Tournament details fetched successfully',
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       participants_info: {
         total: tournament.current_participants,
         max: tournament.max_participants,
@@ -1399,7 +1416,7 @@ exports.searchTournaments = async (req, res) => {
       success: true,
       code: 'SEARCH_COMPLETED',
       message: 'Tournament search completed successfully',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       search_info: {
         query: query || '',
         filters: {
@@ -1468,7 +1485,7 @@ exports.getFeaturedTournaments = async (req, res) => {
       success: true,
       code: 'FEATURED_TOURNAMENTS_FETCHED',
       message: 'Featured tournaments fetched successfully',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       count: tournaments.length,
       featured_until: new Date(Date.now() + 24 * 60 * 60 * 1000),
       timestamp: new Date().toISOString(),
@@ -1530,7 +1547,7 @@ exports.getUpcomingTournaments = async (req, res) => {
       success: true,
       code: 'UPCOMING_TOURNAMENTS_FETCHED',
       message: 'Upcoming tournaments fetched successfully',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       count: tournaments.length,
       time_window: `${hours} hours`,
       next_update: new Date(Date.now() + 5 * 60 * 1000),
@@ -1895,7 +1912,7 @@ exports.createTournament = async (req, res) => {
       message: userRole === 'user' 
         ? 'Tournament created successfully! Waiting for admin approval.' 
         : 'Tournament created and auto-approved successfully!',
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       points_awarded: userRole !== 'admin' ? 5 : 0,
       creator: {
         id: req.user.userId,
@@ -2077,7 +2094,7 @@ exports.updateTournament = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_UPDATED',
       message: 'Tournament updated successfully',
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       updated_fields: Object.keys(updateData),
       updated_at: new Date().toISOString(),
       updated_by: req.user.username,
@@ -2151,44 +2168,59 @@ exports.deleteTournament = async (req, res) => {
       
       for (const participant of tournament.participants) {
         if (participant.payment_status === 'paid') {
+          // Update User wallet_balance
+          await User.findByIdAndUpdate(participant.user, {
+            $inc: { 
+              wallet_balance: participant.amount_paid,
+              total_spent: -participant.amount_paid,
+              total_earned: participant.amount_paid // Add to total_earned for refund
+            },
+            $set: {
+              'wallet.last_activity': new Date(),
+              'metadata.last_active': new Date()
+            }
+          }).session(session);
+
+          // Also update Wallet collection if it exists separately
           const wallet = await Wallet.findOne({ user_id: participant.user }).session(session);
           if (wallet) {
             wallet.balance += participant.amount_paid;
             wallet.refunded_amount += participant.amount_paid;
+            wallet.total_spent -= participant.amount_paid;
             wallet.last_activity = new Date();
             await wallet.save({ session });
-            
-            await createTransactionRecord(
-              participant.user,
-              'credit',
-              participant.amount_paid,
-              `Refund for deleted tournament: ${tournament.title}`,
-              tournament._id,
-              {
-                tournament_id: tournament._id,
-                tournament_title: tournament.title,
-                refund_reason: 'Tournament deleted by ' + (isAdmin ? 'admin' : 'creator')
-              },
-              session
-            );
-            
-            // Notify participant about refund
-            await createNotification(
-              participant.user,
-              'tournament_refund',
-              'Tournament Refund Processed',
-              `Tournament "${tournament.title}" was deleted. Refund of ${tournament.entry_fee} processed.`,
-              {
-                tournament_id: tournament._id,
-                tournament_title: tournament.title,
-                refund_amount: tournament.entry_fee,
-                refund_reason: 'Tournament deleted',
-                refund_status: 'completed'
-              },
-              'high',
-              session
-            );
           }
+          
+          await createTransactionRecord(
+            participant.user,
+            'credit',
+            participant.amount_paid,
+            `Refund for deleted tournament: ${tournament.title}`,
+            tournament._id,
+            {
+              tournament_id: tournament._id,
+              tournament_title: tournament.title,
+              refund_reason: 'Tournament deleted by ' + (isAdmin ? 'admin' : 'creator')
+            },
+            session
+          );
+          
+          // Notify participant about refund
+          await createNotification(
+            participant.user,
+            'tournament_refund',
+            'Tournament Refund Processed',
+            `Tournament "${tournament.title}" was deleted. Refund of ${tournament.entry_fee} processed.`,
+            {
+              tournament_id: tournament._id,
+              tournament_title: tournament.title,
+              refund_amount: tournament.entry_fee,
+              refund_reason: 'Tournament deleted',
+              refund_status: 'completed'
+            },
+            'high',
+            session
+          );
         }
       }
     }
@@ -2653,31 +2685,45 @@ exports.leaveTournament = async (req, res) => {
     tournament.current_participants = Math.max(0, tournament.current_participants - 1);
     
     if (entryFee > 0 && new Date() < new Date(tournament.start_time.getTime() - 60 * 60 * 1000)) {
+      // Update User wallet_balance
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 
+          wallet_balance: entryFee,
+          total_spent: -entryFee,
+          total_earned: entryFee // Add to total_earned for refund
+        },
+        $set: {
+          'wallet.last_activity': new Date(),
+          'metadata.last_active': new Date()
+        }
+      }).session(session);
+
+      // Also update Wallet collection
       const wallet = await Wallet.findOne({ user_id: userId }).session(session);
       if (wallet) {
         wallet.balance += entryFee;
         wallet.total_spent -= entryFee;
         wallet.last_activity = new Date();
         await wallet.save({ session });
-
-        await createTransactionRecord(
-          userId,
-          'credit',
-          entryFee,
-          `Refund for leaving tournament: ${tournament.title}`,
-          tournament._id,
-          {
-            tournament_id: tournament._id,
-            tournament_title: tournament.title,
-            refund_reason: 'Voluntary leave before tournament start',
-            joined_at: joinedAt,
-            left_at: new Date()
-          },
-          session
-        );
-
-        console.log(`💰 Refunded ${entryFee} to user ${userId}`);
       }
+
+      await createTransactionRecord(
+        userId,
+        'credit',
+        entryFee,
+        `Refund for leaving tournament: ${tournament.title}`,
+        tournament._id,
+        {
+          tournament_id: tournament._id,
+          tournament_title: tournament.title,
+          refund_reason: 'Voluntary leave before tournament start',
+          joined_at: joinedAt,
+          left_at: new Date()
+        },
+        session
+      );
+
+      console.log(`💰 Refunded ${entryFee} to user ${userId}`);
     }
 
     await tournament.save({ session });
@@ -2821,7 +2867,7 @@ exports.getUserTournaments = async (req, res) => {
       success: true,
       code: 'USER_TOURNAMENTS_FETCHED',
       message: `${type} tournaments fetched successfully`,
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -3037,10 +3083,9 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
           },
           rejected_count: { 
             $sum: { $cond: [{ $eq: ['$approval_status', 'rejected'] }, 1, 0] }
-          }
         }
       }
-    ]);
+    });
     
     const totalPages = Math.ceil(totalTournaments / pageSize);
     const hasNextPage = pageNumber < totalPages;
@@ -3052,7 +3097,7 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
       success: true,
       code: 'ADMIN_TOURNAMENTS_FETCHED',
       message: 'Tournaments fetched successfully for admin',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       pagination: {
         current_page: pageNumber,
         page_size: pageSize,
@@ -3135,7 +3180,7 @@ exports.getPendingTournamentsForAdmin = async (req, res) => {
       success: true,
       code: 'PENDING_TOURNAMENTS_FETCHED',
       message: tournaments.length === 0 ? 'No pending tournaments' : 'Pending tournaments fetched',
-      data: formattedTournaments, // ✅ Formatted data
+      data: formattedTournaments,
       count: tournaments.length,
       requires_attention: tournaments.filter(t => 
         new Date(t.schedule_time) < new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -3239,7 +3284,7 @@ exports.approveTournamentForAdmin = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_APPROVED',
       message: 'Tournament approved successfully',
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       approval_details: {
         approved_by: adminName,
         approved_at: new Date().toISOString(),
@@ -3365,27 +3410,42 @@ exports.rejectTournamentForAdmin = async (req, res) => {
       
       for (const participant of tournament.participants) {
         if (participant.payment_status === 'paid') {
+          // Update User wallet_balance
+          await User.findByIdAndUpdate(participant.user, {
+            $inc: { 
+              wallet_balance: participant.amount_paid,
+              total_spent: -participant.amount_paid,
+              total_earned: participant.amount_paid // Add to total_earned for refund
+            },
+            $set: {
+              'wallet.last_activity': new Date(),
+              'metadata.last_active': new Date()
+            }
+          }).session(session);
+
+          // Also update Wallet collection
           const wallet = await Wallet.findOne({ user_id: participant.user }).session(session);
           if (wallet) {
             wallet.balance += participant.amount_paid;
             wallet.refunded_amount += participant.amount_paid;
+            wallet.total_spent -= participant.amount_paid;
             wallet.last_activity = new Date();
             await wallet.save({ session });
-            
-            await createTransactionRecord(
-              participant.user,
-              'credit',
-              participant.amount_paid,
-              `Refund for rejected tournament: ${tournament.title}`,
-              tournament._id,
-              {
-                tournament_id: tournament._id,
-                tournament_title: tournament.title,
-                refund_reason: 'Tournament rejected by admin'
-              },
-              session
-            );
           }
+          
+          await createTransactionRecord(
+            participant.user,
+            'credit',
+            participant.amount_paid,
+            `Refund for rejected tournament: ${tournament.title}`,
+            tournament._id,
+            {
+              tournament_id: tournament._id,
+              tournament_title: tournament.title,
+              refund_reason: 'Tournament rejected by admin'
+            },
+            session
+          );
         }
       }
       
@@ -3424,7 +3484,7 @@ exports.rejectTournamentForAdmin = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_REJECTED',
       message: 'Tournament rejected successfully',
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       rejection_details: {
         rejected_by: adminName,
         rejected_at: new Date().toISOString(),
@@ -3563,7 +3623,7 @@ exports.updateTournamentStatus = async (req, res) => {
       success: true,
       code: 'TOURNAMENT_STATUS_UPDATED',
       message: `Tournament status updated to ${newStatus}`,
-      data: formattedTournament, // ✅ Formatted data
+      data: formattedTournament,
       status_change: {
         old_status: oldStatus,
         new_status: newStatus,
@@ -3793,31 +3853,45 @@ exports.removeParticipant = async (req, res) => {
     tournament.current_participants = Math.max(0, tournament.current_participants - 1);
     
     if (entryFee > 0) {
+      // Update User wallet_balance
+      await User.findByIdAndUpdate(userId, {
+        $inc: { 
+          wallet_balance: entryFee,
+          total_spent: -entryFee,
+          total_earned: entryFee // Add to total_earned for refund
+        },
+        $set: {
+          'wallet.last_activity': new Date(),
+          'metadata.last_active': new Date()
+        }
+      }).session(session);
+
+      // Also update Wallet collection
       const wallet = await Wallet.findOne({ user_id: userId }).session(session);
       if (wallet) {
         wallet.balance += entryFee;
         wallet.total_spent -= entryFee;
         wallet.last_activity = new Date();
         await wallet.save({ session });
-        
-        await createTransactionRecord(
-          userId,
-          'credit',
-          entryFee,
-          `Refund for removal from tournament: ${tournament.title}`,
-          tournament._id,
-          {
-            tournament_id: tournament._id,
-            tournament_title: tournament.title,
-            refund_reason: 'Removed by admin',
-            removed_by: req.user.username,
-            removed_at: new Date()
-          },
-          session
-        );
-        
-        console.log(`💰 Refunded ${entryFee} to user ${userId}`);
       }
+      
+      await createTransactionRecord(
+        userId,
+        'credit',
+        entryFee,
+        `Refund for removal from tournament: ${tournament.title}`,
+        tournament._id,
+        {
+          tournament_id: tournament._id,
+          tournament_title: tournament.title,
+          refund_reason: 'Removed by admin',
+          removed_by: req.user.username,
+          removed_at: new Date()
+        },
+        session
+      );
+      
+      console.log(`💰 Refunded ${entryFee} to user ${userId}`);
     }
     
     await tournament.save({ session });
