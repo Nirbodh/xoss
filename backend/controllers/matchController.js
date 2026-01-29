@@ -18,7 +18,7 @@ const MATCH_DETAILS_CACHE_TTL = 300; // 5 minutes
 const formatMatchResponse = (match) => {
   if (!match) return null;
   
-  return {
+  const response = {
     ...match,
     // Frontend-friendly camelCase conversion
     entryFee: match.entry_fee || 0,
@@ -45,6 +45,21 @@ const formatMatchResponse = (match) => {
     timeUntilStart: match.schedule_time ? 
       new Date(match.schedule_time).getTime() - Date.now() : null
   };
+  
+  // Remove duplicate fields if they exist
+  delete response.entry_fee;
+  delete response.total_prize;
+  delete response.max_participants;
+  delete response.current_participants;
+  delete response.is_featured;
+  delete response.approval_status;
+  delete response.registration_open;
+  delete response.result_submission_open;
+  delete response.allow_result_edit;
+  delete response.kill_prize_enabled;
+  delete response.per_kill;
+  
+  return response;
 };
 
 // ✅ Helper: Clear match cache
@@ -153,6 +168,16 @@ const processRevenueSharing = async (match, joinerId, joinerUsername, entryFee, 
           creatorWallet.total_earned += revenueShare;
           creatorWallet.last_activity = new Date();
           await creatorWallet.save({ session });
+
+          // ✅ User-এর wallet_balance আপডেট করুন
+          await User.findByIdAndUpdate(
+            creatorId,
+            { 
+              wallet_balance: creatorWallet.balance,
+              total_earnings: creatorWallet.total_earned
+            },
+            { timestamps: false }
+          ).session(session);
 
           // Transaction record for creator
           await createTransactionRecord(
@@ -883,6 +908,15 @@ exports.joinMatchWithPayment = async (req, res) => {
     wallet.total_spent += match.entry_fee;
     wallet.last_activity = new Date();
     await wallet.save({ session });
+
+    // ✅ User-এর wallet_balance আপডেট করুন
+    await User.findByIdAndUpdate(
+      joinerId,
+      { 
+        wallet_balance: wallet.balance
+      },
+      { timestamps: false }
+    ).session(session);
 
     // Create transaction record for joiner
     await createTransactionRecord(
@@ -1628,9 +1662,18 @@ exports.leaveMatch = async (req, res) => {
         const wallet = await Wallet.findOne({ user_id: userId }).session(session);
         if (wallet) {
           wallet.balance += participant.amount_paid;
-          wallet.refunded_amount += participant.amount_paid;
+          wallet.total_earned += participant.amount_paid; // ✅ সঠিকভাবে যোগ করুন
           wallet.last_activity = new Date();
           await wallet.save({ session });
+          
+          // ✅ User-এর wallet_balance আপডেট করুন
+          await User.findByIdAndUpdate(
+            userId,
+            { 
+              wallet_balance: wallet.balance
+            },
+            { timestamps: false }
+          ).session(session);
           
           await createTransactionRecord(
             userId,
@@ -1918,9 +1961,18 @@ exports.removeParticipant = async (req, res) => {
       const wallet = await Wallet.findOne({ user_id: userId }).session(session);
       if (wallet) {
         wallet.balance += participant.amount_paid;
-        wallet.refunded_amount += participant.amount_paid;
+        wallet.total_earned += participant.amount_paid; // ✅ সঠিকভাবে যোগ করুন
         wallet.last_activity = new Date();
         await wallet.save({ session });
+        
+        // ✅ User-এর wallet_balance আপডেট করুন
+        await User.findByIdAndUpdate(
+          userId,
+          { 
+            wallet_balance: wallet.balance
+          },
+          { timestamps: false }
+        ).session(session);
         
         await createTransactionRecord(
           userId,
@@ -2281,9 +2333,18 @@ exports.rejectMatchForAdmin = async (req, res) => {
           const wallet = await Wallet.findOne({ user_id: participant.user }).session(session);
           if (wallet) {
             wallet.balance += participant.amount_paid;
-            wallet.refunded_amount += participant.amount_paid;
+            wallet.total_earned += participant.amount_paid; // ✅ সঠিকভাবে যোগ করুন
             wallet.last_activity = new Date();
             await wallet.save({ session });
+            
+            // ✅ User-এর wallet_balance আপডেট করুন
+            await User.findByIdAndUpdate(
+              participant.user,
+              { 
+                wallet_balance: wallet.balance
+              },
+              { timestamps: false }
+            ).session(session);
             
             await createTransactionRecord(
               participant.user,
