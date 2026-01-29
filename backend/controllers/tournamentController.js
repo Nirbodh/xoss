@@ -3083,9 +3083,10 @@ exports.getAllTournamentsForAdmin = async (req, res) => {
           },
           rejected_count: { 
             $sum: { $cond: [{ $eq: ['$approval_status', 'rejected'] }, 1, 0] }
+          }  // <-- এই লাইনে ব্র্যাকেট বন্ধ হয়েছে
         }
       }
-    });
+    ]);
     
     const totalPages = Math.ceil(totalTournaments / pageSize);
     const hasNextPage = pageNumber < totalPages;
