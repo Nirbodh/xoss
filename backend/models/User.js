@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
-  // ✅ FIXED: Ensure proper field names
+  // ✅ শুধুমাত্র wallet_balance রাখুন
   wallet_balance: {
     type: Number,
     default: 0,
@@ -26,21 +26,6 @@ const userSchema = new mongoose.Schema({
   },
   
   total_earnings: {
-    type: Number,
-    default: 0
-  },
-  
-  balance: {
-    type: Number,
-    default: 0
-  },
-  
-  matches_played: {
-    type: Number,
-    default: 0
-  },
-  
-  matches_won: {
     type: Number,
     default: 0
   },
@@ -170,7 +155,6 @@ const userSchema = new mongoose.Schema({
     ]
   },
 
-  // ✅ FIXED: পয়েন্ট সিস্টেম
   points: {
     type: Number,
     default: 0,
@@ -574,10 +558,12 @@ const userSchema = new mongoose.Schema({
       delete ret.security?.two_factor_secret;
       delete ret.__v;
       
-      // Ensure proper field names for frontend
-      if (ret.wallet) {
-        ret.walletBalance = ret.wallet.balance;
-      }
+      // ✅ শুধুমাত্র wallet_balance ব্যবহার করুন
+      // ফ্রন্টএন্ডের জন্য balance virtual field
+      ret.balance = ret.wallet_balance; 
+      ret.walletBalance = ret.wallet_balance;
+      
+      // ✅ points এর জন্য virtual
       if (ret.points !== undefined) {
         ret.totalPoints = ret.points;
       }
@@ -595,9 +581,9 @@ const userSchema = new mongoose.Schema({
   }
 });
 
-// ✅ ADDED: Virtuals for frontend compatibility
+// ✅ Virtuals for frontend compatibility
 userSchema.virtual('walletBalance').get(function() {
-  return this.wallet?.balance || this.wallet_balance || this.balance || 0;
+  return this.wallet_balance || this.wallet?.balance || 0;
 });
 
 userSchema.virtual('totalPoints').get(function() {
@@ -618,17 +604,14 @@ userSchema.virtual('points_to_money').get(function() {
 });
 
 userSchema.virtual('win_percentage').get(function() {
-  const played = this.stats?.matches_played || this.matches_played || 0;
-  const won = this.stats?.matches_won || this.matches_won || 0;
+  const played = this.stats?.matches_played || 0;
+  const won = this.stats?.matches_won || 0;
   if (played === 0) return 0;
   return ((won / played) * 100).toFixed(2);
 });
 
 userSchema.virtual('current_balance').get(function() {
-  if (this.wallet?.balance !== undefined) return this.wallet.balance;
-  if (this.wallet_balance !== undefined) return this.wallet_balance;
-  if (this.balance !== undefined) return this.balance;
-  return 0;
+  return this.wallet_balance || this.wallet?.balance || 0;
 });
 
 userSchema.virtual('current_level').get(function() {
@@ -644,15 +627,11 @@ userSchema.virtual('current_experience').get(function() {
 });
 
 userSchema.virtual('total_matches_played').get(function() {
-  if (this.stats?.matches_played !== undefined) return this.stats.matches_played;
-  if (this.matches_played !== undefined) return this.matches_played;
-  return 0;
+  return this.stats?.matches_played || 0;
 });
 
 userSchema.virtual('total_matches_won').get(function() {
-  if (this.stats?.matches_won !== undefined) return this.stats.matches_won;
-  if (this.matches_won !== undefined) return this.matches_won;
-  return 0;
+  return this.stats?.matches_won || 0;
 });
 
 userSchema.virtual('full_name').get(function() {
@@ -674,22 +653,21 @@ userSchema.virtual('is_authenticated').get(function() {
   return this.account_status === 'active' && this.is_active !== false;
 });
 
-// ✅ FIXED: Indexes
+// ✅ Indexes
 userSchema.index({ username: 1 });
 userSchema.index({ email: 1 });
 userSchema.index({ 'wallet.balance': -1 });
 userSchema.index({ wallet_balance: -1 });
-userSchema.index({ balance: -1 });
 userSchema.index({ points: -1 });
 userSchema.index({ 'stats.rank_score': -1 });
 userSchema.index({ level: -1 });
-userSchema.index({ 'progression.current': -1 });
+userSchema.index({ 'progression.current': 1 });
 userSchema.index({ 'referral.code': 1 });
 userSchema.index({ account_status: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ 'metadata.last_active': -1 });
 
-// ✅ FIXED: Pre-save middleware
+// ✅ Pre-save middleware
 userSchema.pre('save', async function(next) {
   try {
     this.syncSchemaData();
@@ -712,6 +690,11 @@ userSchema.pre('save', async function(next) {
       this.password_changed_at = Date.now() - 1000;
     }
 
+    // ✅ Wallet থেকে ব্যালেন্স সিঙ্ক করুন
+    if (this.wallet?.balance !== undefined && this.wallet_balance !== this.wallet.balance) {
+      this.wallet_balance = this.wallet.balance;
+    }
+
     next();
   } catch (error) {
     next(error);
@@ -723,12 +706,11 @@ userSchema.pre(/^find/, function(next) {
   next();
 });
 
-// ✅ FIXED: syncSchemaData method
+// ✅ syncSchemaData method
 userSchema.methods.syncSchemaData = function() {
-  // Sync wallet data
+  // Sync wallet data - শুধুমাত্র wallet_balance ব্যবহার করুন
   if (this.wallet?.balance !== undefined) {
     this.wallet_balance = this.wallet.balance;
-    this.balance = this.wallet.balance;
   } else if (this.wallet_balance !== undefined) {
     this.wallet = this.wallet || {};
     this.wallet.balance = this.wallet_balance;
@@ -750,21 +732,6 @@ userSchema.methods.syncSchemaData = function() {
     this.progression.experience = this.experience;
   }
   
-  // Sync matches data
-  if (this.stats?.matches_played !== undefined) {
-    this.matches_played = this.stats.matches_played;
-  } else if (this.matches_played !== undefined) {
-    this.stats = this.stats || {};
-    this.stats.matches_played = this.matches_played;
-  }
-  
-  if (this.stats?.matches_won !== undefined) {
-    this.matches_won = this.stats.matches_won;
-  } else if (this.matches_won !== undefined) {
-    this.stats = this.stats || {};
-    this.stats.matches_won = this.matches_won;
-  }
-  
   // Sync earnings data
   if (this.total_earnings !== undefined && this.wallet) {
     this.wallet.total_earned = this.total_earnings;
@@ -777,8 +744,8 @@ userSchema.methods.syncSchemaData = function() {
 };
 
 userSchema.methods.calculateWinRate = function() {
-  const played = this.stats?.matches_played || this.matches_played || 0;
-  const won = this.stats?.matches_won || this.matches_won || 0;
+  const played = this.stats?.matches_played || 0;
+  const won = this.stats?.matches_won || 0;
   
   if (played > 0) {
     const winRate = (won / played) * 100;
@@ -880,7 +847,7 @@ userSchema.methods.addLoginHistory = function(ip, userAgent, location, successfu
   return this.save({ validateBeforeSave: false });
 };
 
-// ✅ FIXED: পয়েন্ট ম্যানেজমেন্ট মেথড
+// ✅ পয়েন্ট ম্যানেজমেন্ট মেথড
 userSchema.methods.addPoints = async function(amount, type = 'other', description = '', referenceId = null, refModel = 'User') {
   if (amount <= 0) return this;
   
@@ -905,7 +872,7 @@ userSchema.methods.addPoints = async function(amount, type = 'other', descriptio
   return this.save({ validateBeforeSave: false });
 };
 
-// ✅ FIXED: Add points for match creation
+// ✅ Add points for match creation
 userSchema.methods.addPointsForMatchCreation = async function(matchId, matchTitle) {
   return this.addPoints(
     5,
@@ -916,7 +883,7 @@ userSchema.methods.addPointsForMatchCreation = async function(matchId, matchTitl
   );
 };
 
-// ✅ FIXED: Add points for player joining match
+// ✅ Add points for player joining match
 userSchema.methods.addPointsForPlayerJoin = async function(matchId, matchTitle, joinerName) {
   return this.addPoints(
     5,
@@ -927,7 +894,7 @@ userSchema.methods.addPointsForPlayerJoin = async function(matchId, matchTitle, 
   );
 };
 
-// ✅ FIXED: পয়েন্ট টাকায় কনভার্ট
+// ✅ পয়েন্ট টাকায় কনভার্ট
 userSchema.methods.convertPointsToMoney = async function() {
   const points = this.points || 0;
   if (points < 100) {
@@ -954,15 +921,14 @@ userSchema.methods.convertPointsToMoney = async function() {
   this.wallet.balance = (this.wallet.balance || 0) + moneyAmount;
   this.wallet.total_earned = (this.wallet.total_earned || 0) + moneyAmount;
   
-  // Sync balance fields
+  // ✅ শুধুমাত্র wallet_balance আপডেট করুন
   this.wallet_balance = this.wallet.balance;
-  this.balance = this.wallet.balance;
   this.total_earnings = (this.total_earnings || 0) + moneyAmount;
   
   return this.save({ validateBeforeSave: false });
 };
 
-// ✅ FIXED: getFormattedUser মেথড
+// ✅ getFormattedUser মেথড
 userSchema.methods.getFormattedUser = function() {
   return {
     _id: this._id,
@@ -974,7 +940,7 @@ userSchema.methods.getFormattedUser = function() {
     avatar: this.avatar,
     role: this.role,
     
-    // ✅ FIXED: Points info
+    // ✅ Points info
     points: this.points || 0,
     totalPoints: this.points || 0,
     total_points_earned: this.total_points_earned || 0,
@@ -982,11 +948,12 @@ userSchema.methods.getFormattedUser = function() {
     can_convert_points: this.can_convert_points,
     points_to_money: this.points_to_money,
     
-    // ✅ FIXED: Wallet info
-    walletBalance: this.walletBalance,
-    wallet_balance: this.current_balance,
+    // ✅ Wallet info - শুধুমাত্র wallet_balance ব্যবহার করুন
+    walletBalance: this.wallet_balance,
+    balance: this.wallet_balance, // ফ্রন্টএন্ডের জন্য
+    wallet_balance: this.wallet_balance,
     wallet: {
-      balance: this.current_balance,
+      balance: this.wallet_balance,
       total_earned: this.wallet?.total_earned || this.total_earnings || 0,
       total_deposited: this.wallet?.total_deposited || 0,
       total_withdrawn: this.wallet?.total_withdrawn || 0,
@@ -1064,7 +1031,7 @@ userSchema.methods.getFormattedUser = function() {
 userSchema.methods.updateWallet = async function(amount, type, description = '') {
   this.wallet = this.wallet || {};
   
-  const oldBalance = this.wallet.balance || this.current_balance;
+  const oldBalance = this.wallet.balance || this.wallet_balance || 0;
   
   switch(type) {
     case 'deposit':
@@ -1096,9 +1063,8 @@ userSchema.methods.updateWallet = async function(amount, type, description = '')
   this.wallet.last_transaction = new Date();
   this.wallet.transaction_count = (this.wallet.transaction_count || 0) + 1;
   
-  // Sync fields
+  // ✅ শুধুমাত্র wallet_balance আপডেট করুন
   this.wallet_balance = this.wallet.balance;
-  this.balance = this.wallet.balance;
   
   if (type === 'win') {
     this.total_earnings = (this.total_earnings || 0) + amount;
